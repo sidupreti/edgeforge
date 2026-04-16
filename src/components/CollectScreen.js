@@ -214,7 +214,7 @@ export default function CollectScreen({ config, projectId, onAnalysisReady, chat
     let burstActive    = false;
     let burstStrength  = 0;
     let burstFrames    = 0;
-    let nextBurstIn    = 200 + Math.floor(Math.random() * 150);
+    let nextBurstIn    = 180 + Math.floor(Math.random() * 30);
     let capturing      = false;
     let captureFrames  = 0;
     const capBuf       = { ax: [], ay: [], az: [] };
@@ -247,7 +247,7 @@ export default function CollectScreen({ config, projectId, onAnalysisReady, chat
         if (burstFrames <= 0) {
           burstActive   = false;
           burstStrength = 0;
-          nextBurstIn   = 200 + Math.floor(Math.random() * 220);
+          nextBurstIn   = 180 + Math.floor(Math.random() * 30);
         }
       } else {
         nextBurstIn--;
@@ -255,7 +255,7 @@ export default function CollectScreen({ config, projectId, onAnalysisReady, chat
           burstActive   = true;
           burstStrength = 0.80 + Math.random() * 0.55;
           burstFrames   = 18 + Math.floor(Math.random() * 14);
-          nextBurstIn   = 200 + Math.floor(Math.random() * 220);
+          nextBurstIn   = 180 + Math.floor(Math.random() * 30);
 
           if (isRecordingRef.current) {
             capturing     = true;
