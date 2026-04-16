@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import CopilotChat from "./CopilotChat";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -355,17 +356,17 @@ function RecommendationCard({ title, value, subtext, onApply, applyLabel = "Appl
   );
 }
 
-function CopilotSidebar({ analyzeResult, separabilityNote, onApplyCutoff, onApplyWindow }) {
+function CopilotSidebar({ analyzeResult, separabilityNote, onApplyCutoff, onApplyWindow, chatHistory, setChatHistory, projectId, onApplyAction }) {
   if (!analyzeResult) {
     return (
-      <div className="h-full flex flex-col">
-        <div className="flex items-center gap-2 mb-4">
+      <div className="h-full flex flex-col gap-4">
+        <div className="flex items-center gap-2">
           <div className="w-3.5 h-3.5 rounded-full bg-gray-200 flex items-center justify-center">
             <div className="w-1.5 h-1.5 rounded-full bg-gray-400" />
           </div>
           <h3 className="text-xs uppercase tracking-widest text-gray-400">Copilot</h3>
         </div>
-        <div className="flex-1 flex flex-col items-center justify-center text-center px-2">
+        <div className="flex flex-col items-center text-center px-2 py-4">
           <div className="w-10 h-10 rounded-full border-2 border-dashed border-gray-200 flex items-center justify-center mb-3">
             <svg className="w-4 h-4 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
@@ -374,6 +375,14 @@ function CopilotSidebar({ analyzeResult, separabilityNote, onApplyCutoff, onAppl
           <p className="text-xs text-gray-400 leading-relaxed">
             Complete data collection to unlock signal-based recommendations.
           </p>
+        </div>
+        <div className="border-t border-gray-200 pt-4">
+          <CopilotChat
+            chatHistory={chatHistory}
+            setChatHistory={setChatHistory}
+            projectId={projectId}
+            onApplyAction={onApplyAction}
+          />
         </div>
       </div>
     );
@@ -457,6 +466,16 @@ function CopilotSidebar({ analyzeResult, separabilityNote, onApplyCutoff, onAppl
             </div>
           </div>
         )}
+
+        {/* Chat */}
+        <div className="border-t border-gray-200 pt-4 mt-2">
+          <CopilotChat
+            chatHistory={chatHistory}
+            setChatHistory={setChatHistory}
+            projectId={projectId}
+            onApplyAction={onApplyAction}
+          />
+        </div>
       </div>
     </div>
   );
@@ -519,7 +538,7 @@ function PipelineBlock({ block, isActive, isPast, onClick }) {
 
 // ── Main component ────────────────────────────────────────────────────────────
 
-export default function PipelineScreen({ config, analyzeResult, separabilityNote, pipelineConfig, setPipelineConfig }) {
+export default function PipelineScreen({ config, analyzeResult, separabilityNote, pipelineConfig, setPipelineConfig, projectId, chatHistory, setChatHistory, onApplyAction }) {
   const [activeBlock, setActiveBlock] = useState("filter");
 
   // Derive slices and per-slice setters from lifted state
@@ -613,6 +632,10 @@ export default function PipelineScreen({ config, analyzeResult, separabilityNote
             separabilityNote={separabilityNote}
             onApplyCutoff={applyRecommendedCutoff}
             onApplyWindow={applyRecommendedWindow}
+            chatHistory={chatHistory}
+            setChatHistory={setChatHistory}
+            projectId={projectId}
+            onApplyAction={onApplyAction}
           />
         </div>
       </div>

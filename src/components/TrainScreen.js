@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef } from "react";
 import API_BASE_URL from "../config";
+import CopilotChat from "./CopilotChat";
 
 const MODEL_LABELS = { auto: "Auto-select", rf: "Random Forest", svm: "SVM", nn: "Neural Net" };
 
@@ -204,7 +205,7 @@ function ModelCard({ result, isBest }) {
 
 // ── Copilot explanation ───────────────────────────────────────────────────────
 
-function CopilotExplanation({ results, analyzeResult }) {
+function CopilotExplanation({ results, analyzeResult, chatHistory, setChatHistory, projectId, onApplyAction }) {
   const best       = results?.models?.find((m) => m.id === results.best_model_id);
   const others     = results?.models?.filter((m) => m.id !== results.best_model_id) ?? [];
   const bestAcc    = Math.round((best?.accuracy ?? 0) * 100);
@@ -261,8 +262,8 @@ function CopilotExplanation({ results, analyzeResult }) {
   }
 
   return (
-    <div className="border border-gray-200 rounded-xl p-5">
-      <div className="flex items-center gap-2 mb-4">
+    <div className="border border-gray-200 rounded-xl p-5 flex flex-col gap-4">
+      <div className="flex items-center gap-2">
         <div className="w-3.5 h-3.5 rounded-full bg-accent/20 flex items-center justify-center flex-shrink-0">
           <div className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" />
         </div>
@@ -274,6 +275,14 @@ function CopilotExplanation({ results, analyzeResult }) {
             {line}
           </p>
         ))}
+      </div>
+      <div className="border-t border-gray-100 pt-3">
+        <CopilotChat
+          chatHistory={chatHistory}
+          setChatHistory={setChatHistory}
+          projectId={projectId}
+          onApplyAction={onApplyAction}
+        />
       </div>
     </div>
   );
@@ -287,7 +296,7 @@ const MODEL_TRAIN_STEPS = [
   { id: "nn",   label: "Neural Net" },
 ];
 
-export default function TrainScreen({ projectId, analyzeResult, pipelineConfig, onRetrain }) {
+export default function TrainScreen({ projectId, analyzeResult, pipelineConfig, onRetrain, chatHistory, setChatHistory, onApplyAction }) {
   const [trainState,    setTrainState]    = useState("idle"); // idle | running | done | error
   const [progress,      setProgress]      = useState(0);
   const [currentModel,  setCurrentModel]  = useState("");
@@ -466,6 +475,16 @@ export default function TrainScreen({ projectId, analyzeResult, pipelineConfig, 
           >
             Run Training →
           </button>
+
+          {/* Copilot chat — available before training starts */}
+          <div className="w-full max-w-sm border border-gray-200 rounded-xl p-4">
+            <CopilotChat
+              chatHistory={chatHistory}
+              setChatHistory={setChatHistory}
+              projectId={effectiveProjectId}
+              onApplyAction={onApplyAction}
+            />
+          </div>
         </div>
       )}
 
@@ -537,7 +556,14 @@ export default function TrainScreen({ projectId, analyzeResult, pipelineConfig, 
               )}
             </div>
 
-            <CopilotExplanation results={results} analyzeResult={analyzeResult} />
+            <CopilotExplanation
+              results={results}
+              analyzeResult={analyzeResult}
+              chatHistory={chatHistory}
+              setChatHistory={setChatHistory}
+              projectId={effectiveProjectId}
+              onApplyAction={onApplyAction}
+            />
           </div>
 
           {/* Retrain button */}

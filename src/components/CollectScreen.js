@@ -1,5 +1,6 @@
 import React, { useRef, useEffect, useState } from "react";
 import API_BASE_URL from "../config";
+import CopilotChat from "./CopilotChat";
 
 const COPILOT_THRESHOLD = 5;    // events before first analysis
 const COPILOT_DEBOUNCE  = 1500; // ms to wait after last event before calling API
@@ -64,7 +65,7 @@ function WaveformThumb({ data, color = "#1D9E75", w = 64, h = 28 }) {
 
 // ── Main component ────────────────────────────────────────────────────────────
 
-export default function CollectScreen({ config, projectId, onAnalysisReady }) {
+export default function CollectScreen({ config, projectId, onAnalysisReady, chatHistory, setChatHistory, onApplyAction }) {
   const activeAxes = getActiveAxes(config?.sensorType);
 
   // Canvas
@@ -651,7 +652,7 @@ export default function CollectScreen({ config, projectId, onAnalysisReady }) {
           </div>
 
           {/* Body */}
-          <div className="bg-gray-50 p-3 space-y-3">
+          <div className="bg-gray-50 p-3 space-y-3 overflow-y-auto">
 
             {/* ── idle ── */}
             {copilot.status === "idle" && (
@@ -786,6 +787,16 @@ export default function CollectScreen({ config, projectId, onAnalysisReady }) {
                 </>
               );
             })()}
+
+            {/* ── Copilot chat ── */}
+            <div className="border-t border-gray-200 pt-3">
+              <CopilotChat
+                chatHistory={chatHistory}
+                setChatHistory={setChatHistory}
+                projectId={projectId}
+                onApplyAction={onApplyAction}
+              />
+            </div>
           </div>
         </div>
       </div>

@@ -50,8 +50,22 @@ export default function App() {
   const [analyzeResult,    setAnalyzeResult]    = useState(null);
   const [separabilityNote, setSeparabilityNote] = useState(null);
   const [pipelineConfig,   setPipelineConfig]   = useState(INITIAL_PIPELINE_CONFIG);
+  const [chatHistory,      setChatHistory]      = useState([]);
 
   const goBack = () => setActiveStep((s) => Math.max(s - 1, 0));
+
+  function handleApplyAction({ type, value }) {
+    if (type === "set_cutoff") {
+      setPipelineConfig((cfg) => ({ ...cfg, filter: { ...cfg.filter, cutoff: parseFloat(value) } }));
+    } else if (type === "set_window") {
+      setPipelineConfig((cfg) => ({ ...cfg, normalize: { ...cfg.normalize, window: parseInt(value) } }));
+    } else if (type === "set_model") {
+      setPipelineConfig((cfg) => ({ ...cfg, model: String(value) }));
+    } else if (type === "add_feature") {
+      setPipelineConfig((cfg) => ({ ...cfg, features: { ...cfg.features, [String(value)]: true } }));
+    }
+    setActiveStep(2); // navigate to Pipeline screen
+  }
 
   async function handleSetupSubmit() {
     setSubmitLoading(true);
@@ -112,6 +126,9 @@ export default function App() {
             setAnalyzeResult(data);
             setSeparabilityNote(note);
           }}
+          chatHistory={chatHistory}
+          setChatHistory={setChatHistory}
+          onApplyAction={handleApplyAction}
         />
       );
     }
@@ -123,6 +140,10 @@ export default function App() {
           separabilityNote={separabilityNote}
           pipelineConfig={pipelineConfig}
           setPipelineConfig={setPipelineConfig}
+          projectId={projectId}
+          chatHistory={chatHistory}
+          setChatHistory={setChatHistory}
+          onApplyAction={handleApplyAction}
         />
       );
     }
@@ -133,11 +154,21 @@ export default function App() {
           analyzeResult={analyzeResult}
           pipelineConfig={pipelineConfig}
           onRetrain={() => setActiveStep(2)}
+          chatHistory={chatHistory}
+          setChatHistory={setChatHistory}
+          onApplyAction={handleApplyAction}
         />
       );
     }
     if (currentKey === "validate") {
-      return <ValidateScreen projectId={projectId} />;
+      return (
+        <ValidateScreen
+          projectId={projectId}
+          chatHistory={chatHistory}
+          setChatHistory={setChatHistory}
+          onApplyAction={handleApplyAction}
+        />
+      );
     }
     if (currentKey === "export") {
       return (

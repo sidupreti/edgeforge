@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import API_BASE_URL from "../config";
+import CopilotChat from "./CopilotChat";
 
 // ── Class colour palette (first class = green, second = amber, third = red, …) ─
 
@@ -155,7 +156,7 @@ function LogEntry({ entry, color, bg }) {
 
 // ── Main component ────────────────────────────────────────────────────────────
 
-export default function ValidateScreen({ projectId }) {
+export default function ValidateScreen({ projectId, chatHistory, setChatHistory, onApplyAction }) {
   const [localProjectId, setLocalProjectId] = useState(null);
   const [latest,     setLatest]     = useState(null);
   const [log,        setLog]        = useState([]);
@@ -414,6 +415,16 @@ export default function ValidateScreen({ projectId }) {
               ))
             )}
           </div>
+        </div>
+
+        {/* Copilot chat */}
+        <div className="border border-gray-200 rounded-xl p-4 flex-shrink-0">
+          <CopilotChat
+            chatHistory={chatHistory}
+            setChatHistory={setChatHistory}
+            projectId={effectiveProjectId}
+            onApplyAction={onApplyAction}
+          />
         </div>
 
         {/* Summary stats */}
