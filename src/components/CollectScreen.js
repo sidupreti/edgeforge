@@ -794,6 +794,7 @@ export default function CollectScreen({ config, projectId, onAnalysisReady, chat
                 setChatHistory={setChatHistory}
                 projectId={projectId}
                 onApplyAction={onApplyAction}
+                screen="collect"
               />
             </div>
           </div>

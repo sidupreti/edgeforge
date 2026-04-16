@@ -205,7 +205,7 @@ function ModelCard({ result, isBest }) {
 
 // ── Copilot explanation ───────────────────────────────────────────────────────
 
-function CopilotExplanation({ results, analyzeResult, chatHistory, setChatHistory, projectId, onApplyAction }) {
+function CopilotExplanation({ results, analyzeResult, chatHistory, setChatHistory, projectId, onApplyAction, pipelineConfig }) {
   const best       = results?.models?.find((m) => m.id === results.best_model_id);
   const others     = results?.models?.filter((m) => m.id !== results.best_model_id) ?? [];
   const bestAcc    = Math.round((best?.accuracy ?? 0) * 100);
@@ -282,6 +282,8 @@ function CopilotExplanation({ results, analyzeResult, chatHistory, setChatHistor
           setChatHistory={setChatHistory}
           projectId={projectId}
           onApplyAction={onApplyAction}
+          screen="train"
+          pipelineConfig={pipelineConfig}
         />
       </div>
     </div>
@@ -483,6 +485,8 @@ export default function TrainScreen({ projectId, analyzeResult, pipelineConfig, 
               setChatHistory={setChatHistory}
               projectId={effectiveProjectId}
               onApplyAction={onApplyAction}
+              screen="train"
+              pipelineConfig={pipelineConfig}
             />
           </div>
         </div>
@@ -563,6 +567,7 @@ export default function TrainScreen({ projectId, analyzeResult, pipelineConfig, 
               setChatHistory={setChatHistory}
               projectId={effectiveProjectId}
               onApplyAction={onApplyAction}
+              pipelineConfig={pipelineConfig}
             />
           </div>
 

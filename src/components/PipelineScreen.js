@@ -356,7 +356,7 @@ function RecommendationCard({ title, value, subtext, onApply, applyLabel = "Appl
   );
 }
 
-function CopilotSidebar({ analyzeResult, separabilityNote, onApplyCutoff, onApplyWindow, chatHistory, setChatHistory, projectId, onApplyAction }) {
+function CopilotSidebar({ analyzeResult, separabilityNote, onApplyCutoff, onApplyWindow, chatHistory, setChatHistory, projectId, onApplyAction, pipelineConfig }) {
   if (!analyzeResult) {
     return (
       <div className="h-full flex flex-col gap-4">
@@ -382,6 +382,8 @@ function CopilotSidebar({ analyzeResult, separabilityNote, onApplyCutoff, onAppl
             setChatHistory={setChatHistory}
             projectId={projectId}
             onApplyAction={onApplyAction}
+            screen="pipeline"
+            pipelineConfig={pipelineConfig}
           />
         </div>
       </div>
@@ -474,6 +476,8 @@ function CopilotSidebar({ analyzeResult, separabilityNote, onApplyCutoff, onAppl
             setChatHistory={setChatHistory}
             projectId={projectId}
             onApplyAction={onApplyAction}
+            screen="pipeline"
+            pipelineConfig={pipelineConfig}
           />
         </div>
       </div>
@@ -636,6 +640,7 @@ export default function PipelineScreen({ config, analyzeResult, separabilityNote
             setChatHistory={setChatHistory}
             projectId={projectId}
             onApplyAction={onApplyAction}
+            pipelineConfig={pipelineConfig}
           />
         </div>
       </div>

@@ -16,7 +16,7 @@ const ACTION_LABELS = {
   add_feature: (v) => `add ${v}`,
 };
 
-export default function CopilotChat({ chatHistory, setChatHistory, projectId, onApplyAction }) {
+export default function CopilotChat({ chatHistory, setChatHistory, projectId, onApplyAction, screen, pipelineConfig }) {
   const [input,     setInput]     = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const scrollRef                  = useRef(null);
@@ -46,8 +46,10 @@ export default function CopilotChat({ chatHistory, setChatHistory, projectId, on
         method:  "POST",
         headers: { "Content-Type": "application/json" },
         body:    JSON.stringify({
-          message:    trimmed,
-          project_id: projectId ?? "demo-project",
+          message:         trimmed,
+          project_id:      projectId ?? "demo-project",
+          screen:          screen ?? undefined,
+          pipeline_config: pipelineConfig ?? undefined,
         }),
       });
       if (!res.ok) throw new Error(`API ${res.status}`);

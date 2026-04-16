@@ -424,6 +424,7 @@ export default function ValidateScreen({ projectId, chatHistory, setChatHistory,
             setChatHistory={setChatHistory}
             projectId={effectiveProjectId}
             onApplyAction={onApplyAction}
+            screen="validate"
           />
         </div>
 
