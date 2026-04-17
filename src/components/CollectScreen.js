@@ -65,7 +65,7 @@ function WaveformThumb({ data, color = "#1D9E75", w = 64, h = 28 }) {
 
 // ── Main component ────────────────────────────────────────────────────────────
 
-export default function CollectScreen({ config, projectId, onAnalysisReady, chatHistory, setChatHistory, onApplyAction }) {
+export default function CollectScreen({ config, projectId, analyzeResult, onAnalysisReady, chatHistory, setChatHistory, onApplyAction }) {
   const activeAxes = getActiveAxes(config?.sensorType);
 
   // Canvas
@@ -497,6 +497,16 @@ export default function CollectScreen({ config, projectId, onAnalysisReady, chat
             {isRecording ? "⏹ Stop" : "⏺ Record"}
           </button>
         </div>
+
+        {/* AI pipeline design ready banner */}
+        {analyzeResult && (
+          <div className="flex-shrink-0 flex items-center gap-2.5 px-3 py-2 rounded-lg border border-accent/25 text-xs"
+               style={{ background: "rgba(29,158,117,0.05)" }}>
+            <span className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse flex-shrink-0" />
+            <span className="text-accent font-semibold">Signal analyzed</span>
+            <span className="text-gray-500">— AI pipeline design ready on the next screen →</span>
+          </div>
+        )}
 
         {/* Event list */}
         <div className="flex-1 overflow-y-auto min-h-0 space-y-1.5 pr-0.5">

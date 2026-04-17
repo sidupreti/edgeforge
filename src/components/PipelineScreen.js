@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import CopilotChat from "./CopilotChat";
+import API_BASE_URL from "../config";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -339,6 +340,355 @@ function ModelPanel({ model, setModel }) {
   );
 }
 
+// ── Signal visualizations ─────────────────────────────────────────────────────
+
+function FilterViz({ analyzeResult, cutoffHz }) {
+  const canvasRef  = useRef(null);
+  const sampleRate = analyzeResult?.sample_rate?.declared_hz ?? 100;
+  const nyquist    = sampleRate / 2;
+  const energyPct  = analyzeResult?.cutoff_frequency?.energy_threshold_pct ?? 90;
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const dpr = window.devicePixelRatio || 1;
+    const W = canvas.offsetWidth;
+    const H = 80;
+    canvas.width  = W * dpr;
+    canvas.height = H * dpr;
+    canvas.style.height = `${H}px`;
+    const ctx = canvas.getContext("2d");
+    ctx.scale(dpr, dpr);
+
+    const w = W;
+    const h = H;
+    const cutoffX = Math.min(w, (cutoffHz / nyquist) * w);
+
+    // Synthetic 1/f³ power spectrum
+    const specY = (f) => 1 / (1 + Math.pow(f / Math.max(cutoffHz * 0.7, 1), 3));
+
+    // Green fill (signal region)
+    ctx.beginPath();
+    ctx.moveTo(0, h - 4);
+    for (let x = 0; x <= cutoffX; x++) {
+      const y = h - 4 - specY((x / w) * nyquist) * (h - 14);
+      x === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    }
+    ctx.lineTo(cutoffX, h - 4);
+    ctx.closePath();
+    ctx.fillStyle = "rgba(29,158,117,0.18)";
+    ctx.fill();
+
+    // Red fill (noise region)
+    ctx.beginPath();
+    ctx.moveTo(cutoffX, h - 4);
+    for (let x = Math.ceil(cutoffX); x <= w; x++) {
+      const y = h - 4 - specY((x / w) * nyquist) * (h - 14);
+      ctx.lineTo(x, y);
+    }
+    ctx.lineTo(w, h - 4);
+    ctx.closePath();
+    ctx.fillStyle = "rgba(239,68,68,0.12)";
+    ctx.fill();
+
+    // Spectrum line
+    ctx.beginPath();
+    for (let x = 0; x <= w; x++) {
+      const y = h - 4 - specY((x / w) * nyquist) * (h - 14);
+      x === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    }
+    ctx.strokeStyle = "#9CA3AF";
+    ctx.lineWidth   = 1.5;
+    ctx.stroke();
+
+    // Cutoff dashed line
+    ctx.beginPath();
+    ctx.moveTo(cutoffX, 4);
+    ctx.lineTo(cutoffX, h - 4);
+    ctx.strokeStyle = "rgba(29,158,117,0.8)";
+    ctx.lineWidth   = 1.5;
+    ctx.setLineDash([3, 3]);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // X axis
+    ctx.beginPath();
+    ctx.moveTo(0, h - 4);
+    ctx.lineTo(w, h - 4);
+    ctx.strokeStyle = "#E5E7EB";
+    ctx.lineWidth   = 1;
+    ctx.stroke();
+  }, [cutoffHz, nyquist]);
+
+  return (
+    <div className="space-y-2">
+      <p className="text-[10px] text-gray-400 uppercase tracking-widest">Frequency Spectrum</p>
+      <canvas ref={canvasRef} className="w-full block rounded" style={{ height: "80px" }} />
+      <div className="flex items-center justify-between text-[10px] text-gray-400">
+        <span>0 Hz</span>
+        <span className="text-accent font-bold tabular-nums">{cutoffHz} Hz cutoff</span>
+        <span>{nyquist} Hz</span>
+      </div>
+      <div className="flex gap-3 text-[10px]">
+        <span className="flex items-center gap-1">
+          <span className="w-2 h-2 rounded-sm" style={{ background: "rgba(29,158,117,0.35)" }} />
+          <span className="text-accent font-semibold">{energyPct}% signal</span>
+        </span>
+        <span className="flex items-center gap-1">
+          <span className="w-2 h-2 rounded-sm" style={{ background: "rgba(239,68,68,0.3)" }} />
+          <span className="text-red-400">{100 - energyPct}% filtered</span>
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function NormalizeViz({ analyzeResult, windowMs }) {
+  const canvasRef = useRef(null);
+  const nw    = analyzeResult?.normalization_window;
+  const minMs = nw?.min_ms  ?? 100;
+  const maxMs = nw?.max_ms  ?? 2000;
+  const meanMs = nw?.mean_ms ?? 800;
+  const recMs  = nw?.recommended_ms ?? 1000;
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const dpr = window.devicePixelRatio || 1;
+    const W = canvas.offsetWidth;
+    const H = 80;
+    canvas.width  = W * dpr;
+    canvas.height = H * dpr;
+    canvas.style.height = `${H}px`;
+    const ctx = canvas.getContext("2d");
+    ctx.scale(dpr, dpr);
+
+    const w = W;
+    const h = H;
+    const span = maxMs * 1.15 - minMs * 0.85;
+    const toX  = (ms) => ((ms - minMs * 0.85) / span) * w;
+
+    // Synthetic log-normal histogram
+    const NUM = 18;
+    const mu    = Math.log(meanMs);
+    const sigma = 0.3;
+    const heights = [];
+    let maxH = 0;
+    for (let i = 0; i < NUM; i++) {
+      const ms = minMs * 0.85 + (i + 0.5) * span / NUM;
+      const v  = Math.exp(-Math.pow(Math.log(Math.max(ms, 1)) - mu, 2) / (2 * sigma * sigma)) / Math.max(ms, 1);
+      heights.push(v);
+      if (v > maxH) maxH = v;
+    }
+    const barW = w / NUM - 1;
+    for (let i = 0; i < NUM; i++) {
+      const x  = i * (barW + 1);
+      const bh = (heights[i] / maxH) * (h - 14);
+      const ms = minMs * 0.85 + (i + 0.5) * span / NUM;
+      ctx.fillStyle = ms <= windowMs ? "rgba(29,158,117,0.55)" : "rgba(156,163,175,0.3)";
+      ctx.fillRect(x, h - 10 - bh, barW, bh);
+    }
+
+    // Window line
+    const wx = toX(windowMs);
+    if (wx >= 0 && wx <= w) {
+      ctx.beginPath();
+      ctx.moveTo(wx, 4);
+      ctx.lineTo(wx, h - 10);
+      ctx.strokeStyle = "#1D9E75";
+      ctx.lineWidth   = 2;
+      ctx.stroke();
+    }
+
+    // Recommended line (if different)
+    const rx = toX(recMs);
+    if (Math.abs(rx - wx) > 6 && rx >= 0 && rx <= w) {
+      ctx.beginPath();
+      ctx.moveTo(rx, 4);
+      ctx.lineTo(rx, h - 10);
+      ctx.strokeStyle = "#9CA3AF";
+      ctx.lineWidth   = 1;
+      ctx.setLineDash([3, 3]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    // X axis
+    ctx.beginPath();
+    ctx.moveTo(0, h - 10);
+    ctx.lineTo(w, h - 10);
+    ctx.strokeStyle = "#E5E7EB";
+    ctx.lineWidth   = 1;
+    ctx.stroke();
+  }, [windowMs, minMs, maxMs, meanMs, recMs]);
+
+  const p90 = nw?.p90_ms;
+  return (
+    <div className="space-y-2">
+      <p className="text-[10px] text-gray-400 uppercase tracking-widest">Event Durations</p>
+      <canvas ref={canvasRef} className="w-full block rounded" style={{ height: "80px" }} />
+      <div className="flex justify-between text-[10px] text-gray-400">
+        <span>{minMs} ms</span>
+        <span>{maxMs} ms</span>
+      </div>
+      <div className="space-y-1 text-[10px]">
+        {[
+          ["Shortest", `${minMs} ms`],
+          ["Longest",  `${maxMs} ms`],
+          p90 ? ["90th pct", `${p90} ms`] : null,
+          ["Your window", `${windowMs} ms`, true],
+        ].filter(Boolean).map(([label, val, accent]) => (
+          <div key={label} className="flex justify-between">
+            <span className={accent ? "text-accent" : "text-gray-400"}>{label}</span>
+            <span className={`font-semibold tabular-nums ${accent ? "text-accent" : "text-gray-600"}`}>{val}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function FeaturesViz() {
+  const SCORES = [
+    { id: "kurtosis",      label: "Kurtosis",    score: 0.88 },
+    { id: "fft_energy",    label: "FFT Energy",  score: 0.82 },
+    { id: "rms",           label: "RMS",         score: 0.74 },
+    { id: "peak",          label: "Peak",        score: 0.71 },
+    { id: "dominant_freq", label: "Dom. Freq",   score: 0.68 },
+    { id: "std_dev",       label: "Std Dev",     score: 0.65 },
+    { id: "absolute_max",  label: "Abs Max",     score: 0.60 },
+    { id: "mean",          label: "Mean",        score: 0.42 },
+  ];
+  const col = (s) => s >= 0.75 ? "#1D9E75" : s >= 0.55 ? "#F59E0B" : "#EF4444";
+
+  return (
+    <div className="space-y-2">
+      <p className="text-[10px] text-gray-400 uppercase tracking-widest">Separability (heuristic)</p>
+      {SCORES.map(({ id, label, score }) => (
+        <div key={id} className="space-y-0.5">
+          <div className="flex justify-between text-[10px]">
+            <span className="text-gray-600">{label}</span>
+            <span className="font-bold tabular-nums" style={{ color: col(score) }}>
+              {Math.round(score * 100)}%
+            </span>
+          </div>
+          <div className="h-1 bg-gray-100 rounded-full overflow-hidden">
+            <div
+              className="h-full rounded-full transition-all duration-500"
+              style={{ width: `${score * 100}%`, backgroundColor: col(score) }}
+            />
+          </div>
+        </div>
+      ))}
+      <p className="text-[9px] text-gray-300 pt-0.5">Based on vibration signal domain knowledge.</p>
+    </div>
+  );
+}
+
+// ── AI Pipeline Designer panel ────────────────────────────────────────────────
+
+function AiDesignerPanel({ design, config, onApplyStage, onApplyAll, onDismiss, animatingBlock }) {
+  const appDesc  = config?.applicationDescription ?? "";
+  const shortDesc = appDesc.length > 72 ? appDesc.slice(0, 72) + "…" : appDesc;
+
+  const ALL_FEAT_IDS = ["mean", "std_dev", "rms", "peak", "absolute_max", "fft_energy", "dominant_freq", "kurtosis"];
+  const stages = [
+    {
+      id:       "filter",
+      name:     "Filter",
+      setting:  design.filter?.skip
+        ? "Skip — hardware filtered"
+        : `${design.filter?.cutoff_hz} Hz · order ${design.filter?.order ?? 4}`,
+      reasoning: design.filter?.skip ? design.filter?.skip_reason : design.filter?.reasoning,
+    },
+    {
+      id:       "normalize",
+      name:     "Normalize",
+      setting:  `${design.normalize?.window_ms} ms · ${design.normalize?.interpolation ?? "cubic"}`,
+      reasoning: design.normalize?.reasoning,
+    },
+    {
+      id:       "features",
+      name:     "Features",
+      setting:  [
+        ...(design.features?.time_domain      ?? []),
+        ...(design.features?.frequency_domain ?? []),
+      ].join(", "),
+      reasoning: design.features?.reasoning,
+    },
+    {
+      id:       "model",
+      name:     "Model",
+      setting:  (design.model?.type ?? "").replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase()),
+      reasoning: design.model?.reasoning,
+    },
+  ];
+
+  return (
+    <div
+      className="rounded-xl border border-accent/30 overflow-hidden mb-5"
+      style={{ background: "linear-gradient(135deg, rgba(29,158,117,0.04) 0%, transparent 55%)" }}
+    >
+      {/* Header */}
+      <div className="flex items-center gap-3 px-5 py-3 border-b border-accent/15">
+        <div className="w-3.5 h-3.5 rounded-full bg-accent/20 flex items-center justify-center flex-shrink-0">
+          <div className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" />
+        </div>
+        <div className="flex-1 min-w-0">
+          <span className="text-xs font-bold text-gray-800 uppercase tracking-widest">AI-Designed Pipeline</span>
+          {shortDesc && (
+            <span className="text-xs text-gray-400 font-normal normal-case tracking-normal ml-2">· {shortDesc}</span>
+          )}
+        </div>
+        <button onClick={onDismiss} className="text-xs text-gray-400 hover:text-gray-600 transition-colors flex-shrink-0">
+          Configure manually →
+        </button>
+      </div>
+
+      <div className="px-5 py-4 space-y-4">
+        {/* Overall reasoning */}
+        {design.reasoning && (
+          <p className="text-xs text-gray-600 leading-relaxed border-l-2 border-accent/40 pl-3 italic">
+            {design.reasoning}
+          </p>
+        )}
+
+        {/* Stage cards */}
+        <div className="grid grid-cols-4 gap-3">
+          {stages.map((stage) => (
+            <div
+              key={stage.id}
+              className={`rounded-lg border p-3 transition-all duration-200 ${
+                animatingBlock === stage.id
+                  ? "border-accent bg-accent/10 shadow-md shadow-accent/20"
+                  : "border-gray-200 bg-white"
+              }`}
+            >
+              <p className="text-[10px] text-gray-400 uppercase tracking-widest mb-1">{stage.name}</p>
+              <p className="text-sm font-bold text-gray-800 leading-snug mb-1.5">{stage.setting}</p>
+              <p className="text-[11px] text-gray-500 leading-relaxed mb-3 min-h-[2.5rem]">{stage.reasoning}</p>
+              <button
+                onClick={() => onApplyStage(stage.id)}
+                className="w-full text-[10px] border border-accent/40 text-accent rounded px-2 py-1 hover:bg-accent/5 transition-colors font-bold tracking-wide"
+              >
+                Apply ↗
+              </button>
+            </div>
+          ))}
+        </div>
+
+        {/* Apply All */}
+        <button
+          onClick={onApplyAll}
+          className="w-full py-2.5 bg-accent text-white text-xs font-bold rounded-lg hover:bg-accent-dark transition-colors tracking-wider uppercase shadow-sm shadow-accent/25"
+        >
+          Apply All Settings →
+        </button>
+      </div>
+    </div>
+  );
+}
+
 // ── Copilot sidebar ───────────────────────────────────────────────────────────
 
 function RecommendationCard({ title, value, subtext, onApply, applyLabel = "Apply" }) {
@@ -500,7 +850,7 @@ function ChevronArrow({ lit }) {
   );
 }
 
-function PipelineBlock({ block, isActive, isPast, onClick, isFlashing }) {
+function PipelineBlock({ block, isActive, isPast, onClick, isFlashing, isAnimating, isAiBadged }) {
   const ICONS = {
     raw:       <path d="M2 10c2-4 4-6 6-6s4 2 6 6-4 6-6 6-4-2-6-6z" stroke="currentColor" strokeWidth="1.3" fill="none"/>,
     filter:    <><path d="M3 5h14M6 10h8M9 15h2" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/></>,
@@ -509,13 +859,14 @@ function PipelineBlock({ block, isActive, isPast, onClick, isFlashing }) {
     model:     <><circle cx="10" cy="7" r="2.5" stroke="currentColor" strokeWidth="1.3" fill="none"/><circle cx="5"  cy="14" r="2"   stroke="currentColor" strokeWidth="1.3" fill="none"/><circle cx="15" cy="14" r="2"   stroke="currentColor" strokeWidth="1.3" fill="none"/><path d="M8 9l-2 3M12 9l2 3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/></>,
   };
 
+  const highlighted = isFlashing || isAnimating;
   return (
     <button
       onClick={onClick}
       className={`
-        flex flex-col items-center gap-2 px-4 py-3 rounded-xl border-2 transition-all duration-200
+        relative flex flex-col items-center gap-2 px-4 py-3 rounded-xl border-2 transition-all duration-200
         min-w-[90px] select-none
-        ${isFlashing
+        ${highlighted
           ? "border-accent bg-accent/15 shadow-lg shadow-accent/30"
           : isActive
           ? "border-accent bg-accent/8 shadow-sm shadow-accent/20"
@@ -524,7 +875,7 @@ function PipelineBlock({ block, isActive, isPast, onClick, isFlashing }) {
           : "border-gray-200 text-gray-400 hover:border-gray-300 hover:text-gray-600"}
       `}
       style={
-        isFlashing
+        highlighted
           ? { backgroundColor: "rgba(29,158,117,0.12)" }
           : isActive
           ? { backgroundColor: "rgba(29,158,117,0.06)" }
@@ -533,20 +884,26 @@ function PipelineBlock({ block, isActive, isPast, onClick, isFlashing }) {
           : {}
       }
     >
+      {/* Persistent AI badge */}
+      {isAiBadged && !highlighted && (
+        <span className="absolute top-1.5 right-1.5 text-[8px] font-bold bg-accent text-white px-1 py-0.5 rounded-sm leading-none tracking-wide">
+          AI
+        </span>
+      )}
       <svg
         viewBox="0 0 20 20"
-        className={`w-5 h-5 ${isFlashing || isActive ? "text-accent" : isPast ? "text-accent/60" : "text-gray-300"}`}
+        className={`w-5 h-5 ${highlighted || isActive ? "text-accent" : isPast ? "text-accent/60" : "text-gray-300"}`}
       >
         {ICONS[block.id]}
       </svg>
       <div className="text-center">
-        <p className={`text-xs font-bold tracking-wide ${isFlashing || isActive ? "text-accent" : isPast ? "text-gray-600" : "text-gray-400"}`}>
+        <p className={`text-xs font-bold tracking-wide ${highlighted || isActive ? "text-accent" : isPast ? "text-gray-600" : "text-gray-400"}`}>
           {block.label}
         </p>
-        <p className={`text-xs mt-0.5 ${isFlashing || isActive ? "text-accent/70" : "text-gray-300"}`}>
+        <p className={`text-xs mt-0.5 ${highlighted || isActive ? "text-accent/70" : "text-gray-300"}`}>
           {block.sublabel}
         </p>
-        {/* "AI applied" badge — fades in when flashing, fades out otherwise */}
+        {/* "AI applied" text — animates in when flashing, collapses otherwise */}
         <p
           className="text-[9px] font-bold text-accent uppercase tracking-widest overflow-hidden leading-none transition-all duration-300"
           style={{
@@ -564,9 +921,21 @@ function PipelineBlock({ block, isActive, isPast, onClick, isFlashing }) {
 
 // ── Main component ────────────────────────────────────────────────────────────
 
-export default function PipelineScreen({ config, analyzeResult, separabilityNote, pipelineConfig, setPipelineConfig, projectId, chatHistory, setChatHistory, onApplyAction, pendingFlash, onFlashConsumed }) {
-  const [activeBlock,   setActiveBlock]   = useState("filter");
-  const [flashingBlock, setFlashingBlock] = useState(null);
+export default function PipelineScreen({
+  config, analyzeResult, separabilityNote,
+  pipelineConfig, setPipelineConfig,
+  projectId, chatHistory, setChatHistory, onApplyAction,
+  pendingFlash, onFlashConsumed,
+  aiPipelineDesign, setAiPipelineDesign,
+  aiConfiguredBlocks, setAiConfiguredBlocks,
+  onGoToSetup,
+}) {
+  const [activeBlock,    setActiveBlock]    = useState("filter");
+  const [flashingBlock,  setFlashingBlock]  = useState(null);
+  const [animatingBlock, setAnimatingBlock] = useState(null);
+  const [isDesigning,    setIsDesigning]    = useState(false);
+  const [designError,    setDesignError]    = useState(null);
+  const [dismissed,      setDismissed]      = useState(false);
 
   // Consume pendingFlash from App: navigate to the block, flash it for 600ms
   useEffect(() => {
@@ -578,12 +947,13 @@ export default function PipelineScreen({ config, analyzeResult, separabilityNote
     return () => clearTimeout(t);
   }, [pendingFlash]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Derive slices and per-slice setters from lifted state
-  const filterCfg  = pipelineConfig.filter;
-  const normCfg    = pipelineConfig.normalize;
-  const features   = pipelineConfig.features;
-  const model      = pipelineConfig.model;
+  // Derive slices from lifted state
+  const filterCfg = pipelineConfig.filter;
+  const normCfg   = pipelineConfig.normalize;
+  const features  = pipelineConfig.features;
+  const model     = pipelineConfig.model;
 
+  // Base setters (used by AI apply — do NOT clear badge)
   const setFilterCfg = (updater) =>
     setPipelineConfig((cfg) => ({ ...cfg, filter: typeof updater === "function" ? updater(cfg.filter) : updater }));
   const setNormCfg = (updater) =>
@@ -593,89 +963,268 @@ export default function PipelineScreen({ config, analyzeResult, separabilityNote
   const setModel = (val) =>
     setPipelineConfig((cfg) => ({ ...cfg, model: val }));
 
+  // Manual setters — also clear the AI badge on that block
+  const setFilterCfgManual = (updater) => {
+    setFilterCfg(updater);
+    setAiConfiguredBlocks?.((b) => ({ ...b, filter: false }));
+  };
+  const setNormCfgManual = (updater) => {
+    setNormCfg(updater);
+    setAiConfiguredBlocks?.((b) => ({ ...b, normalize: false }));
+  };
+  const setFeaturesManual = (updater) => {
+    setFeatures(updater);
+    setAiConfiguredBlocks?.((b) => ({ ...b, features: false }));
+  };
+  const setModelManual = (val) => {
+    setModel(val);
+    setAiConfiguredBlocks?.((b) => ({ ...b, model: false }));
+  };
+
   const activeIdx = BLOCKS.findIndex((b) => b.id === activeBlock);
 
   function applyRecommendedCutoff() {
     if (!analyzeResult) return;
-    setFilterCfg((c) => ({ ...c, cutoff: Math.round(analyzeResult.cutoff_frequency.recommended_hz) }));
+    setFilterCfgManual((c) => ({ ...c, cutoff: Math.round(analyzeResult.cutoff_frequency.recommended_hz) }));
     setActiveBlock("filter");
   }
 
   function applyRecommendedWindow() {
     if (!analyzeResult) return;
-    setNormCfg((c) => ({ ...c, window: analyzeResult.normalization_window.recommended_ms }));
+    setNormCfgManual((c) => ({ ...c, window: analyzeResult.normalization_window.recommended_ms }));
     setActiveBlock("normalize");
   }
+
+  // ── AI Pipeline Designer ─────────────────────────────────────────────────────
+
+  async function handleDesign() {
+    setIsDesigning(true);
+    setDesignError(null);
+    try {
+      const res = await fetch(`${API_BASE_URL}/pipeline/design`, {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          project_id:              projectId ?? "demo-project",
+          application_description: config?.applicationDescription ?? "",
+          hardware_preprocessing:  config?.hardwarePreprocessing  ?? { type: "none" },
+          signal_analysis: analyzeResult ? {
+            sample_rate_hz:        analyzeResult.sample_rate?.declared_hz,
+            recommended_cutoff_hz: analyzeResult.cutoff_frequency?.recommended_hz,
+            recommended_window_ms: analyzeResult.normalization_window?.recommended_ms,
+            event_count:           analyzeResult.event_count,
+          } : null,
+        }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.detail ?? `API ${res.status}`);
+      }
+      const data = await res.json();
+      setAiPipelineDesign?.(data);
+      setDismissed(false);
+    } catch (err) {
+      setDesignError(err.message);
+    } finally {
+      setIsDesigning(false);
+    }
+  }
+
+  function applyStage(stageId) {
+    const d = aiPipelineDesign;
+    if (!d) return;
+    const ALL_IDS = ["mean", "std_dev", "rms", "peak", "absolute_max", "fft_energy", "dominant_freq", "kurtosis"];
+    if (stageId === "filter") {
+      if (!d.filter?.skip) {
+        setFilterCfg((c) => ({ ...c, cutoff: Math.round(d.filter.cutoff_hz), order: d.filter.order ?? c.order }));
+      }
+      setAiConfiguredBlocks?.((b) => ({ ...b, filter: true }));
+    } else if (stageId === "normalize") {
+      setNormCfg((c) => ({ ...c, window: d.normalize.window_ms, interpolation: d.normalize.interpolation ?? c.interpolation }));
+      setAiConfiguredBlocks?.((b) => ({ ...b, normalize: true }));
+    } else if (stageId === "features") {
+      const aiFeats = [...(d.features?.time_domain ?? []), ...(d.features?.frequency_domain ?? [])];
+      const newF = {};
+      ALL_IDS.forEach((id) => { newF[id] = aiFeats.includes(id); });
+      setFeatures(newF);
+      setAiConfiguredBlocks?.((b) => ({ ...b, features: true }));
+    } else if (stageId === "model") {
+      setModel(d.model.type);
+      setAiConfiguredBlocks?.((b) => ({ ...b, model: true }));
+    }
+  }
+
+  async function handleApplyAll() {
+    const stages = ["filter", "normalize", "features", "model"];
+    for (const stage of stages) {
+      setAnimatingBlock(stage);
+      setActiveBlock(stage);
+      applyStage(stage);
+      await new Promise((r) => setTimeout(r, 200));
+    }
+    setAnimatingBlock(null);
+    setActiveBlock("filter");
+  }
+
+  // ── Rendering ────────────────────────────────────────────────────────────────
+
+  const hasAppDesc = !!(config?.applicationDescription?.trim());
+
+  // Show the designer panel when: design exists and not dismissed, OR currently loading/error
+  const showDesignerPanel = !dismissed && (aiPipelineDesign || isDesigning || designError);
 
   function renderConfigPanel() {
     switch (activeBlock) {
       case "raw":       return <RawPanel config={config} />;
-      case "filter":    return <FilterPanel cfg={filterCfg} setCfg={setFilterCfg} />;
-      case "normalize": return <NormalizePanel cfg={normCfg} setCfg={setNormCfg} analyzeResult={analyzeResult} />;
-      case "features":  return <FeaturesPanel features={features} setFeatures={setFeatures} />;
-      case "model":     return <ModelPanel model={model} setModel={setModel} />;
+      case "filter":    return <FilterPanel cfg={filterCfg} setCfg={setFilterCfgManual} />;
+      case "normalize": return <NormalizePanel cfg={normCfg} setCfg={setNormCfgManual} analyzeResult={analyzeResult} />;
+      case "features":  return <FeaturesPanel features={features} setFeatures={setFeaturesManual} />;
+      case "model":     return <ModelPanel model={model} setModel={setModelManual} />;
       default:          return null;
     }
   }
 
+  function renderViz() {
+    if (!analyzeResult) return null;
+    if (activeBlock === "filter") {
+      return <FilterViz analyzeResult={analyzeResult} cutoffHz={filterCfg.cutoff} />;
+    }
+    if (activeBlock === "normalize") {
+      return <NormalizeViz analyzeResult={analyzeResult} windowMs={normCfg.window} />;
+    }
+    if (activeBlock === "features") {
+      return <FeaturesViz analyzeResult={analyzeResult} />;
+    }
+    return null;
+  }
+
+  const viz = renderViz();
+
   return (
-    <div className="flex gap-6 min-h-0">
+    <div className="flex flex-col gap-5 min-h-0">
 
-      {/* ── Left: chain + config ─────────────────────────────────────────────── */}
-      <div className="flex-1 flex flex-col gap-6 min-w-0">
+      {/* ── AI Designer panel (full width, top) ─────────────────────────────── */}
+      {showDesignerPanel && aiPipelineDesign && (
+        <AiDesignerPanel
+          design={aiPipelineDesign}
+          config={config}
+          onApplyStage={applyStage}
+          onApplyAll={handleApplyAll}
+          onDismiss={() => setDismissed(true)}
+          animatingBlock={animatingBlock}
+        />
+      )}
 
-        {/* Pipeline chain */}
-        <div className="border border-gray-200 rounded-xl p-5 bg-white">
-          <p className="text-xs text-gray-400 uppercase tracking-widest mb-5">Pipeline</p>
-          <div className="flex items-center gap-1 overflow-x-auto pb-1">
-            {BLOCKS.map((block, i) => (
-              <React.Fragment key={block.id}>
-                <PipelineBlock
-                  block={block}
-                  isActive={activeBlock === block.id}
-                  isPast={i < activeIdx}
-                  onClick={() => setActiveBlock(block.id)}
-                  isFlashing={flashingBlock === block.id}
-                />
-                {i < BLOCKS.length - 1 && (
-                  <ChevronArrow lit={i < activeIdx} />
-                )}
-              </React.Fragment>
-            ))}
+      {/* Loading state */}
+      {isDesigning && (
+        <div className="border border-accent/25 rounded-xl px-5 py-4 flex items-center gap-3"
+             style={{ background: "rgba(29,158,117,0.04)" }}>
+          <div className="w-3.5 h-3.5 rounded-full bg-accent/20 flex items-center justify-center flex-shrink-0">
+            <div className="w-1.5 h-1.5 rounded-full bg-accent animate-ping" />
+          </div>
+          <p className="text-xs text-gray-600">Analyzing your application and signal data…</p>
+        </div>
+      )}
+
+      {/* Error state */}
+      {designError && !isDesigning && (
+        <div className="border border-red-200 bg-red-50 rounded-xl px-5 py-3 flex items-center justify-between">
+          <p className="text-xs text-red-600">{designError}</p>
+          <button onClick={handleDesign} className="text-xs text-red-500 underline ml-4">Retry</button>
+        </div>
+      )}
+
+      {/* ── Main layout: left (chain + config) + right (sidebar) ────────────── */}
+      <div className="flex gap-6 min-h-0 flex-1">
+
+        {/* ── Left: chain + config ──────────────────────────────────────────── */}
+        <div className="flex-1 flex flex-col gap-5 min-w-0">
+
+          {/* Pipeline chain */}
+          <div className="border border-gray-200 rounded-xl p-5 bg-white flex-shrink-0">
+            <div className="flex items-center justify-between mb-4">
+              <p className="text-xs text-gray-400 uppercase tracking-widest">Pipeline</p>
+
+              {/* Design / Redesign button */}
+              {!isDesigning && (
+                hasAppDesc ? (
+                  <button
+                    onClick={handleDesign}
+                    className="flex items-center gap-1.5 text-xs font-bold text-accent border border-accent/30 px-3 py-1 rounded-lg hover:bg-accent/5 transition-colors"
+                  >
+                    <span className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" />
+                    {aiPipelineDesign && !dismissed ? "Redesign with AI" : "Design Pipeline with AI"}
+                  </button>
+                ) : (
+                  <button
+                    onClick={onGoToSetup}
+                    className="text-[10px] text-gray-400 hover:text-accent transition-colors"
+                  >
+                    Add application context on Setup to enable AI design →
+                  </button>
+                )
+              )}
+            </div>
+
+            <div className="flex items-center gap-1 overflow-x-auto pb-1">
+              {BLOCKS.map((block, i) => (
+                <React.Fragment key={block.id}>
+                  <PipelineBlock
+                    block={block}
+                    isActive={activeBlock === block.id}
+                    isPast={i < activeIdx}
+                    onClick={() => setActiveBlock(block.id)}
+                    isFlashing={flashingBlock === block.id}
+                    isAnimating={animatingBlock === block.id}
+                    isAiBadged={!!(aiConfiguredBlocks?.[block.id])}
+                  />
+                  {i < BLOCKS.length - 1 && <ChevronArrow lit={i < activeIdx} />}
+                </React.Fragment>
+              ))}
+            </div>
+          </div>
+
+          {/* Config panel */}
+          <div className="border border-gray-200 rounded-xl p-6 bg-white flex-1">
+            <div className="flex items-center gap-3 mb-6 pb-4 border-b border-gray-100">
+              <div className="w-2 h-2 rounded-full bg-accent" />
+              <h2 className="text-sm font-bold text-gray-800 tracking-wide uppercase">
+                {BLOCKS.find((b) => b.id === activeBlock)?.label}
+              </h2>
+              <span className="text-xs text-gray-400">
+                {BLOCKS.find((b) => b.id === activeBlock)?.sublabel}
+              </span>
+            </div>
+
+            {/* Two-column: controls left, viz right */}
+            <div className="flex gap-6">
+              <div className="flex-1 min-w-0">
+                {renderConfigPanel()}
+              </div>
+              {viz && (
+                <div className="w-48 flex-shrink-0 border-l border-gray-100 pl-5">
+                  {viz}
+                </div>
+              )}
+            </div>
           </div>
         </div>
 
-        {/* Config panel */}
-        <div className="border border-gray-200 rounded-xl p-6 bg-white flex-1">
-          {/* Panel header */}
-          <div className="flex items-center gap-3 mb-6 pb-4 border-b border-gray-100">
-            <div className="w-2 h-2 rounded-full bg-accent" />
-            <h2 className="text-sm font-bold text-gray-800 tracking-wide uppercase">
-              {BLOCKS.find((b) => b.id === activeBlock)?.label}
-            </h2>
-            <span className="text-xs text-gray-400">
-              {BLOCKS.find((b) => b.id === activeBlock)?.sublabel}
-            </span>
+        {/* ── Right: copilot sidebar ─────────────────────────────────────────── */}
+        <div className="w-60 flex-shrink-0">
+          <div className="border border-gray-200 rounded-xl p-4 bg-white h-full">
+            <CopilotSidebar
+              analyzeResult={analyzeResult}
+              separabilityNote={separabilityNote}
+              onApplyCutoff={applyRecommendedCutoff}
+              onApplyWindow={applyRecommendedWindow}
+              chatHistory={chatHistory}
+              setChatHistory={setChatHistory}
+              projectId={projectId}
+              onApplyAction={onApplyAction}
+              pipelineConfig={pipelineConfig}
+            />
           </div>
-
-          {renderConfigPanel()}
-        </div>
-      </div>
-
-      {/* ── Right: copilot sidebar ─────────────────────────────────────────── */}
-      <div className="w-60 flex-shrink-0">
-        <div className="border border-gray-200 rounded-xl p-4 bg-white h-full">
-          <CopilotSidebar
-            analyzeResult={analyzeResult}
-            separabilityNote={separabilityNote}
-            onApplyCutoff={applyRecommendedCutoff}
-            onApplyWindow={applyRecommendedWindow}
-            chatHistory={chatHistory}
-            setChatHistory={setChatHistory}
-            projectId={projectId}
-            onApplyAction={onApplyAction}
-            pipelineConfig={pipelineConfig}
-          />
         </div>
       </div>
     </div>

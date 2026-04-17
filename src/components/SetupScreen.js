@@ -230,6 +230,7 @@ function DeviceStatusPanel({ connectionType }) {
 
 export default function SetupScreen({ config, setConfig, submitError }) {
   const { projectName, sensorType, connectionType, triggerType, triggerConfig, targetMcu } = config;
+  const hwType = config.hardwarePreprocessing?.type ?? "none";
 
   const update = (key, val) => setConfig((prev) => ({ ...prev, [key]: val }));
   const setTriggerConfig = (updater) =>
@@ -294,6 +295,68 @@ export default function SetupScreen({ config, setConfig, submitError }) {
             options={TARGET_MCUS}
             placeholder="Select MCU…"
           />
+        </div>
+
+        {/* ── Application Context ─────────────────────────────────────────── */}
+        <div className="pt-4 border-t border-gray-100">
+          <p className="text-xs text-gray-400 uppercase tracking-widest mb-4">Application Context</p>
+          <div className="space-y-5">
+
+            <div>
+              <Label>Application context (optional)</Label>
+              <textarea
+                value={config.applicationDescription ?? ""}
+                onChange={(e) => update("applicationDescription", e.target.value)}
+                placeholder="e.g. Piezoelectric sensor on CNC spindle bearing, hardware lowpass at 500Hz already on chip. Want to detect normal vs early wear vs critical wear."
+                rows={3}
+                className="w-full bg-gray-50 border border-gray-200 rounded px-3 py-2 text-sm text-gray-800
+                           placeholder-gray-400 focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent/30
+                           resize-none leading-relaxed"
+              />
+              <p className="text-xs text-gray-400 mt-1.5 leading-relaxed">
+                The AI uses this to give domain-specific pipeline recommendations.
+              </p>
+            </div>
+
+            <div>
+              <Label>Prior chip processing?</Label>
+              <select
+                value={hwType}
+                onChange={(e) => update("hardwarePreprocessing", { type: e.target.value })}
+                className="w-full bg-gray-50 border border-gray-200 rounded px-3 py-2 text-sm text-gray-800
+                           focus:outline-none focus:border-accent focus:ring-1 focus:ring-accent/30
+                           appearance-none cursor-pointer"
+              >
+                <option value="none">None</option>
+                <option value="lowpass">Hardware lowpass filter</option>
+                <option value="highpass">Hardware highpass filter</option>
+                <option value="custom">Custom</option>
+              </select>
+
+              {(hwType === "lowpass" || hwType === "highpass") && (
+                <div className="mt-3 pl-3 border-l-2 border-accent/40">
+                  <Label>Cutoff frequency (Hz)</Label>
+                  <Input
+                    type="number"
+                    value={config.hardwarePreprocessing?.cutoff_hz ?? ""}
+                    onChange={(v) => update("hardwarePreprocessing", { ...config.hardwarePreprocessing, cutoff_hz: v })}
+                    placeholder="e.g. 500"
+                  />
+                </div>
+              )}
+              {hwType === "custom" && (
+                <div className="mt-3 pl-3 border-l-2 border-accent/40">
+                  <Label>Describe what's applied</Label>
+                  <Input
+                    value={config.hardwarePreprocessing?.description ?? ""}
+                    onChange={(v) => update("hardwarePreprocessing", { ...config.hardwarePreprocessing, description: v })}
+                    placeholder="e.g. Band-pass 20–200 Hz, 6th order Butterworth"
+                  />
+                </div>
+              )}
+            </div>
+
+          </div>
         </div>
 
         {submitError && (

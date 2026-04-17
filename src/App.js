@@ -22,12 +22,14 @@ const STEPS = [
 const PLACEHOLDER_META = {};
 
 const INITIAL_CONFIG = {
-  projectName:    "",
-  sensorType:     "",
-  connectionType: "",
-  triggerType:    "",
-  triggerConfig:  {},
-  targetMcu:      "",
+  projectName:            "",
+  sensorType:             "",
+  connectionType:         "",
+  triggerType:            "",
+  triggerConfig:          {},
+  targetMcu:              "",
+  applicationDescription: "",
+  hardwarePreprocessing:  { type: "none" },
 };
 
 const INITIAL_PIPELINE_CONFIG = {
@@ -50,8 +52,10 @@ export default function App() {
   const [analyzeResult,    setAnalyzeResult]    = useState(null);
   const [separabilityNote, setSeparabilityNote] = useState(null);
   const [pipelineConfig,   setPipelineConfig]   = useState(INITIAL_PIPELINE_CONFIG);
-  const [chatHistory,      setChatHistory]      = useState([]);
-  const [pendingFlash,     setPendingFlash]     = useState(null);
+  const [chatHistory,        setChatHistory]        = useState([]);
+  const [pendingFlash,       setPendingFlash]       = useState(null);
+  const [aiPipelineDesign,   setAiPipelineDesign]   = useState(null);
+  const [aiConfiguredBlocks, setAiConfiguredBlocks] = useState({});
 
   const goBack = () => setActiveStep((s) => Math.max(s - 1, 0));
 
@@ -80,12 +84,14 @@ export default function App() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          name:            config.projectName,
-          sensor_type:     config.sensorType,
-          connection_type: config.connectionType,
-          trigger_type:    config.triggerType,
-          trigger_config:  config.triggerConfig,
-          target_mcu:      config.targetMcu,
+          name:                    config.projectName,
+          sensor_type:             config.sensorType,
+          connection_type:         config.connectionType,
+          trigger_type:            config.triggerType,
+          trigger_config:          config.triggerConfig,
+          target_mcu:              config.targetMcu,
+          application_description: config.applicationDescription || null,
+          hardware_preprocessing:  config.hardwarePreprocessing  || null,
         }),
       });
       if (!res.ok) {
@@ -127,6 +133,7 @@ export default function App() {
         <CollectScreen
           config={config}
           projectId={projectId}
+          analyzeResult={analyzeResult}
           onAnalysisReady={(data, note) => {
             setAnalyzeResult(data);
             setSeparabilityNote(note);
@@ -151,6 +158,11 @@ export default function App() {
           onApplyAction={handleApplyAction}
           pendingFlash={pendingFlash}
           onFlashConsumed={() => setPendingFlash(null)}
+          aiPipelineDesign={aiPipelineDesign}
+          setAiPipelineDesign={setAiPipelineDesign}
+          aiConfiguredBlocks={aiConfiguredBlocks}
+          setAiConfiguredBlocks={setAiConfiguredBlocks}
+          onGoToSetup={() => setActiveStep(0)}
         />
       );
     }
