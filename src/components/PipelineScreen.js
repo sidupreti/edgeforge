@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import CopilotChat from "./CopilotChat";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -78,6 +78,7 @@ function Slider({ min, max, value, onChange, unit = "" }) {
           style={{
             accentColor: "#1D9E75",
             background: `linear-gradient(to right, #1D9E75 ${pct}%, #e5e7eb ${pct}%)`,
+            transition: "background 300ms ease",
           }}
         />
       </div>
@@ -499,7 +500,7 @@ function ChevronArrow({ lit }) {
   );
 }
 
-function PipelineBlock({ block, isActive, isPast, onClick }) {
+function PipelineBlock({ block, isActive, isPast, onClick, isFlashing }) {
   const ICONS = {
     raw:       <path d="M2 10c2-4 4-6 6-6s4 2 6 6-4 6-6 6-4-2-6-6z" stroke="currentColor" strokeWidth="1.3" fill="none"/>,
     filter:    <><path d="M3 5h14M6 10h8M9 15h2" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/></>,
@@ -512,28 +513,49 @@ function PipelineBlock({ block, isActive, isPast, onClick }) {
     <button
       onClick={onClick}
       className={`
-        flex flex-col items-center gap-2 px-4 py-3 rounded-xl border-2 transition-all
+        flex flex-col items-center gap-2 px-4 py-3 rounded-xl border-2 transition-all duration-200
         min-w-[90px] select-none
-        ${isActive
+        ${isFlashing
+          ? "border-accent bg-accent/15 shadow-lg shadow-accent/30"
+          : isActive
           ? "border-accent bg-accent/8 shadow-sm shadow-accent/20"
           : isPast
           ? "border-accent/30 bg-accent/3 text-gray-600 hover:border-accent/50"
           : "border-gray-200 text-gray-400 hover:border-gray-300 hover:text-gray-600"}
       `}
-      style={isActive ? { backgroundColor: "rgba(29,158,117,0.06)" } : isPast ? { backgroundColor: "rgba(29,158,117,0.02)" } : {}}
+      style={
+        isFlashing
+          ? { backgroundColor: "rgba(29,158,117,0.12)" }
+          : isActive
+          ? { backgroundColor: "rgba(29,158,117,0.06)" }
+          : isPast
+          ? { backgroundColor: "rgba(29,158,117,0.02)" }
+          : {}
+      }
     >
       <svg
         viewBox="0 0 20 20"
-        className={`w-5 h-5 ${isActive ? "text-accent" : isPast ? "text-accent/60" : "text-gray-300"}`}
+        className={`w-5 h-5 ${isFlashing || isActive ? "text-accent" : isPast ? "text-accent/60" : "text-gray-300"}`}
       >
         {ICONS[block.id]}
       </svg>
       <div className="text-center">
-        <p className={`text-xs font-bold tracking-wide ${isActive ? "text-accent" : isPast ? "text-gray-600" : "text-gray-400"}`}>
+        <p className={`text-xs font-bold tracking-wide ${isFlashing || isActive ? "text-accent" : isPast ? "text-gray-600" : "text-gray-400"}`}>
           {block.label}
         </p>
-        <p className={`text-xs mt-0.5 ${isActive ? "text-accent/70" : "text-gray-300"}`}>
+        <p className={`text-xs mt-0.5 ${isFlashing || isActive ? "text-accent/70" : "text-gray-300"}`}>
           {block.sublabel}
+        </p>
+        {/* "AI applied" badge — fades in when flashing, fades out otherwise */}
+        <p
+          className="text-[9px] font-bold text-accent uppercase tracking-widest overflow-hidden leading-none transition-all duration-300"
+          style={{
+            maxHeight: isFlashing ? "12px" : "0px",
+            opacity:   isFlashing ? 1 : 0,
+            marginTop: isFlashing ? "4px" : "0px",
+          }}
+        >
+          AI applied
         </p>
       </div>
     </button>
@@ -542,8 +564,19 @@ function PipelineBlock({ block, isActive, isPast, onClick }) {
 
 // ── Main component ────────────────────────────────────────────────────────────
 
-export default function PipelineScreen({ config, analyzeResult, separabilityNote, pipelineConfig, setPipelineConfig, projectId, chatHistory, setChatHistory, onApplyAction }) {
-  const [activeBlock, setActiveBlock] = useState("filter");
+export default function PipelineScreen({ config, analyzeResult, separabilityNote, pipelineConfig, setPipelineConfig, projectId, chatHistory, setChatHistory, onApplyAction, pendingFlash, onFlashConsumed }) {
+  const [activeBlock,   setActiveBlock]   = useState("filter");
+  const [flashingBlock, setFlashingBlock] = useState(null);
+
+  // Consume pendingFlash from App: navigate to the block, flash it for 600ms
+  useEffect(() => {
+    if (!pendingFlash) return;
+    setActiveBlock(pendingFlash);
+    setFlashingBlock(pendingFlash);
+    onFlashConsumed?.();
+    const t = setTimeout(() => setFlashingBlock(null), 600);
+    return () => clearTimeout(t);
+  }, [pendingFlash]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Derive slices and per-slice setters from lifted state
   const filterCfg  = pipelineConfig.filter;
@@ -602,6 +635,7 @@ export default function PipelineScreen({ config, analyzeResult, separabilityNote
                   isActive={activeBlock === block.id}
                   isPast={i < activeIdx}
                   onClick={() => setActiveBlock(block.id)}
+                  isFlashing={flashingBlock === block.id}
                 />
                 {i < BLOCKS.length - 1 && (
                   <ChevronArrow lit={i < activeIdx} />

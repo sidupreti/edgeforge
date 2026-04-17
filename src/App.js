@@ -51,18 +51,23 @@ export default function App() {
   const [separabilityNote, setSeparabilityNote] = useState(null);
   const [pipelineConfig,   setPipelineConfig]   = useState(INITIAL_PIPELINE_CONFIG);
   const [chatHistory,      setChatHistory]      = useState([]);
+  const [pendingFlash,     setPendingFlash]     = useState(null);
 
   const goBack = () => setActiveStep((s) => Math.max(s - 1, 0));
 
   function handleApplyAction({ type, value }) {
     if (type === "set_cutoff") {
       setPipelineConfig((cfg) => ({ ...cfg, filter: { ...cfg.filter, cutoff: parseFloat(value) } }));
+      setPendingFlash("filter");
     } else if (type === "set_window") {
       setPipelineConfig((cfg) => ({ ...cfg, normalize: { ...cfg.normalize, window: parseInt(value) } }));
+      setPendingFlash("normalize");
     } else if (type === "set_model") {
       setPipelineConfig((cfg) => ({ ...cfg, model: String(value) }));
+      setPendingFlash("model");
     } else if (type === "add_feature") {
       setPipelineConfig((cfg) => ({ ...cfg, features: { ...cfg.features, [String(value)]: true } }));
+      setPendingFlash("features");
     }
     setActiveStep(2); // navigate to Pipeline screen
   }
@@ -144,6 +149,8 @@ export default function App() {
           chatHistory={chatHistory}
           setChatHistory={setChatHistory}
           onApplyAction={handleApplyAction}
+          pendingFlash={pendingFlash}
+          onFlashConsumed={() => setPendingFlash(null)}
         />
       );
     }
