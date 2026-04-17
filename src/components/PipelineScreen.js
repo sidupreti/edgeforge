@@ -591,7 +591,7 @@ function AiDesignerPanel({ design, config, onApplyStage, onApplyAll, onDismiss, 
   const appDesc  = config?.applicationDescription ?? "";
   const shortDesc = appDesc.length > 72 ? appDesc.slice(0, 72) + "…" : appDesc;
 
-  const ALL_FEAT_IDS = ["mean", "std_dev", "rms", "peak", "absolute_max", "fft_energy", "dominant_freq", "kurtosis"];
+  // ALL_FEAT_IDS declared at applyStage call-site instead
   const stages = [
     {
       id:       "filter",
