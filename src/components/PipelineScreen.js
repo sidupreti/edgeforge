@@ -34,7 +34,15 @@ const MODELS = [
 ];
 
 const ORDER_OPTIONS = [2, 4, 6, 8];
-const INTERP_OPTIONS = ["cubic", "linear"];
+const INTERP_OPTIONS = ["cubic", "linear", "none"];
+
+const FILTER_TYPES = [
+  { id: "butterworth",    label: "Butterworth",     desc: "Flat passband, best general purpose" },
+  { id: "chebyshev",      label: "Chebyshev I",     desc: "Sharper rolloff, small ripple" },
+  { id: "bessel",         label: "Bessel",           desc: "Linear phase, preserves pulse shape" },
+  { id: "moving_average", label: "Moving Average",   desc: "Simplest, lowest MCU compute" },
+  { id: "none",           label: "None",             desc: "Skip filtering (hardware already filtered)" },
+];
 
 // ── Primitive UI pieces ───────────────────────────────────────────────────────
 
@@ -219,49 +227,129 @@ function RawPanel({ config }) {
 }
 
 function FilterPanel({ cfg, setCfg }) {
+  const filterType = cfg.filterType ?? "butterworth";
+  const isNone     = filterType === "none";
+  const hasOrder   = filterType !== "moving_average" && filterType !== "none";
+
   return (
     <div className="space-y-6">
+      {/* Filter type */}
       <div>
-        <SectionLabel>Cutoff frequency</SectionLabel>
-        <Slider min={5} max={200} value={cfg.cutoff} onChange={(v) => setCfg((c) => ({ ...c, cutoff: v }))} unit=" Hz" />
+        <SectionLabel>Filter type</SectionLabel>
+        <div className="space-y-1.5">
+          {FILTER_TYPES.map(({ id, label, desc }) => (
+            <label
+              key={id}
+              className={`flex items-start gap-3 p-2.5 rounded-lg border cursor-pointer transition-colors ${
+                filterType === id
+                  ? "border-accent/40 bg-accent/5"
+                  : "border-gray-200 hover:border-gray-300 hover:bg-gray-50"
+              }`}
+            >
+              <span
+                className={`mt-0.5 w-3.5 h-3.5 rounded-full border-2 flex-shrink-0 flex items-center justify-center transition-colors ${
+                  filterType === id ? "border-accent" : "border-gray-300"
+                }`}
+              >
+                {filterType === id && <span className="w-1.5 h-1.5 rounded-full bg-accent block" />}
+              </span>
+              <input
+                type="radio"
+                className="sr-only"
+                value={id}
+                checked={filterType === id}
+                onChange={() => setCfg((c) => ({ ...c, filterType: id }))}
+              />
+              <div className="min-w-0">
+                <span className={`text-xs font-semibold ${filterType === id ? "text-gray-800" : "text-gray-600"}`}>
+                  {label}
+                </span>
+                <p className="text-xs text-gray-400 mt-0.5 leading-relaxed">{desc}</p>
+              </div>
+            </label>
+          ))}
+        </div>
       </div>
-      <div>
-        <SectionLabel>Filter order</SectionLabel>
-        <SegmentedControl
-          options={ORDER_OPTIONS}
-          value={cfg.order}
-          onChange={(v) => setCfg((c) => ({ ...c, order: v }))}
-          fmt={(v) => `${v}`}
-        />
-        <p className="text-xs text-gray-400 mt-2">
-          Higher order → sharper rolloff, more phase distortion.
-        </p>
-      </div>
+
+      {/* Skip message */}
+      {isNone ? (
+        <div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
+          <p className="text-xs text-gray-500 leading-relaxed">
+            Filter stage skipped — your signal will be passed directly to normalization.
+          </p>
+        </div>
+      ) : (
+        <>
+          <div>
+            <SectionLabel>Cutoff frequency</SectionLabel>
+            <Slider min={5} max={200} value={cfg.cutoff} onChange={(v) => setCfg((c) => ({ ...c, cutoff: v }))} unit=" Hz" />
+          </div>
+          {hasOrder && (
+            <div>
+              <SectionLabel>Filter order</SectionLabel>
+              <SegmentedControl
+                options={ORDER_OPTIONS}
+                value={cfg.order}
+                onChange={(v) => setCfg((c) => ({ ...c, order: v }))}
+                fmt={(v) => `${v}`}
+              />
+              <p className="text-xs text-gray-400 mt-2">
+                Higher order → sharper rolloff, more phase distortion.
+              </p>
+            </div>
+          )}
+        </>
+      )}
     </div>
   );
 }
 
 function NormalizePanel({ cfg, setCfg, analyzeResult }) {
+  const isNone = cfg.interpolation === "none";
   return (
     <div className="space-y-6">
       <DurationCallout analyzeResult={analyzeResult} />
 
       <div>
-        <SectionLabel>Window length</SectionLabel>
-        <Slider min={100} max={3000} value={cfg.window} onChange={(v) => setCfg((c) => ({ ...c, window: v }))} unit=" ms" />
+        <SectionLabel>Interpolation</SectionLabel>
+        <div className="inline-flex border border-gray-200 rounded overflow-hidden">
+          {INTERP_OPTIONS.map((opt) => (
+            <button
+              key={opt}
+              onClick={() => setCfg((c) => ({ ...c, interpolation: opt }))}
+              className={`px-3 py-1.5 text-xs transition-colors ${
+                cfg.interpolation === opt
+                  ? "bg-accent text-white"
+                  : "text-gray-500 hover:bg-gray-50"
+              }`}
+            >
+              {opt === "none" ? "None" : opt.charAt(0).toUpperCase() + opt.slice(1)}
+            </button>
+          ))}
+        </div>
+
+        {isNone ? (
+          <div className="mt-3 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
+            <p className="text-xs text-gray-500 leading-relaxed">
+              Normalization skipped — events passed directly to feature extraction.
+              Only use if all your events are exactly the same duration.
+            </p>
+          </div>
+        ) : (
+          <p className="text-xs text-gray-400 mt-2">
+            {cfg.interpolation === "cubic"
+              ? "Cubic preserves curvature through inflection points."
+              : "Linear is faster and uses less MCU memory."}
+          </p>
+        )}
       </div>
 
-      <div>
-        <SectionLabel>Interpolation</SectionLabel>
-        <SegmentedControl
-          options={INTERP_OPTIONS}
-          value={cfg.interpolation}
-          onChange={(v) => setCfg((c) => ({ ...c, interpolation: v }))}
-        />
-        <p className="text-xs text-gray-400 mt-2">
-          Cubic preserves curvature through inflection points. Linear is faster.
-        </p>
-      </div>
+      {!isNone && (
+        <div>
+          <SectionLabel>Window length</SectionLabel>
+          <Slider min={100} max={3000} value={cfg.window} onChange={(v) => setCfg((c) => ({ ...c, window: v }))} unit=" ms" />
+        </div>
+      )}
     </div>
   );
 }

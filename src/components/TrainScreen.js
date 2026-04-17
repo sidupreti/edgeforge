@@ -387,6 +387,7 @@ export default function TrainScreen({ projectId, analyzeResult, pipelineConfig, 
         body:    JSON.stringify({
           project_id:        effectiveProjectId,
           cutoff_hz:         pipelineConfig.filter.cutoff,
+          filter_type:       pipelineConfig.filter.filterType ?? "butterworth",
           window_ms:         pipelineConfig.normalize.window,
           interpolation:     pipelineConfig.normalize.interpolation,
           selected_features: selectedFeatures,

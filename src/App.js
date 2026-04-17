@@ -33,7 +33,7 @@ const INITIAL_CONFIG = {
 };
 
 const INITIAL_PIPELINE_CONFIG = {
-  filter:    { cutoff: 30, order: 4 },
+  filter:    { cutoff: 30, order: 4, filterType: "butterworth" },
   normalize: { window: 1000, interpolation: "cubic" },
   features:  {
     mean: true, std_dev: true, rms: true, peak: true, absolute_max: true,
