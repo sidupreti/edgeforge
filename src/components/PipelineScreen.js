@@ -5,6 +5,7 @@ import { highlight, languages } from "prismjs/components/prism-core";
 import "prismjs/components/prism-clike";
 import "prismjs/components/prism-python";
 import "prismjs/themes/prism-tomorrow.css";
+import "./CodeEditorTheme.css";
 import CopilotChat from "./CopilotChat";
 import API_BASE_URL from "../config";
 
@@ -903,13 +904,19 @@ function AddBlockModal({ projectId, onAdd, onClose }) {
                 <>
                   <div>
                     <label className="text-xs text-gray-400 uppercase tracking-widest block mb-2">Generated code (editable)</label>
-                    <div className="rounded-lg overflow-hidden border border-gray-800" style={{ background: "#1e1e2e" }}>
+                    <div className="rounded-lg overflow-hidden border border-gray-800" style={{ background: "#1a1a2e" }}>
                       <Editor
                         value={generatedCode}
                         onValueChange={setGeneratedCode}
                         highlight={(code) => highlight(code, languages.python, "python")}
-                        padding={12}
-                        style={{ fontFamily: "'Fira Code', 'Fira Mono', monospace, monospace", fontSize: 11, minHeight: 120 }}
+                        padding={14}
+                        style={{
+                          fontFamily: "'Fira Code', 'Fira Mono', 'Cascadia Code', monospace",
+                          fontSize: 13,
+                          lineHeight: 1.6,
+                          color: "#e2e8f0",
+                          minHeight: 200,
+                        }}
                       />
                     </div>
                   </div>
@@ -936,13 +943,19 @@ function CustomBlockPanel({ block, onUpdateCode }) {
     <div className="space-y-4">
       <div>
         <SectionLabel>Processing code</SectionLabel>
-        <div className="rounded-lg overflow-hidden border border-gray-800" style={{ background: "#1e1e2e" }}>
+        <div className="rounded-lg overflow-hidden border border-gray-800" style={{ background: "#1a1a2e" }}>
           <Editor
             value={block.code || "# No code — click 'Edit' to regenerate"}
             onValueChange={onUpdateCode}
             highlight={(code) => highlight(code, languages.python, "python")}
-            padding={12}
-            style={{ fontFamily: "'Fira Code', 'Fira Mono', monospace, monospace", fontSize: 11, minHeight: 160 }}
+            padding={14}
+            style={{
+              fontFamily: "'Fira Code', 'Fira Mono', 'Cascadia Code', monospace",
+              fontSize: 13,
+              lineHeight: 1.6,
+              color: "#e2e8f0",
+              minHeight: 200,
+            }}
           />
         </div>
       </div>

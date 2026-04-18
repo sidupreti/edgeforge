@@ -1,0 +1,60 @@
+/* EdgeForge code editor — custom Prism token overrides */
+/* Applied after prism-tomorrow.css, so !important is needed */
+
+/* Keywords: for, in, if, else, return, def, import, from, as, with, while, not, and, or */
+.token.keyword {
+  color: #1D9E75 !important;
+}
+
+/* Strings (single, double, triple-quoted) */
+.token.string,
+.token.string-interpolation {
+  color: #EF9F27 !important;
+}
+
+/* Comments */
+.token.comment {
+  color: #888780 !important;
+  font-style: italic !important;
+}
+
+/* Numbers (int, float, hex) */
+.token.number {
+  color: #378ADD !important;
+}
+
+/* Function & method names */
+.token.function {
+  color: #5DCAA5 !important;
+}
+
+/* Built-ins: len, print, range, int, str, dict, list, etc. */
+.token.builtin {
+  color: #5DCAA5 !important;
+}
+
+/* Class names */
+.token.class-name {
+  color: #5DCAA5 !important;
+}
+
+/* Boolean / None */
+.token.boolean,
+.token.constant {
+  color: #378ADD !important;
+}
+
+/* Operators: =, +, -, *, /, etc. */
+.token.operator {
+  color: #e2e8f0 !important;
+}
+
+/* Punctuation: ( ) [ ] { } : , */
+.token.punctuation {
+  color: #e2e8f0 !important;
+}
+
+/* Decorator @ */
+.token.decorator {
+  color: #EF9F27 !important;
+}
