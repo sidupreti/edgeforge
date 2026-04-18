@@ -1,16 +1,14 @@
 import React, { useState, useEffect, useRef } from "react";
+import { DragDropContext, Droppable, Draggable } from "@hello-pangea/dnd";
+import Editor from "react-simple-code-editor";
+import { highlight, languages } from "prismjs/components/prism-core";
+import "prismjs/components/prism-clike";
+import "prismjs/components/prism-python";
+import "prismjs/themes/prism-tomorrow.css";
 import CopilotChat from "./CopilotChat";
 import API_BASE_URL from "../config";
 
 // ── Constants ─────────────────────────────────────────────────────────────────
-
-const BLOCKS = [
-  { id: "raw",       label: "Raw Signal", sublabel: "Source" },
-  { id: "filter",    label: "Filter",     sublabel: "Low-pass" },
-  { id: "normalize", label: "Normalize",  sublabel: "Window" },
-  { id: "features",  label: "Features",   sublabel: "Extract" },
-  { id: "model",     label: "Model",      sublabel: "Classify" },
-];
 
 const TIME_FEATURES = [
   { id: "mean",         label: "Mean" },
@@ -42,6 +40,16 @@ const FILTER_TYPES = [
   { id: "bessel",         label: "Bessel",           desc: "Linear phase, preserves pulse shape" },
   { id: "moving_average", label: "Moving Average",   desc: "Simplest, lowest MCU compute" },
   { id: "none",           label: "None",             desc: "Skip filtering (hardware already filtered)" },
+];
+
+const STANDARD_BLOCK_TYPES = [
+  { id: "bandpass",      label: "Bandpass Filter",  desc: "Keep only a frequency band (1–30 Hz)" },
+  { id: "envelope",      label: "Envelope",         desc: "Signal amplitude envelope via Hilbert transform" },
+  { id: "derivative",    label: "Derivative",       desc: "First difference — highlights rate-of-change" },
+  { id: "zscore",        label: "Z-Score Norm",     desc: "Standardize each axis to zero mean, unit variance" },
+  { id: "peak_detector", label: "Peak Detector",    desc: "Replace signal with peak presence indicator" },
+  { id: "fft_transform", label: "FFT Magnitudes",   desc: "Transform signal to frequency domain magnitudes" },
+  { id: "abs_smooth",    label: "Abs + Smooth",     desc: "Absolute value then 5-sample moving average" },
 ];
 
 // ── Primitive UI pieces ───────────────────────────────────────────────────────
@@ -777,6 +785,186 @@ function AiDesignerPanel({ design, config, onApplyStage, onApplyAll, onDismiss, 
   );
 }
 
+// ── Add Block Modal ───────────────────────────────────────────────────────────
+
+function AddBlockModal({ projectId, onAdd, onClose }) {
+  const [tab,            setTab]            = useState("standard");
+  const [description,    setDescription]    = useState("");
+  const [generatedCode,  setGeneratedCode]  = useState("");
+  const [isGenerating,   setIsGenerating]   = useState(false);
+  const [genError,       setGenError]       = useState(null);
+
+  async function generateCustom() {
+    setIsGenerating(true);
+    setGenError(null);
+    try {
+      const res  = await fetch(`${API_BASE_URL}/pipeline/custom-block`, {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({ description, project_id: projectId ?? "demo-project" }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail ?? `API ${res.status}`);
+      setGeneratedCode(data.code);
+    } catch (err) {
+      setGenError(err.message);
+    } finally {
+      setIsGenerating(false);
+    }
+  }
+
+  async function addStandard(bt) {
+    try {
+      const res  = await fetch(`${API_BASE_URL}/pipeline/standard-block`, {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({ block_type: bt.id }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail ?? `API ${res.status}`);
+      onAdd({ id: `${bt.id}-${Date.now()}`, type: "standard", name: bt.label, skipped: false, code: data.code });
+      onClose();
+    } catch (err) {
+      // silently ignore, user can retry
+    }
+  }
+
+  function addCustom() {
+    if (!generatedCode) return;
+    const name = description.length > 28 ? description.slice(0, 28) + "…" : description;
+    onAdd({ id: `custom-${Date.now()}`, type: "custom", name, skipped: false, code: generatedCode });
+    onClose();
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: "rgba(0,0,0,0.35)" }}
+         onClick={onClose}>
+      <div className="bg-white rounded-2xl border border-gray-200 w-[560px] shadow-2xl overflow-hidden"
+           style={{ maxHeight: "80vh" }}
+           onClick={(e) => e.stopPropagation()}>
+
+        {/* Header */}
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
+          <h2 className="text-sm font-bold text-gray-800 uppercase tracking-widest">Add Pipeline Block</h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 transition-colors text-xl leading-none">×</button>
+        </div>
+
+        {/* Tabs */}
+        <div className="flex border-b border-gray-100">
+          {[["standard", "Standard"], ["custom", "Custom (AI)"]].map(([id, label]) => (
+            <button key={id} onClick={() => setTab(id)}
+              className={`flex-1 py-2.5 text-xs font-bold uppercase tracking-widest transition-colors ${
+                tab === id ? "text-accent border-b-2 border-accent -mb-px" : "text-gray-400 hover:text-gray-600"
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
+        <div className="overflow-y-auto" style={{ maxHeight: "calc(80vh - 116px)" }}>
+          {tab === "standard" ? (
+            <div className="p-5 grid grid-cols-2 gap-3">
+              {STANDARD_BLOCK_TYPES.map((bt) => (
+                <button key={bt.id} onClick={() => addStandard(bt)}
+                  className="flex flex-col gap-1.5 p-4 rounded-xl border border-gray-200 hover:border-purple-300 hover:bg-purple-50/40 transition-all text-left group">
+                  <div className="flex items-center gap-2">
+                    <span className="text-[8px] font-bold bg-purple-100 text-purple-600 px-1 py-0.5 rounded tracking-wide">STD</span>
+                    <span className="text-xs font-bold text-gray-800 group-hover:text-purple-700 transition-colors">{bt.label}</span>
+                  </div>
+                  <span className="text-[11px] text-gray-400 leading-relaxed">{bt.desc}</span>
+                </button>
+              ))}
+            </div>
+          ) : (
+            <div className="p-5 space-y-4">
+              <div>
+                <label className="text-xs text-gray-400 uppercase tracking-widest block mb-2">Describe your transformation</label>
+                <textarea
+                  value={description}
+                  onChange={(e) => setDescription(e.target.value)}
+                  placeholder="e.g. Compute the vibration RMS in a 50ms sliding window and smooth it…"
+                  className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-xs font-mono resize-none outline-none focus:border-accent/40 transition-colors"
+                  rows={3}
+                />
+              </div>
+
+              <button
+                onClick={generateCustom}
+                disabled={!description.trim() || isGenerating}
+                className="w-full py-2 bg-accent text-white text-xs font-bold rounded-lg hover:bg-accent-dark disabled:opacity-40 disabled:cursor-not-allowed transition-colors tracking-widest uppercase"
+              >
+                {isGenerating ? "Generating…" : "Generate with AI ✦"}
+              </button>
+
+              {genError && <p className="text-xs text-red-500">{genError}</p>}
+
+              {generatedCode && (
+                <>
+                  <div>
+                    <label className="text-xs text-gray-400 uppercase tracking-widest block mb-2">Generated code (editable)</label>
+                    <div className="rounded-lg overflow-hidden border border-gray-800" style={{ background: "#1e1e2e" }}>
+                      <Editor
+                        value={generatedCode}
+                        onValueChange={setGeneratedCode}
+                        highlight={(code) => highlight(code, languages.python, "python")}
+                        padding={12}
+                        style={{ fontFamily: "'Fira Code', 'Fira Mono', monospace, monospace", fontSize: 11, minHeight: 120 }}
+                      />
+                    </div>
+                  </div>
+                  <button
+                    onClick={addCustom}
+                    className="w-full py-2 bg-purple-600 text-white text-xs font-bold rounded-lg hover:bg-purple-700 transition-colors tracking-widest uppercase"
+                  >
+                    Add Block →
+                  </button>
+                </>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Custom block config panel ─────────────────────────────────────────────────
+
+function CustomBlockPanel({ block, onUpdateCode }) {
+  return (
+    <div className="space-y-4">
+      <div>
+        <SectionLabel>Processing code</SectionLabel>
+        <div className="rounded-lg overflow-hidden border border-gray-800" style={{ background: "#1e1e2e" }}>
+          <Editor
+            value={block.code || "# No code — click 'Edit' to regenerate"}
+            onValueChange={onUpdateCode}
+            highlight={(code) => highlight(code, languages.python, "python")}
+            padding={12}
+            style={{ fontFamily: "'Fira Code', 'Fira Mono', monospace, monospace", fontSize: 11, minHeight: 160 }}
+          />
+        </div>
+      </div>
+      <div className="rounded-lg border border-gray-100 bg-gray-50 p-3 space-y-1">
+        <p className="text-[10px] text-gray-400 uppercase tracking-widest font-semibold mb-1.5">Available in scope</p>
+        {[
+          ["df",               "pandas DataFrame with a_x, a_y, a_z columns"],
+          ["np",               "numpy"],
+          ["SAMPLE_RATE_HZ",   "float (100.0)"],
+          ["filtfilt / hilbert / find_peaks", "scipy.signal"],
+          ["uniform_filter1d", "scipy.ndimage"],
+        ].map(([name, desc]) => (
+          <div key={name} className="flex gap-2 text-[10px]">
+            <code className="text-accent font-mono flex-shrink-0">{name}</code>
+            <span className="text-gray-400">{desc}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 // ── Copilot sidebar ───────────────────────────────────────────────────────────
 
 function RecommendationCard({ title, value, subtext, onApply, applyLabel = "Apply" }) {
@@ -926,84 +1114,157 @@ function CopilotSidebar({ analyzeResult, separabilityNote, onApplyCutoff, onAppl
 
 // ── Pipeline chain ────────────────────────────────────────────────────────────
 
-function ChevronArrow({ lit }) {
+function ChevronArrow({ lit, dashed }) {
   return (
     <svg
       className={`w-5 h-5 flex-shrink-0 transition-colors ${lit ? "text-accent/50" : "text-gray-200"}`}
       viewBox="0 0 20 20"
       fill="none"
     >
-      <path d="M7 4l6 6-6 6" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+      <path
+        d="M7 4l6 6-6 6"
+        stroke="currentColor"
+        strokeWidth="1.5"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeDasharray={dashed ? "3 2" : undefined}
+      />
     </svg>
   );
 }
 
-function PipelineBlock({ block, isActive, isPast, onClick, isFlashing, isAnimating, isAiBadged }) {
-  const ICONS = {
-    raw:       <path d="M2 10c2-4 4-6 6-6s4 2 6 6-4 6-6 6-4-2-6-6z" stroke="currentColor" strokeWidth="1.3" fill="none"/>,
-    filter:    <><path d="M3 5h14M6 10h8M9 15h2" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/></>,
-    normalize: <><rect x="3" y="7" width="14" height="6" rx="1" stroke="currentColor" strokeWidth="1.3" fill="none"/><path d="M7 7V5M10 7V3M13 7V5M7 13v2M10 13v4M13 13v2" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/></>,
-    features:  <><path d="M4 6h12M4 10h8M4 14h5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/><circle cx="15" cy="14" r="2" stroke="currentColor" strokeWidth="1.3" fill="none"/></>,
-    model:     <><circle cx="10" cy="7" r="2.5" stroke="currentColor" strokeWidth="1.3" fill="none"/><circle cx="5"  cy="14" r="2"   stroke="currentColor" strokeWidth="1.3" fill="none"/><circle cx="15" cy="14" r="2"   stroke="currentColor" strokeWidth="1.3" fill="none"/><path d="M8 9l-2 3M12 9l2 3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/></>,
-  };
+const BLOCK_ICONS = {
+  raw:       <path d="M2 10c2-4 4-6 6-6s4 2 6 6-4 6-6 6-4-2-6-6z" stroke="currentColor" strokeWidth="1.3" fill="none"/>,
+  filter:    <><path d="M3 5h14M6 10h8M9 15h2" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/></>,
+  normalize: <><rect x="3" y="7" width="14" height="6" rx="1" stroke="currentColor" strokeWidth="1.3" fill="none"/><path d="M7 7V5M10 7V3M13 7V5M7 13v2M10 13v4M13 13v2" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/></>,
+  features:  <><path d="M4 6h12M4 10h8M4 14h5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/><circle cx="15" cy="14" r="2" stroke="currentColor" strokeWidth="1.3" fill="none"/></>,
+  model:     <><circle cx="10" cy="7" r="2.5" stroke="currentColor" strokeWidth="1.3" fill="none"/><circle cx="5"  cy="14" r="2"   stroke="currentColor" strokeWidth="1.3" fill="none"/><circle cx="15" cy="14" r="2"   stroke="currentColor" strokeWidth="1.3" fill="none"/><path d="M8 9l-2 3M12 9l2 3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/></>,
+  custom:    <><path d="M6 7l-3 3 3 3M14 7l3 3-3 3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/><path d="M11 5l-2 10" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/></>,
+};
 
+function PipelineBlock({
+  block, isActive, isPast, onClick,
+  isFlashing, isAnimating, isAiBadged,
+  canSkip, canRemove, onSkipToggle, onRemove,
+  dragHandleProps,
+}) {
+  const isCustom   = block.type === "custom" || block.type === "standard";
+  const isSkipped  = block.skipped;
   const highlighted = isFlashing || isAnimating;
+  const icon = BLOCK_ICONS[block.id] ?? BLOCK_ICONS.custom;
+
   return (
-    <button
-      onClick={onClick}
-      className={`
-        relative flex flex-col items-center gap-2 px-4 py-3 rounded-xl border-2 transition-all duration-200
-        min-w-[90px] select-none
-        ${highlighted
-          ? "border-accent bg-accent/15 shadow-lg shadow-accent/30"
-          : isActive
-          ? "border-accent bg-accent/8 shadow-sm shadow-accent/20"
-          : isPast
-          ? "border-accent/30 bg-accent/3 text-gray-600 hover:border-accent/50"
-          : "border-gray-200 text-gray-400 hover:border-gray-300 hover:text-gray-600"}
-      `}
-      style={
-        highlighted
-          ? { backgroundColor: "rgba(29,158,117,0.12)" }
-          : isActive
-          ? { backgroundColor: "rgba(29,158,117,0.06)" }
-          : isPast
-          ? { backgroundColor: "rgba(29,158,117,0.02)" }
-          : {}
-      }
-    >
-      {/* Persistent AI badge */}
-      {isAiBadged && !highlighted && (
-        <span className="absolute top-1.5 right-1.5 text-[8px] font-bold bg-accent text-white px-1 py-0.5 rounded-sm leading-none tracking-wide">
-          AI
-        </span>
-      )}
-      <svg
-        viewBox="0 0 20 20"
-        className={`w-5 h-5 ${highlighted || isActive ? "text-accent" : isPast ? "text-accent/60" : "text-gray-300"}`}
-      >
-        {ICONS[block.id]}
-      </svg>
-      <div className="text-center">
-        <p className={`text-xs font-bold tracking-wide ${highlighted || isActive ? "text-accent" : isPast ? "text-gray-600" : "text-gray-400"}`}>
-          {block.label}
-        </p>
-        <p className={`text-xs mt-0.5 ${highlighted || isActive ? "text-accent/70" : "text-gray-300"}`}>
-          {block.sublabel}
-        </p>
-        {/* "AI applied" text — animates in when flashing, collapses otherwise */}
-        <p
-          className="text-[9px] font-bold text-accent uppercase tracking-widest overflow-hidden leading-none transition-all duration-300"
-          style={{
-            maxHeight: isFlashing ? "12px" : "0px",
-            opacity:   isFlashing ? 1 : 0,
-            marginTop: isFlashing ? "4px" : "0px",
-          }}
+    <div className="relative group flex-shrink-0">
+      {/* × skip/remove button — shows on hover */}
+      {(canSkip || canRemove) && (
+        <button
+          onClick={(e) => { e.stopPropagation(); canRemove ? onRemove() : onSkipToggle(); }}
+          className="absolute -top-1.5 -right-1.5 z-10 w-4 h-4 rounded-full bg-white border border-gray-200 flex items-center justify-center text-gray-400 hover:text-red-400 hover:border-red-300 transition-colors opacity-0 group-hover:opacity-100 shadow-sm"
+          title={canRemove ? "Remove block" : (isSkipped ? "Unskip block" : "Skip block")}
         >
-          AI applied
-        </p>
-      </div>
-    </button>
+          <span className="text-[10px] leading-none">×</span>
+        </button>
+      )}
+
+      <button
+        {...(dragHandleProps || {})}
+        onClick={onClick}
+        className={`
+          relative flex flex-col items-center gap-2 px-4 py-3 rounded-xl border-2 transition-all duration-200
+          min-w-[90px] select-none
+          ${isSkipped
+            ? "border-gray-100 bg-gray-50 opacity-60"
+            : highlighted
+            ? "border-accent bg-accent/15 shadow-lg shadow-accent/30"
+            : isActive && isCustom
+            ? "border-purple-400 shadow-sm shadow-purple-100"
+            : isActive
+            ? "border-accent bg-accent/8 shadow-sm shadow-accent/20"
+            : isPast
+            ? "border-accent/30 bg-accent/3 text-gray-600 hover:border-accent/50"
+            : isCustom
+            ? "border-purple-200 hover:border-purple-300"
+            : "border-gray-200 text-gray-400 hover:border-gray-300 hover:text-gray-600"
+          }
+        `}
+        style={
+          isSkipped      ? {}
+          : highlighted  ? { backgroundColor: "rgba(29,158,117,0.12)" }
+          : isActive && isCustom ? { backgroundColor: "rgba(124,58,237,0.06)" }
+          : isActive     ? { backgroundColor: "rgba(29,158,117,0.06)" }
+          : isPast       ? { backgroundColor: "rgba(29,158,117,0.02)" }
+          : isCustom     ? { backgroundColor: "rgba(124,58,237,0.02)" }
+          : {}
+        }
+      >
+        {/* AI badge */}
+        {isAiBadged && !highlighted && !isSkipped && (
+          <span className="absolute top-1 right-1 text-[8px] font-bold bg-accent text-white px-1 py-0.5 rounded-sm leading-none tracking-wide">
+            AI
+          </span>
+        )}
+
+        {/* Custom / Standard type badge */}
+        {isCustom && !isSkipped && (
+          <span className="absolute top-1 left-1 text-[8px] font-bold bg-purple-100 text-purple-600 px-1 py-0.5 rounded-sm leading-none tracking-wide">
+            {block.type === "standard" ? "STD" : "</>"}
+          </span>
+        )}
+
+        <svg
+          viewBox="0 0 20 20"
+          className={`w-5 h-5 ${
+            isSkipped           ? "text-gray-300"
+            : highlighted || (isActive && !isCustom) ? "text-accent"
+            : isActive && isCustom ? "text-purple-500"
+            : isPast            ? "text-accent/60"
+            : isCustom          ? "text-purple-400"
+            : "text-gray-300"
+          }`}
+        >
+          {icon}
+        </svg>
+
+        <div className="text-center">
+          <p className={`text-xs font-bold tracking-wide ${
+            isSkipped                           ? "line-through text-gray-300"
+            : highlighted || (isActive && !isCustom) ? "text-accent"
+            : isActive && isCustom              ? "text-purple-600"
+            : isPast                            ? "text-gray-600"
+            : isCustom                          ? "text-purple-500"
+            : "text-gray-400"
+          }`}>
+            {block.label || block.name}
+          </p>
+          {!isSkipped && (
+            <p className={`text-[10px] mt-0.5 ${
+              highlighted || (isActive && !isCustom) ? "text-accent/70"
+              : isActive && isCustom ? "text-purple-400"
+              : isCustom ? "text-purple-300"
+              : "text-gray-300"
+            }`}>
+              {block.sublabel || (isCustom ? (block.type === "standard" ? "Standard" : "Custom") : "")}
+            </p>
+          )}
+          {/* "AI applied" text */}
+          <p
+            className="text-[9px] font-bold text-accent uppercase tracking-widest overflow-hidden leading-none transition-all duration-300"
+            style={{ maxHeight: isFlashing ? "12px" : "0px", opacity: isFlashing ? 1 : 0, marginTop: isFlashing ? "4px" : "0px" }}
+          >
+            AI applied
+          </p>
+        </div>
+
+        {/* SKIPPED overlay */}
+        {isSkipped && (
+          <div className="absolute inset-0 flex items-center justify-center rounded-xl pointer-events-none">
+            <span className="text-[9px] font-bold text-gray-300 uppercase tracking-widest" style={{ transform: "rotate(-12deg)" }}>
+              SKIPPED
+            </span>
+          </div>
+        )}
+      </button>
+    </div>
   );
 }
 
@@ -1017,6 +1278,7 @@ export default function PipelineScreen({
   aiPipelineDesign, setAiPipelineDesign,
   aiConfiguredBlocks, setAiConfiguredBlocks,
   onGoToSetup,
+  pipelineBlocks, setPipelineBlocks,
 }) {
   const [activeBlock,    setActiveBlock]    = useState("filter");
   const [flashingBlock,  setFlashingBlock]  = useState(null);
@@ -1024,6 +1286,7 @@ export default function PipelineScreen({
   const [isDesigning,    setIsDesigning]    = useState(false);
   const [designError,    setDesignError]    = useState(null);
   const [dismissed,      setDismissed]      = useState(false);
+  const [showAddModal,   setShowAddModal]   = useState(false);
 
   // Consume pendingFlash from App: navigate to the block, flash it for 600ms
   useEffect(() => {
@@ -1069,7 +1332,8 @@ export default function PipelineScreen({
     setAiConfiguredBlocks?.((b) => ({ ...b, model: false }));
   };
 
-  const activeIdx = BLOCKS.findIndex((b) => b.id === activeBlock);
+  // For isPast: find active block position in pipelineBlocks (raw = -1)
+  const activeIdx = activeBlock === "raw" ? -1 : (pipelineBlocks || []).findIndex((b) => b.id === activeBlock);
 
   function applyRecommendedCutoff() {
     if (!analyzeResult) return;
@@ -1081,6 +1345,39 @@ export default function PipelineScreen({
     if (!analyzeResult) return;
     setNormCfgManual((c) => ({ ...c, window: analyzeResult.normalization_window.recommended_ms }));
     setActiveBlock("normalize");
+  }
+
+  // ── Pipeline block management ────────────────────────────────────────────────
+
+  function handleDragEnd(result) {
+    if (!result.destination || result.destination.index === result.source.index) return;
+    const items    = Array.from(pipelineBlocks || []);
+    const [moved]  = items.splice(result.source.index, 1);
+    items.splice(result.destination.index, 0, moved);
+    setPipelineBlocks?.(items);
+  }
+
+  function toggleSkip(blockId) {
+    setPipelineBlocks?.((blocks) =>
+      blocks.map((b) => b.id === blockId ? { ...b, skipped: !b.skipped } : b)
+    );
+  }
+
+  function removeBlock(blockId) {
+    setPipelineBlocks?.((blocks) => blocks.filter((b) => b.id !== blockId));
+    if (activeBlock === blockId) setActiveBlock("filter");
+  }
+
+  function addBlock(newBlock) {
+    setPipelineBlocks?.((blocks) => [...blocks, newBlock]);
+    setActiveBlock(newBlock.id);
+    setShowAddModal(false);
+  }
+
+  function updateBlockCode(blockId, code) {
+    setPipelineBlocks?.((blocks) =>
+      blocks.map((b) => b.id === blockId ? { ...b, code } : b)
+    );
   }
 
   // ── AI Pipeline Designer ─────────────────────────────────────────────────────
@@ -1162,6 +1459,16 @@ export default function PipelineScreen({
   const showDesignerPanel = !dismissed && (aiPipelineDesign || isDesigning || designError);
 
   function renderConfigPanel() {
+    // Check if activeBlock is a custom/standard block
+    const activeBlockObj = (pipelineBlocks || []).find((b) => b.id === activeBlock);
+    if (activeBlockObj && (activeBlockObj.type === "custom" || activeBlockObj.type === "standard")) {
+      return (
+        <CustomBlockPanel
+          block={activeBlockObj}
+          onUpdateCode={(code) => updateBlockCode(activeBlock, code)}
+        />
+      );
+    }
     switch (activeBlock) {
       case "raw":       return <RawPanel config={config} />;
       case "filter":    return <FilterPanel cfg={filterCfg} setCfg={setFilterCfgManual} />;
@@ -1254,35 +1561,111 @@ export default function PipelineScreen({
               )}
             </div>
 
-            <div className="flex items-center gap-1 overflow-x-auto pb-1">
-              {BLOCKS.map((block, i) => (
-                <React.Fragment key={block.id}>
-                  <PipelineBlock
-                    block={block}
-                    isActive={activeBlock === block.id}
-                    isPast={i < activeIdx}
-                    onClick={() => setActiveBlock(block.id)}
-                    isFlashing={flashingBlock === block.id}
-                    isAnimating={animatingBlock === block.id}
-                    isAiBadged={!!(aiConfiguredBlocks?.[block.id])}
-                  />
-                  {i < BLOCKS.length - 1 && <ChevronArrow lit={i < activeIdx} />}
-                </React.Fragment>
-              ))}
-            </div>
+            <DragDropContext onDragEnd={handleDragEnd}>
+              <div className="flex items-center gap-1 overflow-x-auto pb-1">
+                {/* Raw block — always first, static */}
+                <PipelineBlock
+                  block={{ id: "raw", label: "Raw Signal", sublabel: "Source", type: "builtin", skipped: false }}
+                  isActive={activeBlock === "raw"}
+                  isPast={false}
+                  onClick={() => setActiveBlock("raw")}
+                  isFlashing={false}
+                  isAnimating={false}
+                  isAiBadged={false}
+                />
+                <ChevronArrow lit={activeBlock !== "raw"} />
+
+                {/* Dynamic blocks (draggable) */}
+                <Droppable droppableId="pipeline-chain" direction="horizontal">
+                  {(provided) => (
+                    <div
+                      ref={provided.innerRef}
+                      {...provided.droppableProps}
+                      className="flex items-center gap-1"
+                    >
+                      {(pipelineBlocks || []).map((block, i) => {
+                        const blockIdx   = i;  // position in pipelineBlocks
+                        const isPast     = activeIdx > blockIdx;
+                        const canSkip    = block.type === "builtin" && block.id !== "model" && block.id !== "raw";
+                        const canRemove  = block.type === "custom" || block.type === "standard";
+                        const isLast     = i === (pipelineBlocks || []).length - 1;
+
+                        return (
+                          <Draggable key={block.id} draggableId={block.id} index={i}>
+                            {(drag) => (
+                              <div
+                                ref={drag.innerRef}
+                                {...drag.draggableProps}
+                                className="flex items-center gap-1"
+                              >
+                                <PipelineBlock
+                                  block={block}
+                                  isActive={activeBlock === block.id}
+                                  isPast={isPast}
+                                  onClick={() => setActiveBlock(block.id)}
+                                  isFlashing={flashingBlock === block.id}
+                                  isAnimating={animatingBlock === block.id}
+                                  isAiBadged={!!(aiConfiguredBlocks?.[block.id])}
+                                  canSkip={canSkip}
+                                  canRemove={canRemove}
+                                  onSkipToggle={() => toggleSkip(block.id)}
+                                  onRemove={() => removeBlock(block.id)}
+                                  dragHandleProps={drag.dragHandleProps}
+                                />
+                                {!isLast && (
+                                  <ChevronArrow lit={isPast && !block.skipped} dashed={block.skipped} />
+                                )}
+                              </div>
+                            )}
+                          </Draggable>
+                        );
+                      })}
+                      {provided.placeholder}
+                    </div>
+                  )}
+                </Droppable>
+
+                {/* + Add Block button */}
+                <button
+                  onClick={() => setShowAddModal(true)}
+                  className="flex-shrink-0 flex flex-col items-center gap-2 px-3 py-3 rounded-xl border-2 border-dashed border-gray-200 text-gray-300 hover:border-purple-300 hover:text-purple-400 hover:bg-purple-50/30 transition-all min-w-[72px]"
+                  title="Add a custom processing block"
+                >
+                  <svg viewBox="0 0 20 20" className="w-5 h-5" fill="none">
+                    <path d="M10 4v12M4 10h12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
+                  </svg>
+                  <span className="text-[10px] font-semibold tracking-wide">Add</span>
+                </button>
+              </div>
+            </DragDropContext>
           </div>
 
           {/* Config panel */}
           <div className="border border-gray-200 rounded-xl p-6 bg-white flex-1">
-            <div className="flex items-center gap-3 mb-6 pb-4 border-b border-gray-100">
-              <div className="w-2 h-2 rounded-full bg-accent" />
-              <h2 className="text-sm font-bold text-gray-800 tracking-wide uppercase">
-                {BLOCKS.find((b) => b.id === activeBlock)?.label}
-              </h2>
-              <span className="text-xs text-gray-400">
-                {BLOCKS.find((b) => b.id === activeBlock)?.sublabel}
-              </span>
-            </div>
+            {(() => {
+              const activeBlockObj  = (pipelineBlocks || []).find((b) => b.id === activeBlock);
+              const isCustomActive  = activeBlockObj && (activeBlockObj.type === "custom" || activeBlockObj.type === "standard");
+              const staticBlock     = activeBlock === "raw"
+                ? { label: "Raw Signal", sublabel: "Source" }
+                : (pipelineBlocks || []).find((b) => b.id === activeBlock)
+                  ?? { label: activeBlock, sublabel: "" };
+              return (
+                <div className="flex items-center gap-3 mb-6 pb-4 border-b border-gray-100">
+                  <div className={`w-2 h-2 rounded-full ${isCustomActive ? "bg-purple-500" : "bg-accent"}`} />
+                  <h2 className="text-sm font-bold text-gray-800 tracking-wide uppercase">
+                    {staticBlock.label || staticBlock.name}
+                  </h2>
+                  {isCustomActive && (
+                    <span className="text-[9px] font-bold bg-purple-100 text-purple-600 px-1.5 py-0.5 rounded tracking-wide uppercase">
+                      {activeBlockObj.type}
+                    </span>
+                  )}
+                  <span className="text-xs text-gray-400">
+                    {staticBlock.sublabel || (isCustomActive ? "Custom processing" : "")}
+                  </span>
+                </div>
+              );
+            })()}
 
             {/* Two-column: controls left, viz right */}
             <div className="flex gap-6">
@@ -1315,6 +1698,15 @@ export default function PipelineScreen({
           </div>
         </div>
       </div>
+
+      {/* ── Add Block Modal ──────────────────────────────────────────────────── */}
+      {showAddModal && (
+        <AddBlockModal
+          projectId={projectId}
+          onAdd={addBlock}
+          onClose={() => setShowAddModal(false)}
+        />
+      )}
     </div>
   );
 }

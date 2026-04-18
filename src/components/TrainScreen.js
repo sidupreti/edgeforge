@@ -298,7 +298,7 @@ const MODEL_TRAIN_STEPS = [
   { id: "nn",   label: "Neural Net" },
 ];
 
-export default function TrainScreen({ projectId, analyzeResult, pipelineConfig, onRetrain, chatHistory, setChatHistory, onApplyAction }) {
+export default function TrainScreen({ projectId, analyzeResult, pipelineConfig, pipelineBlocks, onRetrain, chatHistory, setChatHistory, onApplyAction }) {
   const [trainState,    setTrainState]    = useState("idle"); // idle | running | done | error
   const [progress,      setProgress]      = useState(0);
   const [currentModel,  setCurrentModel]  = useState("");
@@ -392,6 +392,9 @@ export default function TrainScreen({ projectId, analyzeResult, pipelineConfig, 
           interpolation:     pipelineConfig.normalize.interpolation,
           selected_features: selectedFeatures,
           model_type:        pipelineConfig.model,
+          custom_blocks:     (pipelineBlocks || [])
+            .filter(b => !b.skipped && (b.type === "custom" || b.type === "standard") && b.code)
+            .map(b => ({ id: b.id, name: b.name, code: b.code })),
         }),
       });
       if (!res.ok) {

@@ -42,6 +42,13 @@ const INITIAL_PIPELINE_CONFIG = {
   model: "auto",
 };
 
+const INITIAL_BLOCKS = [
+  { id: "filter",    type: "builtin",  name: "Filter",    skipped: false, code: null },
+  { id: "normalize", type: "builtin",  name: "Normalize", skipped: false, code: null },
+  { id: "features",  type: "builtin",  name: "Features",  skipped: false, code: null },
+  { id: "model",     type: "builtin",  name: "Model",     skipped: false, code: null },
+];
+
 export default function App() {
   const [activeStep, setActiveStep] = useState(0);
   const [config, setConfig] = useState(INITIAL_CONFIG);
@@ -56,6 +63,7 @@ export default function App() {
   const [pendingFlash,       setPendingFlash]       = useState(null);
   const [aiPipelineDesign,   setAiPipelineDesign]   = useState(null);
   const [aiConfiguredBlocks, setAiConfiguredBlocks] = useState({});
+  const [pipelineBlocks,     setPipelineBlocks]     = useState(INITIAL_BLOCKS);
 
   const goBack = () => setActiveStep((s) => Math.max(s - 1, 0));
 
@@ -163,6 +171,8 @@ export default function App() {
           aiConfiguredBlocks={aiConfiguredBlocks}
           setAiConfiguredBlocks={setAiConfiguredBlocks}
           onGoToSetup={() => setActiveStep(0)}
+          pipelineBlocks={pipelineBlocks}
+          setPipelineBlocks={setPipelineBlocks}
         />
       );
     }
@@ -172,6 +182,7 @@ export default function App() {
           projectId={projectId}
           analyzeResult={analyzeResult}
           pipelineConfig={pipelineConfig}
+          pipelineBlocks={pipelineBlocks}
           onRetrain={() => setActiveStep(2)}
           chatHistory={chatHistory}
           setChatHistory={setChatHistory}
