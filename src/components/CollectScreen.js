@@ -553,13 +553,13 @@ export default function CollectScreen({ config, projectId, analyzeResult, onAnal
       </div>
 
       {/* ── RIGHT PANEL ─────────────────────────────────────────────────────── */}
-      <div className="w-56 flex-shrink-0 flex flex-col gap-4 min-h-0">
+      <div className="w-56 flex-shrink-0 flex flex-col gap-4 min-h-0 overflow-hidden">
 
-        {/* Class manager */}
-        <div className="flex-1 flex flex-col min-h-0 border border-gray-200 rounded-lg overflow-hidden">
+        {/* ── Classes panel — always visible at top, natural height ─────────── */}
+        <div className="flex-shrink-0 border border-gray-200 rounded-lg overflow-hidden">
 
           {/* Header */}
-          <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100 flex-shrink-0">
+          <div className="flex items-center justify-between px-4 py-3 border-b border-gray-100">
             <h3 className="text-xs uppercase tracking-widest text-gray-500">Classes</h3>
             <button
               onClick={() => setShowAddClass((v) => !v)}
@@ -571,7 +571,7 @@ export default function CollectScreen({ config, projectId, analyzeResult, onAnal
 
           {/* Inline add input */}
           {showAddClass && (
-            <div className="px-3 py-2 border-b border-gray-100 flex gap-2 flex-shrink-0">
+            <div className="px-3 py-2 border-b border-gray-100 flex gap-2">
               <input
                 autoFocus
                 value={newClassName}
@@ -593,8 +593,8 @@ export default function CollectScreen({ config, projectId, analyzeResult, onAnal
             </div>
           )}
 
-          {/* Class list */}
-          <div className="flex-1 overflow-y-auto min-h-0 divide-y divide-gray-50">
+          {/* Class list — scrollable if many classes, capped so panel doesn't grow unbounded */}
+          <div className="divide-y divide-gray-50 overflow-y-auto" style={{ maxHeight: "220px" }}>
             {classes.map((cls) => {
               const count  = events.filter((e) => e.classId === cls.id).length;
               const pct    = Math.min(100, (count / TARGET_COUNT) * 100);
@@ -638,10 +638,10 @@ export default function CollectScreen({ config, projectId, analyzeResult, onAnal
           </div>
         </div>
 
-        {/* Copilot panel */}
-        <div className="flex-shrink-0 border border-gray-200 rounded-lg overflow-hidden">
+        {/* ── Copilot panel — fills remaining space, scrolls internally ─────── */}
+        <div className="flex-1 min-h-0 border border-gray-200 rounded-lg overflow-hidden flex flex-col">
           {/* Header */}
-          <div className="flex items-center gap-2 px-3 py-2.5 border-b border-gray-100 bg-white">
+          <div className="flex-shrink-0 flex items-center gap-2 px-3 py-2.5 border-b border-gray-100 bg-white">
             <div className="w-3.5 h-3.5 rounded-full bg-accent/20 flex items-center justify-center flex-shrink-0">
               <div
                 className={`w-1.5 h-1.5 rounded-full bg-accent ${
@@ -660,8 +660,8 @@ export default function CollectScreen({ config, projectId, analyzeResult, onAnal
             )}
           </div>
 
-          {/* Body */}
-          <div className="bg-gray-50 p-3 space-y-3 overflow-y-auto">
+          {/* Body — this is the scrollable region */}
+          <div className="flex-1 min-h-0 overflow-y-auto bg-gray-50 p-3 space-y-3">
 
             {/* ── idle ── */}
             {copilot.status === "idle" && (
