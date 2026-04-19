@@ -3,6 +3,15 @@ import API_BASE_URL from "../config";
 
 const MODEL_LABELS = { auto: "Auto-select", rf: "Random Forest", svm: "SVM", nn: "Neural Net" };
 
+const CHIPS = [
+  { id: "generic", label: "Generic ARM",  sub: "Cortex-M / C99",        freq: null,  arm: true  },
+  { id: "esp32",   label: "ESP32",        sub: "Xtensa LX6 240 MHz",    freq: 240,   arm: false },
+  { id: "stm32",   label: "STM32",        sub: "Cortex-M4 168 MHz",     freq: 168,   arm: true  },
+  { id: "nrf",     label: "nRF52840",     sub: "Cortex-M4 64 MHz",      freq: 64,    arm: true  },
+  { id: "arduino", label: "Arduino BLE",  sub: "nRF52840 64 MHz",       freq: 64,    arm: true  },
+  { id: "rp2040",  label: "RP2040",       sub: "Cortex-M0+ 133 MHz",    freq: 133,   arm: true  },
+];
+
 // ── Helpers ────────────────────────────────────────────────────────────────────
 
 function generatePythonPreview(projectId, pipelineConfig, trainingStatus) {
@@ -136,6 +145,67 @@ function generateEfpPreview(projectId, pipelineConfig, trainingStatus) {
   }, null, 2);
 }
 
+function generateCPreview(projectId, pipelineConfig, trainingStatus, chip) {
+  const results   = trainingStatus?.results;
+  const classes   = results?.class_labels ?? ["class_0", "class_1"];
+  const cutoff    = pipelineConfig.filter.cutoff;
+  const winMs     = pipelineConfig.normalize.window;
+  const nSamples  = Math.max(2, Math.round((winMs * 100) / 1000));
+  const featCount = Object.values(pipelineConfig.features).filter(Boolean).length * 3;
+  const bestM     = results?.models?.find((m) => m.id === results.best_model_id);
+  const modelName = bestM ? MODEL_LABELS[bestM.id] ?? bestM.id : "Auto-select";
+  const chipObj   = CHIPS.find((c) => c.id === chip) ?? CHIPS[0];
+  const chipNote  = chipObj.arm
+    ? `/* Target: ${chipObj.label} — consider CMSIS-DSP for ef_dom_freq */`
+    : `/* Target: ${chipObj.label} — IRAM_ATTR on hot paths recommended */`;
+
+  return `/*
+ * EdgeForge — auto-generated on-device classifier
+ * -----------------------------------------------
+ * Project  : ${projectId ?? "demo-project"}
+ * Model    : ${modelName}
+ * Classes  : ${JSON.stringify(classes)}
+ * Features : ${featCount}
+ * ${chipNote.slice(3, -3).trim()}
+ *
+ * Usage
+ * -----
+ *   #include "classifier.h"
+ *   int8_t idx = ef_classify(ax, ay, az, EF_WINDOW_SAMPLES);
+ *   const char *label = EF_CLASSES[idx];
+ *
+ * Note: weights are placeholders — download for real values.
+ */
+
+#pragma once
+#include <stdint.h>
+#include <math.h>
+#include <string.h>
+
+/* ── Pipeline config ─────────────────────────────────────────────────────── */
+#define EF_SAMPLE_RATE_HZ  100
+#define EF_CUTOFF_HZ       ${cutoff}
+#define EF_WINDOW_MS       ${winMs}
+#define EF_WINDOW_SAMPLES  ${nSamples}
+#define EF_N_CLASSES       ${classes.length}
+#define EF_N_FEATURES      ${featCount}
+
+/* ── Class labels ────────────────────────────────────────────────────────── */
+static const char *EF_CLASSES[${classes.length}] = { ${classes.map((c) => `"${c}"`).join(", ")} };
+
+/* ── Butterworth IIR coefficients — order 4 ──────────────────────────────── */
+/* (real values computed from cutoff at download time) */
+static const float EF_FILTER_B[5] = { 0.0f, 0.0f, 0.0f, 0.0f, 0.0f };
+static const float EF_FILTER_A[5] = { 1.0f, 0.0f, 0.0f, 0.0f, 0.0f };
+
+/* ── Model weights — truncated preview ───────────────────────────────────── */
+/* Download the full header for complete weight arrays */
+
+/* ── Public API ──────────────────────────────────────────────────────────── */
+static int8_t ef_classify(
+    const float *ax, const float *ay, const float *az, uint16_t n);`;
+}
+
 // ── Option card ────────────────────────────────────────────────────────────────
 
 function OptionCard({ id, selected, onSelect, icon, title, subtitle, tag, tagColor, comingSoon, children }) {
@@ -216,7 +286,9 @@ function CodePreview({ code, language = "python" }) {
               <div key={c} className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: c }} />
             ))}
           </div>
-          <span className="text-xs text-gray-400 ml-2">{language === "python" ? "session.py" : "project.efp"}</span>
+          <span className="text-xs text-gray-400 ml-2">
+            {language === "python" ? "session.py" : language === "c" ? "classifier.h" : "project.efp"}
+          </span>
         </div>
         <button
           onClick={copy}
@@ -294,6 +366,90 @@ function SummaryCard({ pipelineConfig, trainingStatus }) {
   );
 }
 
+// ── Chip selector ──────────────────────────────────────────────────────────────
+
+function ChipSelector({ chip, setChip }) {
+  return (
+    <div className="flex flex-wrap gap-2">
+      {CHIPS.map((c) => (
+        <button
+          key={c.id}
+          onClick={() => setChip(c.id)}
+          className={`flex flex-col items-start px-3 py-2 rounded-lg border text-left transition-all ${
+            chip === c.id
+              ? "border-accent bg-accent/5 shadow-sm"
+              : "border-gray-200 hover:border-gray-300"
+          }`}
+        >
+          <span className={`text-xs font-semibold ${chip === c.id ? "text-accent" : "text-gray-700"}`}>
+            {c.label}
+          </span>
+          <span className="text-[10px] text-gray-400 mt-0.5">{c.sub}</span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// ── Resource usage estimate ─────────────────────────────────────────────────────
+
+function ResourceUsage({ trainingStatus, pipelineConfig, chip }) {
+  const results    = trainingStatus?.results;
+  const modelId    = results?.best_model_id ?? "rf";
+  const nClasses   = results?.class_labels?.length ?? 2;
+  const nFeat      = Object.values(pipelineConfig.features).filter(Boolean).length * 3;
+  const chipObj    = CHIPS.find((c) => c.id === chip) ?? CHIPS[0];
+  const freqMhz    = chipObj.freq ?? 120;
+
+  // Rough flash estimates (bytes)
+  const flashModel = modelId === "rf"
+    ? 8 * 200 * 5 * 4          // 8 trees × ~200 nodes × 5 arrays × 4 bytes
+    : modelId === "svm"
+    ? nFeat * 50 * 4 * 2       // ~50 SVs × n_feat × dual_coef
+    : (nFeat * 64 + 64 * 32 + 32 * nClasses) * 4;  // NN weights
+  const flashScaler  = nFeat * 2 * 4;
+  const flashFilter  = 5 * 2 * 4;
+  const flashTotal   = flashModel + flashScaler + flashFilter + 1024; // +1KB code
+  const flashKb      = (flashTotal / 1024).toFixed(1);
+
+  // RAM: filter state + feature vec + model buffer
+  const ramFeat    = nFeat * 4;
+  const ramFilter  = 3 * 4 * 4;  // 3 axes × 4 state values × 4 bytes
+  const ramWindows = 3 * (Math.max(2, Math.round((pipelineConfig.normalize.window * 100) / 1000))) * 4;
+  const ramModel   = modelId === "nn" ? 64 * 4 : 0;
+  const ramTotal   = ramFeat + ramFilter + ramWindows + ramModel;
+  const ramKb      = (ramTotal / 1024).toFixed(1);
+
+  // Inference time estimate (very rough, based on dominant_freq DFT)
+  const nSamples   = Math.max(2, Math.round((pipelineConfig.normalize.window * 100) / 1000));
+  const dftOps     = nSamples * nSamples * 3;  // 3 axes
+  const cyclesEst  = dftOps * 20 + nFeat * 50;  // ~20 cycles/op, 50 cycles/feat op
+  const timeMs     = ((cyclesEst / (freqMhz * 1e6)) * 1000).toFixed(1);
+
+  const rows = [
+    { label: "Flash (weights + code)", value: `~${flashKb} KB` },
+    { label: "RAM (buffers + state)",  value: `~${ramKb} KB`   },
+    { label: "Inference time",         value: `~${timeMs} ms @ ${freqMhz} MHz` },
+  ];
+
+  return (
+    <div className="border border-gray-200 rounded-xl p-4">
+      <p className="text-xs text-gray-400 uppercase tracking-widest mb-3">Resource estimates</p>
+      <div className="grid grid-cols-3 gap-4">
+        {rows.map(({ label, value }) => (
+          <div key={label}>
+            <p className="text-xs text-gray-400 mb-0.5">{label}</p>
+            <p className="text-sm font-semibold text-gray-700">{value}</p>
+          </div>
+        ))}
+      </div>
+      <p className="text-[10px] text-gray-300 mt-3">
+        Estimates assume mean/std/rms/peak features. DFT-based features (dominant_freq) dominate inference time.
+      </p>
+    </div>
+  );
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 
 const OPTIONS = [
@@ -313,17 +469,18 @@ const OPTIONS = [
     tagColor: "bg-accent/10 text-accent",
   },
   {
-    id:          "c",
-    title:       "C header file",
-    subtitle:    "On-device inference — runs directly on the target MCU without an OS or runtime.",
-    icon:        (
+    id:       "c",
+    title:    "C header file",
+    subtitle: "On-device inference — runs directly on the target MCU without an OS or runtime.",
+    icon:     (
       <>
         <rect x="2" y="3" width="16" height="14" rx="2" stroke="currentColor" strokeWidth="1.2" fill="none"/>
         <path d="M8 7.5C7.5 6.5 6 6 5 7.5v3C6 12 7.5 11.5 8 10.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
         <path d="M12 7.5C11.5 6.5 10 6 9 7.5v3c1 1.5 2.5 1 3 0" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
       </>
     ),
-    comingSoon:  true,
+    tag:      ".h",
+    tagColor: "bg-blue-50 text-blue-500",
   },
   {
     id:       "efp",
@@ -343,6 +500,7 @@ const OPTIONS = [
 
 export default function ExportScreen({ projectId, pipelineConfig }) {
   const [selected,       setSelected]       = useState("python");
+  const [chip,           setChip]           = useState("generic");
   const [trainingStatus, setTrainingStatus] = useState(null);
   const [downloading,    setDownloading]    = useState(false);
   const [downloadError,  setDownloadError]  = useState(null);
@@ -374,17 +532,23 @@ export default function ExportScreen({ projectId, pipelineConfig }) {
   }, [projectId, localProjectId]);
 
   const effectiveProjectId = projectId ?? localProjectId ?? "demo-project";
-  const canDownload        = selected !== "c" && Boolean(trainingStatus?.results);
+  const canDownload        = Boolean(trainingStatus?.results);
 
   async function download() {
     if (!canDownload || downloading) return;
     setDownloading(true);
     setDownloadError(null);
 
-    const url      = selected === "python"
+    const url = selected === "python"
       ? `${API_BASE_URL}/export/python/${effectiveProjectId}`
+      : selected === "c"
+      ? `${API_BASE_URL}/export/c/${effectiveProjectId}?chip=${chip}`
       : `${API_BASE_URL}/export/efp/${effectiveProjectId}`;
-    const filename = selected === "python" ? "session.py" : `${effectiveProjectId}.efp`;
+    const filename = selected === "python"
+      ? "session.py"
+      : selected === "c"
+      ? `${effectiveProjectId}_classifier.h`
+      : `${effectiveProjectId}.efp`;
 
     try {
       const res = await fetch(url);
@@ -408,6 +572,8 @@ export default function ExportScreen({ projectId, pipelineConfig }) {
 
   const previewCode = selected === "python"
     ? generatePythonPreview(effectiveProjectId, pipelineConfig, trainingStatus)
+    : selected === "c"
+    ? generateCPreview(effectiveProjectId, pipelineConfig, trainingStatus, chip)
     : selected === "efp"
     ? generateEfpPreview(effectiveProjectId, pipelineConfig, trainingStatus)
     : null;
@@ -427,24 +593,14 @@ export default function ExportScreen({ projectId, pipelineConfig }) {
         ))}
       </div>
 
-      {/* ── C coming soon banner ──────────────────────────────────────────────── */}
+      {/* ── C: chip selector + resource estimates ────────────────────────────── */}
       {selected === "c" && (
-        <div className="border border-amber-200 bg-amber-50 rounded-xl p-6 flex items-start gap-4">
-          <div className="w-10 h-10 rounded-lg bg-amber-100 flex items-center justify-center flex-shrink-0">
-            <svg className="w-5 h-5 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
-                d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
-            </svg>
+        <div className="flex flex-col gap-3">
+          <div className="border border-gray-200 rounded-xl p-4">
+            <p className="text-xs text-gray-400 uppercase tracking-widest mb-3">Target MCU</p>
+            <ChipSelector chip={chip} setChip={setChip} />
           </div>
-          <div>
-            <p className="text-sm font-semibold text-amber-800 mb-1">Coming soon — on-device inference</p>
-            <p className="text-xs text-amber-700 leading-relaxed">
-              EdgeForge will generate optimised C source files for your target MCU — a{" "}
-              <code className="bg-amber-100 px-1 rounded font-mono">model.h</code> with quantized weights and a{" "}
-              <code className="bg-amber-100 px-1 rounded font-mono">classify.c</code> with the full inference pipeline
-              that compiles with no external dependencies.
-            </p>
-          </div>
+          <ResourceUsage trainingStatus={trainingStatus} pipelineConfig={pipelineConfig} chip={chip} />
         </div>
       )}
 
@@ -466,6 +622,8 @@ export default function ExportScreen({ projectId, pipelineConfig }) {
             <p className="text-xs text-gray-400">
               {selected === "python"
                 ? "The downloaded file contains full model weights and is self-contained."
+                : selected === "c"
+                ? "The .h header is self-contained — no external dependencies, compile with -lm."
                 : "The .efp bundle includes pipeline config, class labels, and training results."}
             </p>
             <button
@@ -487,6 +645,8 @@ export default function ExportScreen({ projectId, pipelineConfig }) {
                 ? "Downloading…"
                 : selected === "python"
                 ? "Download session.py"
+                : selected === "c"
+                ? `Download classifier.h`
                 : `Download ${effectiveProjectId}.efp`}
             </button>
           </div>
