@@ -104,18 +104,19 @@ function parseCSVText(text) {
   return { ax, ay, az, rowCount: ax.length, durationMs: Math.round(durationMs) };
 }
 
-function detectClassFromFilename(filename, classes) {
+function detectClassFromFilename(filename, classes, fallbackClassId) {
   const lower = filename.toLowerCase().replace(/[_\-\s.]/g, " ");
   for (const cls of classes) {
     if (lower.includes(cls.name.toLowerCase())) return cls.id;
   }
-  return classes[0]?.id ?? null;
+  // Fall back to active class, then first class
+  return fallbackClassId ?? classes[0]?.id ?? null;
 }
 
 // ── File upload mode ──────────────────────────────────────────────────────────
 
 function FileUploadMode({
-  classes, events, setEvents, onAnalysisReady,
+  classes, activeClassId, events, setEvents, onAnalysisReady,
   projectId, analyzeResult, separabilityNote,
   copilot, setCopilot,
 }) {
@@ -128,7 +129,7 @@ function FileUploadMode({
   const addFiles = useCallback((newFiles) => {
     const entries = Array.from(newFiles).map((f) => ({
       file: f, name: f.name, parsed: null,
-      classId: detectClassFromFilename(f.name, classes),
+      classId: detectClassFromFilename(f.name, classes, activeClassId),
       error: null, reading: true,
     }));
 
@@ -155,7 +156,7 @@ function FileUploadMode({
     });
 
     setFileEntries((prev) => [...prev, ...entries]);
-  }, [classes]);
+  }, [classes, activeClassId]);
 
   function handleDrop(e) {
     e.preventDefault();
@@ -309,13 +310,27 @@ function FileUploadMode({
                 </div>
               )}
 
-              {/* File info */}
+              {/* File info — class label prominent, filename secondary */}
               <div className="flex-1 min-w-0">
-                <p className="text-xs font-semibold text-gray-700 truncate">{entry.name}</p>
+                {(() => {
+                  const assignedCls = classes.find((c) => c.id === entry.classId);
+                  return assignedCls && !entry.error ? (
+                    <div className="flex items-center gap-1.5 mb-0.5">
+                      <span
+                        className="w-2 h-2 rounded-full flex-shrink-0"
+                        style={{ backgroundColor: assignedCls.color }}
+                      />
+                      <span className="text-xs font-bold" style={{ color: assignedCls.color }}>
+                        {assignedCls.name}
+                      </span>
+                    </div>
+                  ) : null;
+                })()}
+                <p className="text-xs text-gray-400 truncate">{entry.name}</p>
                 {entry.error ? (
                   <p className="text-xs text-red-500 mt-0.5">{entry.error}</p>
                 ) : entry.parsed ? (
-                  <p className="text-xs text-gray-400 mt-0.5 tabular-nums">
+                  <p className="text-[10px] text-gray-300 mt-0.5 tabular-nums">
                     {entry.parsed.rowCount} rows · {entry.parsed.durationMs} ms
                   </p>
                 ) : null}
@@ -326,9 +341,9 @@ function FileUploadMode({
                 <select
                   value={entry.classId ?? ""}
                   onChange={(e) => setEntryClass(idx, e.target.value)}
-                  className="text-xs border border-gray-200 rounded px-1.5 py-1 text-gray-700
+                  className="text-xs border border-gray-200 rounded px-1.5 py-1 text-gray-600
                              focus:outline-none focus:border-accent bg-white flex-shrink-0"
-                  style={{ maxWidth: "90px" }}
+                  style={{ maxWidth: "88px" }}
                 >
                   {classes.map((cls) => (
                     <option key={cls.id} value={cls.id}>{cls.name}</option>
@@ -404,15 +419,19 @@ function FileUploadMode({
               className="flex items-center gap-3 px-3 py-2 bg-white border border-gray-100 rounded hover:border-gray-200 group transition-colors"
             >
               <WaveformThumb data={ev.waveform} color={ev.waveColor} />
-              <div className="flex-1 min-w-0 flex items-center gap-2 flex-wrap">
-                <span
-                  className="text-xs font-semibold px-1.5 py-0.5 rounded"
-                  style={{ color: ev.classColor, backgroundColor: `${ev.classColor}1a` }}
-                >
-                  {ev.className}
-                </span>
-                <span className="text-xs text-gray-400 tabular-nums">{ev.duration} ms</span>
-                {ev.filename && <span className="text-xs text-gray-300 truncate max-w-[80px]">{ev.filename}</span>}
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2">
+                  <span
+                    className="text-xs font-bold px-1.5 py-0.5 rounded"
+                    style={{ color: ev.classColor, backgroundColor: `${ev.classColor}1a` }}
+                  >
+                    {ev.className}
+                  </span>
+                  <span className="text-xs text-gray-400 tabular-nums">{ev.duration} ms</span>
+                </div>
+                {ev.filename && (
+                  <p className="text-[10px] text-gray-300 mt-0.5 truncate">{ev.filename}</p>
+                )}
               </div>
               <button
                 onClick={() => setEvents((prev) => prev.filter((e) => e.id !== ev.id))}
@@ -782,6 +801,7 @@ export default function CollectScreen({ config, projectId, analyzeResult, onAnal
       {isFileUpload ? (
         <FileUploadMode
           classes={classes}
+          activeClassId={activeClassId}
           events={events}
           setEvents={setEvents}
           onAnalysisReady={onAnalysisReady}
