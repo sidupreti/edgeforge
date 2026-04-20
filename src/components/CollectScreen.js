@@ -1,4 +1,4 @@
-import React, { useRef, useEffect, useState } from "react";
+import React, { useRef, useEffect, useState, useCallback } from "react";
 import API_BASE_URL from "../config";
 import CopilotChat from "./CopilotChat";
 
@@ -63,10 +63,377 @@ function WaveformThumb({ data, color = "#1D9E75", w = 64, h = 28 }) {
   );
 }
 
+// ── CSV parser (browser-side, for preview) ────────────────────────────────────
+
+const UPLOAD_COL_MAP = {
+  t: "timestamp", time: "timestamp", ts: "timestamp", time_us: "timestamp",
+  x: "a_x", ax: "a_x", accel_x: "a_x", acc_x: "a_x",
+  y: "a_y", ay: "a_y", accel_y: "a_y", acc_y: "a_y",
+  z: "a_z", az: "a_z", accel_z: "a_z", acc_z: "a_z",
+};
+
+function parseCSVText(text) {
+  const lines = text.trim().split("\n").filter((l) => l.trim() && !l.startsWith("#"));
+  if (lines.length < 2) return null;
+  const sep     = lines[0].includes("\t") ? "\t" : ",";
+  const rawHdrs = lines[0].split(sep).map((h) => h.trim().toLowerCase());
+  const hdrs    = rawHdrs.map((h) => UPLOAD_COL_MAP[h] ?? h);
+
+  const tsIdx = hdrs.indexOf("timestamp");
+  const axIdx = hdrs.indexOf("a_x");
+  const ayIdx = hdrs.indexOf("a_y");
+  const azIdx = hdrs.indexOf("a_z");
+  if (axIdx === -1) return null;
+
+  const ax = [], ay = [], az = [], ts = [];
+  for (let i = 1; i < lines.length; i++) {
+    const parts = lines[i].split(sep).map((p) => p.trim());
+    const xv = parseFloat(parts[axIdx]);
+    if (isNaN(xv)) continue;
+    ax.push(xv);
+    ay.push(ayIdx >= 0 ? (parseFloat(parts[ayIdx]) || 0) : 0);
+    az.push(azIdx >= 0 ? (parseFloat(parts[azIdx]) || 0) : 0);
+    ts.push(tsIdx >= 0 ? (parseFloat(parts[tsIdx]) || 10000) : 10000);
+  }
+  if (ax.length < 2) return null;
+
+  // Convert absolute timestamps to diffs if needed
+  const tArr = ts[0] > 1e9 ? ts.map((v, i) => (i === 0 ? ts[1] - ts[0] : ts[i] - ts[i - 1])) : ts;
+  const durationMs = tArr.reduce((s, v) => s + Math.abs(v), 0) / 1000;
+
+  return { ax, ay, az, rowCount: ax.length, durationMs: Math.round(durationMs) };
+}
+
+function detectClassFromFilename(filename, classes) {
+  const lower = filename.toLowerCase().replace(/[_\-\s.]/g, " ");
+  for (const cls of classes) {
+    if (lower.includes(cls.name.toLowerCase())) return cls.id;
+  }
+  return classes[0]?.id ?? null;
+}
+
+// ── File upload mode ──────────────────────────────────────────────────────────
+
+function FileUploadMode({
+  classes, events, setEvents, onAnalysisReady,
+  projectId, analyzeResult, separabilityNote,
+  copilot, setCopilot,
+}) {
+  const [fileEntries,  setFileEntries]  = useState([]); // {file, name, parsed, classId, error}
+  const [uploading,    setUploading]    = useState(false);
+  const [uploadError,  setUploadError]  = useState(null);
+  const [dragOver,     setDragOver]     = useState(false);
+  const inputRef = useRef(null);
+
+  const addFiles = useCallback((newFiles) => {
+    const entries = Array.from(newFiles).map((f) => ({
+      file: f, name: f.name, parsed: null,
+      classId: detectClassFromFilename(f.name, classes),
+      error: null, reading: true,
+    }));
+
+    // Read file contents async
+    entries.forEach((entry) => {
+      const reader = new FileReader();
+      reader.onload = (e) => {
+        const result = parseCSVText(e.target.result);
+        setFileEntries((prev) => {
+          const updated = [...prev];
+          const realIdx = prev.findIndex((p) => p.file === entry.file);
+          if (realIdx >= 0) {
+            updated[realIdx] = {
+              ...updated[realIdx],
+              parsed:  result,
+              error:   result ? null : "Could not parse — expected timestamp,a_x,a_y,a_z columns",
+              reading: false,
+            };
+          }
+          return updated;
+        });
+      };
+      reader.readAsText(entry.file);
+    });
+
+    setFileEntries((prev) => [...prev, ...entries]);
+  }, [classes]);
+
+  function handleDrop(e) {
+    e.preventDefault();
+    setDragOver(false);
+    if (e.dataTransfer.files.length) addFiles(e.dataTransfer.files);
+  }
+
+  function handleDragOver(e) { e.preventDefault(); setDragOver(true); }
+  function handleDragLeave()  { setDragOver(false); }
+
+  function removeEntry(idx) {
+    setFileEntries((prev) => prev.filter((_, i) => i !== idx));
+  }
+
+  function setEntryClass(idx, classId) {
+    setFileEntries((prev) => prev.map((e, i) => i === idx ? { ...e, classId } : e));
+  }
+
+  const goodEntries = fileEntries.filter((e) => e.parsed && !e.error);
+
+  async function addToDataset() {
+    if (!goodEntries.length || uploading) return;
+    setUploading(true);
+    setUploadError(null);
+
+    const formData = new FormData();
+    formData.append("project_id", projectId ?? "demo-project");
+    for (const entry of goodEntries) {
+      formData.append("files", entry.file);
+      const cls = classes.find((c) => c.id === entry.classId);
+      formData.append("labels", cls?.name ?? entry.classId);
+    }
+
+    try {
+      const res = await fetch(`${API_BASE_URL}/upload-events`, {
+        method: "POST",
+        body:   formData,
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.detail?.message ?? body.detail ?? `Server error ${res.status}`);
+      }
+      const data = await res.json();
+
+      // Add returned events into the events list
+      const newEvents = data.events.map((ev) => {
+        const cls   = classes.find((c) => c.name === ev.class_label) ?? classes[0];
+        return {
+          id:         ev.id,
+          classId:    cls?.id    ?? "cls-event",
+          className:  ev.class_label,
+          classColor: cls?.color ?? "#1D9E75",
+          waveform:   ev.waveform_az ?? [],
+          waveColor:  AXIS_COLORS.az,
+          duration:   ev.duration_ms,
+          timestamp:  new Date().toLocaleTimeString(),
+          snapshot:   { ax: [], ay: [], az: ev.waveform_az ?? [] },
+          filename:   ev.filename,
+        };
+      });
+      setEvents((prev) => [...newEvents, ...prev]);
+
+      // Trigger analysis update
+      if (data.analysis) {
+        onAnalysisReady?.(data.analysis, null);
+        setCopilot({ status: "ready", data: data.analysis, error: null });
+      }
+
+      // Clear processed files (keep files with errors)
+      setFileEntries((prev) => prev.filter((e) => !e.parsed || e.error));
+    } catch (err) {
+      setUploadError(err.message);
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  return (
+    <div className="flex-1 flex flex-col min-h-0 gap-3">
+
+      {/* ── Drop zone ──────────────────────────────────────────────────────── */}
+      <div
+        onDrop={handleDrop}
+        onDragOver={handleDragOver}
+        onDragLeave={handleDragLeave}
+        onClick={() => !fileEntries.length && inputRef.current?.click()}
+        className={`
+          flex-shrink-0 flex flex-col items-center justify-center gap-3
+          rounded-lg border-2 border-dashed cursor-pointer transition-all
+          ${dragOver
+            ? "border-accent bg-accent/5"
+            : "border-gray-600 bg-gray-900 hover:border-gray-500"
+          }
+        `}
+        style={{ minHeight: "140px" }}
+      >
+        <input
+          ref={inputRef}
+          type="file"
+          accept=".csv,.txt"
+          multiple
+          className="hidden"
+          onChange={(e) => { if (e.target.files?.length) addFiles(e.target.files); e.target.value = ""; }}
+        />
+        <svg className={`w-8 h-8 ${dragOver ? "text-accent" : "text-gray-600"}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.3}
+            d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+        </svg>
+        <div className="text-center">
+          <p className={`text-sm font-semibold ${dragOver ? "text-accent" : "text-gray-400"}`}>
+            {dragOver ? "Drop to upload" : "Drop sensor data files here"}
+          </p>
+          <p className="text-xs text-gray-600 mt-0.5">CSV or TXT — columns: timestamp, a_x, a_y, a_z</p>
+        </div>
+        <div className="flex items-center gap-3">
+          <button
+            onClick={(e) => { e.stopPropagation(); inputRef.current?.click(); }}
+            className="text-xs text-gray-500 hover:text-gray-300 border border-gray-700 hover:border-gray-500 rounded px-3 py-1 transition-colors"
+          >
+            Browse files
+          </button>
+          <a
+            href="/sample-data/metal_tap.csv"
+            download
+            onClick={(e) => e.stopPropagation()}
+            className="text-xs text-accent hover:text-accent-dark transition-colors"
+          >
+            Download sample data →
+          </a>
+        </div>
+      </div>
+
+      {/* ── File cards ─────────────────────────────────────────────────────── */}
+      {fileEntries.length > 0 && (
+        <div className="flex flex-col gap-2 flex-shrink-0">
+          {fileEntries.map((entry, idx) => (
+            <div
+              key={idx}
+              className={`flex items-center gap-3 px-3 py-2.5 rounded-lg border ${
+                entry.error ? "border-red-200 bg-red-50" : "border-gray-200 bg-white"
+              }`}
+            >
+              {/* Waveform preview */}
+              {entry.parsed ? (
+                <WaveformThumb data={entry.parsed.az} color={AXIS_COLORS.az} w={64} h={28} />
+              ) : entry.reading ? (
+                <div className="w-16 h-7 bg-gray-100 rounded animate-pulse flex-shrink-0" />
+              ) : (
+                <div className="w-16 h-7 bg-red-100 rounded flex-shrink-0 flex items-center justify-center">
+                  <span className="text-xs text-red-400">!</span>
+                </div>
+              )}
+
+              {/* File info */}
+              <div className="flex-1 min-w-0">
+                <p className="text-xs font-semibold text-gray-700 truncate">{entry.name}</p>
+                {entry.error ? (
+                  <p className="text-xs text-red-500 mt-0.5">{entry.error}</p>
+                ) : entry.parsed ? (
+                  <p className="text-xs text-gray-400 mt-0.5 tabular-nums">
+                    {entry.parsed.rowCount} rows · {entry.parsed.durationMs} ms
+                  </p>
+                ) : null}
+              </div>
+
+              {/* Class dropdown */}
+              {!entry.error && (
+                <select
+                  value={entry.classId ?? ""}
+                  onChange={(e) => setEntryClass(idx, e.target.value)}
+                  className="text-xs border border-gray-200 rounded px-1.5 py-1 text-gray-700
+                             focus:outline-none focus:border-accent bg-white flex-shrink-0"
+                  style={{ maxWidth: "90px" }}
+                >
+                  {classes.map((cls) => (
+                    <option key={cls.id} value={cls.id}>{cls.name}</option>
+                  ))}
+                </select>
+              )}
+
+              {/* Remove button */}
+              <button
+                onClick={() => removeEntry(idx)}
+                className="text-gray-300 hover:text-red-400 transition-colors flex-shrink-0 text-base leading-none px-1"
+              >
+                ×
+              </button>
+            </div>
+          ))}
+
+          {/* Add to dataset button + error */}
+          <div className="flex items-center gap-3">
+            {uploadError && (
+              <p className="text-xs text-red-500 flex-1">{uploadError}</p>
+            )}
+            <button
+              onClick={addToDataset}
+              disabled={!goodEntries.length || uploading}
+              className={`ml-auto flex items-center gap-2 px-4 py-2 rounded text-sm font-semibold transition-all ${
+                !goodEntries.length
+                  ? "bg-gray-100 text-gray-300 cursor-not-allowed"
+                  : uploading
+                  ? "bg-accent/60 text-white cursor-wait"
+                  : "bg-accent text-white hover:bg-accent-dark"
+              }`}
+            >
+              {uploading ? (
+                <>
+                  <span className="w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin" />
+                  Processing files…
+                </>
+              ) : (
+                <>
+                  <svg className="w-3.5 h-3.5" fill="none" viewBox="0 0 16 16" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M8 3v10M3 8l5-5 5 5" />
+                  </svg>
+                  Add {goodEntries.length} file{goodEntries.length !== 1 ? "s" : ""} to dataset
+                </>
+              )}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* ── Analysis banner ─────────────────────────────────────────────────── */}
+      {analyzeResult && (
+        <div className="flex-shrink-0 flex items-center gap-2.5 px-3 py-2 rounded-lg border border-accent/25 text-xs"
+             style={{ background: "rgba(29,158,117,0.05)" }}>
+          <span className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse flex-shrink-0" />
+          <span className="text-accent font-semibold">Signal analyzed</span>
+          <span className="text-gray-500">— AI pipeline design ready on the next screen →</span>
+        </div>
+      )}
+
+      {/* ── Event list ──────────────────────────────────────────────────────── */}
+      <div className="flex-1 overflow-y-auto min-h-0 space-y-1.5 pr-0.5">
+        {events.length === 0 ? (
+          <div className="flex flex-col items-center justify-center h-24 border border-dashed border-gray-200 rounded gap-1">
+            <span className="text-gray-300 text-xs">No events yet</span>
+            <span className="text-gray-200 text-xs">Upload CSV files to add events</span>
+          </div>
+        ) : (
+          events.map((ev) => (
+            <div
+              key={ev.id}
+              className="flex items-center gap-3 px-3 py-2 bg-white border border-gray-100 rounded hover:border-gray-200 group transition-colors"
+            >
+              <WaveformThumb data={ev.waveform} color={ev.waveColor} />
+              <div className="flex-1 min-w-0 flex items-center gap-2 flex-wrap">
+                <span
+                  className="text-xs font-semibold px-1.5 py-0.5 rounded"
+                  style={{ color: ev.classColor, backgroundColor: `${ev.classColor}1a` }}
+                >
+                  {ev.className}
+                </span>
+                <span className="text-xs text-gray-400 tabular-nums">{ev.duration} ms</span>
+                {ev.filename && <span className="text-xs text-gray-300 truncate max-w-[80px]">{ev.filename}</span>}
+              </div>
+              <button
+                onClick={() => setEvents((prev) => prev.filter((e) => e.id !== ev.id))}
+                className="opacity-0 group-hover:opacity-100 text-gray-300 hover:text-red-400 transition-all text-base leading-none px-1"
+                title="Delete"
+              >
+                ×
+              </button>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 
 export default function CollectScreen({ config, projectId, analyzeResult, onAnalysisReady, chatHistory, setChatHistory, onApplyAction }) {
-  const activeAxes = getActiveAxes(config?.sensorType);
+  const activeAxes   = getActiveAxes(config?.sensorType);
+  const isFileUpload = (config?.connectionType ?? "").toLowerCase().includes("file");
 
   // Canvas
   const canvasRef = useRef(null);
@@ -186,6 +553,7 @@ export default function CollectScreen({ config, projectId, analyzeResult, onAnal
 
   // ── Canvas animation ────────────────────────────────────────────────────────
   useEffect(() => {
+    if (isFileUpload) return;
     const canvas = canvasRef.current;
     if (!canvas) return;
 
@@ -411,6 +779,19 @@ export default function CollectScreen({ config, projectId, analyzeResult, onAnal
     <div className="flex gap-6 h-full">
 
       {/* ── LEFT PANEL ──────────────────────────────────────────────────────── */}
+      {isFileUpload ? (
+        <FileUploadMode
+          classes={classes}
+          events={events}
+          setEvents={setEvents}
+          onAnalysisReady={onAnalysisReady}
+          projectId={projectId}
+          analyzeResult={analyzeResult}
+          separabilityNote={separabilityNote}
+          copilot={copilot}
+          setCopilot={setCopilot}
+        />
+      ) : (
       <div className="flex-1 flex flex-col min-h-0 gap-3">
 
         {/* Signal canvas card */}
@@ -551,6 +932,7 @@ export default function CollectScreen({ config, projectId, analyzeResult, onAnal
           )}
         </div>
       </div>
+      )}
 
       {/* ── RIGHT PANEL ─────────────────────────────────────────────────────── */}
       <div className="w-56 flex-shrink-0 flex flex-col gap-4 min-h-0 overflow-hidden">
