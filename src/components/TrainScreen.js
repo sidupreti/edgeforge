@@ -298,36 +298,16 @@ const MODEL_TRAIN_STEPS = [
   { id: "nn",   label: "Neural Net" },
 ];
 
-export default function TrainScreen({ projectId, analyzeResult, pipelineConfig, pipelineBlocks, onRetrain, chatHistory, setChatHistory, onApplyAction }) {
+export default function TrainScreen({ projectId, events, analyzeResult, pipelineConfig, pipelineBlocks, onRetrain, chatHistory, setChatHistory, onApplyAction }) {
   const [trainState,    setTrainState]    = useState("idle"); // idle | running | done | error
   const [progress,      setProgress]      = useState(0);
   const [currentModel,  setCurrentModel]  = useState("");
   const [results,       setResults]       = useState(null);
   const [trainError,    setTrainError]    = useState(null);
-  const [localProjectId, setLocalProjectId] = useState(null);
   const pollRef = useRef(null);
 
-  // If no projectId was passed from setup, auto-create a demo project
-  useEffect(() => {
-    if (projectId || localProjectId) return;
-    fetch(`${API_BASE_URL}/project/create`, {
-      method:  "POST",
-      headers: { "Content-Type": "application/json" },
-      body:    JSON.stringify({
-        name:            "demo-project",
-        sensor_type:     "Accelerometer (IMU)",
-        connection_type: "File Upload",
-        trigger_type:    "Automatic",
-        trigger_config:  {},
-        target_mcu:      "Arduino Nano 33 BLE",
-      }),
-    })
-      .then((r) => r.json())
-      .then((d) => { if (d.project_id) setLocalProjectId(d.project_id); })
-      .catch(() => {}); // silent fail — training will surface the error
-  }, [projectId, localProjectId]);
-
-  const effectiveProjectId = projectId ?? localProjectId;
+  // projectId is always provided and derived from the project name in App.js
+  const effectiveProjectId = projectId ?? "demo";
 
   // Track which models have started/finished based on currentModel string from backend
   function getModelStatus(modelId) {
@@ -369,7 +349,6 @@ export default function TrainScreen({ projectId, analyzeResult, pipelineConfig, 
   }
 
   async function startTraining() {
-    if (!effectiveProjectId) return;
     setTrainState("running");
     setProgress(0);
     setCurrentModel("");
@@ -379,6 +358,17 @@ export default function TrainScreen({ projectId, analyzeResult, pipelineConfig, 
     const selectedFeatures = Object.entries(pipelineConfig.features)
       .filter(([, v]) => v)
       .map(([k]) => k);
+
+    // Build event payload as fallback in case backend lost in-memory state
+    const eventPayload = (events || [])
+      .filter(ev => ev.snapshot?.ax?.length > 0 || ev.snapshot?.az?.length > 0)
+      .map(ev => ({
+        ax:          ev.snapshot?.ax ?? [],
+        ay:          ev.snapshot?.ay ?? [],
+        az:          ev.snapshot?.az ?? ev.waveform ?? [],
+        duration_ms: ev.duration ?? 0,
+        class_label: ev.className ?? "unknown",
+      }));
 
     try {
       const res = await fetch(`${API_BASE_URL}/train`, {
@@ -395,6 +385,7 @@ export default function TrainScreen({ projectId, analyzeResult, pipelineConfig, 
           custom_blocks:     (pipelineBlocks || [])
             .filter(b => !b.skipped && (b.type === "custom" || b.type === "standard") && b.code)
             .map(b => ({ id: b.id, name: b.name, code: b.code })),
+          events:            eventPayload.length > 0 ? eventPayload : undefined,
         }),
       });
       if (!res.ok) {

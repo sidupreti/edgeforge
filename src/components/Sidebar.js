@@ -9,7 +9,7 @@ const STEPS = [
   { id: 5, key: "export",   label: "Export",   sub: "Deploy to device" },
 ];
 
-export default function Sidebar({ activeStep }) {
+export default function Sidebar({ activeStep, onResetRequest }) {
   return (
     <aside className="w-64 h-screen flex-shrink-0 bg-gray-900 border-r border-gray-700 flex flex-col overflow-y-auto">
       {/* Logo / brand */}
@@ -75,9 +75,21 @@ export default function Sidebar({ activeStep }) {
         })}
       </nav>
 
-      {/* Footer */}
-      <div className="px-6 py-4 border-t border-gray-700">
-        <p className="text-gray-600 text-xs">v0.1.0-alpha</p>
+      {/* Reset + Footer */}
+      <div className="px-4 py-4 border-t border-gray-700 space-y-3">
+        <button
+          onClick={onResetRequest}
+          className="w-full flex items-center gap-2 px-3 py-2 rounded border border-gray-700
+                     text-xs text-gray-500 hover:border-red-800 hover:text-red-400
+                     transition-colors group"
+        >
+          <svg className="w-3.5 h-3.5 flex-shrink-0 group-hover:text-red-400" fill="none" viewBox="0 0 16 16" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.6}
+              d="M4 4l8 8M12 4l-8 8" />
+          </svg>
+          Reset Project
+        </button>
+        <p className="text-gray-600 text-xs px-1">v0.1.0-alpha</p>
       </div>
     </aside>
   );

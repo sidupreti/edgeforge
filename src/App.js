@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import "./index.css";
 import API_BASE_URL from "./config";
 import Sidebar from "./components/Sidebar";
@@ -21,13 +21,14 @@ const STEPS = [
 
 const PLACEHOLDER_META = {};
 
+// ── Defaults with sensible pre-selections (Issue 4) ───────────────────────────
 const INITIAL_CONFIG = {
   projectName:            "",
-  sensorType:             "",
-  connectionType:         "",
-  triggerType:            "",
+  sensorType:             "Accelerometer (IMU)",
+  connectionType:         "File Upload (CSV / WAV)",
+  triggerType:            "Threshold",
   triggerConfig:          {},
-  targetMcu:              "",
+  targetMcu:              "ESP32-S3",
   applicationDescription: "",
   hardwarePreprocessing:  { type: "none" },
 };
@@ -49,24 +50,84 @@ const INITIAL_BLOCKS = [
   { id: "model",     type: "builtin",  name: "Model",     skipped: false, code: null },
 ];
 
+// ── localStorage helpers ──────────────────────────────────────────────────────
+const STORAGE_KEY = "edgeforge_state";
+
+function loadSavedState() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+// Derive a stable project_id from the project name (deterministic slug)
+function slugify(name) {
+  const s = (name || "").toLowerCase().replace(/\s+/g, "-").replace(/[^a-z0-9-]/g, "");
+  return s || "demo";
+}
+
+// ── App ───────────────────────────────────────────────────────────────────────
 export default function App() {
-  const [activeStep, setActiveStep] = useState(0);
-  const [config, setConfig] = useState(INITIAL_CONFIG);
-  const [projectId, setProjectId] = useState(null);
-  const [submitLoading, setSubmitLoading] = useState(false);
-  const [submitError, setSubmitError] = useState(null);
-  // Lifted from CollectScreen when /analyze-signal returns
-  const [analyzeResult,    setAnalyzeResult]    = useState(null);
-  const [separabilityNote, setSeparabilityNote] = useState(null);
-  const [pipelineConfig,   setPipelineConfig]   = useState(INITIAL_PIPELINE_CONFIG);
-  const [chatHistory,        setChatHistory]        = useState([]);
-  const [pendingFlash,       setPendingFlash]       = useState(null);
-  const [aiPipelineDesign,   setAiPipelineDesign]   = useState(null);
-  const [aiConfiguredBlocks, setAiConfiguredBlocks] = useState({});
-  const [pipelineBlocks,     setPipelineBlocks]     = useState(INITIAL_BLOCKS);
+  const saved = loadSavedState();
 
-  const goBack = () => setActiveStep((s) => Math.max(s - 1, 0));
+  const [activeStep,        setActiveStep]        = useState(saved?.activeStep        ?? 0);
+  const [config,            setConfig]            = useState(saved?.config            ?? INITIAL_CONFIG);
+  const [events,            setEvents]            = useState(saved?.events            ?? []);
+  const [analyzeResult,     setAnalyzeResult]     = useState(saved?.analyzeResult     ?? null);
+  const [separabilityNote,  setSeparabilityNote]  = useState(saved?.separabilityNote  ?? null);
+  const [pipelineConfig,    setPipelineConfig]    = useState(saved?.pipelineConfig    ?? INITIAL_PIPELINE_CONFIG);
+  const [chatHistory,       setChatHistory]       = useState(saved?.chatHistory       ?? []);
+  const [aiPipelineDesign,  setAiPipelineDesign]  = useState(saved?.aiPipelineDesign  ?? null);
+  const [aiConfiguredBlocks,setAiConfiguredBlocks]= useState(saved?.aiConfiguredBlocks?? {});
+  const [pipelineBlocks,    setPipelineBlocks]    = useState(saved?.pipelineBlocks    ?? INITIAL_BLOCKS);
+  const [pendingFlash,      setPendingFlash]      = useState(null);
+  const [submitLoading,     setSubmitLoading]     = useState(false);
+  const [submitError,       setSubmitError]       = useState(null);
+  const [showResetConfirm,  setShowResetConfirm]  = useState(false);
 
+  // Derived — never stored separately, always consistent with config
+  const projectId = slugify(config.projectName);
+
+  // ── Auto-save to localStorage on every state change ───────────────────────
+  useEffect(() => {
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify({
+        activeStep,
+        config,
+        events,
+        analyzeResult,
+        separabilityNote,
+        pipelineConfig,
+        chatHistory,
+        aiPipelineDesign,
+        aiConfiguredBlocks,
+        pipelineBlocks,
+      }));
+    } catch {
+      // Ignore quota errors
+    }
+  }, [activeStep, config, events, analyzeResult, separabilityNote,
+      pipelineConfig, chatHistory, aiPipelineDesign, aiConfiguredBlocks, pipelineBlocks]);
+
+  // ── Reset project ─────────────────────────────────────────────────────────
+  const handleReset = useCallback(() => {
+    localStorage.removeItem(STORAGE_KEY);
+    setActiveStep(0);
+    setConfig(INITIAL_CONFIG);
+    setEvents([]);
+    setAnalyzeResult(null);
+    setSeparabilityNote(null);
+    setPipelineConfig(INITIAL_PIPELINE_CONFIG);
+    setChatHistory([]);
+    setAiPipelineDesign(null);
+    setAiConfiguredBlocks({});
+    setPipelineBlocks(INITIAL_BLOCKS);
+    setShowResetConfirm(false);
+  }, []);
+
+  // ── Copilot action handler ────────────────────────────────────────────────
   function handleApplyAction({ type, value }) {
     if (type === "set_cutoff") {
       setPipelineConfig((cfg) => ({ ...cfg, filter: { ...cfg.filter, cutoff: parseFloat(value) } }));
@@ -81,9 +142,10 @@ export default function App() {
       setPipelineConfig((cfg) => ({ ...cfg, features: { ...cfg.features, [String(value)]: true } }));
       setPendingFlash("features");
     }
-    setActiveStep(2); // navigate to Pipeline screen
+    setActiveStep(2);
   }
 
+  // ── Setup submit ──────────────────────────────────────────────────────────
   async function handleSetupSubmit() {
     setSubmitLoading(true);
     setSubmitError(null);
@@ -92,7 +154,7 @@ export default function App() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          name:                    config.projectName,
+          name:                    config.projectName || "demo",
           sensor_type:             config.sensorType,
           connection_type:         config.connectionType,
           trigger_type:            config.triggerType,
@@ -106,8 +168,6 @@ export default function App() {
         const body = await res.json().catch(() => ({}));
         throw new Error(body.detail ?? `Server error ${res.status}`);
       }
-      const data = await res.json();
-      setProjectId(data.project_id);
       setActiveStep((s) => s + 1);
     } catch (err) {
       setSubmitError(err.message || "Request failed. Is the API running?");
@@ -124,6 +184,7 @@ export default function App() {
     }
   }
 
+  const goBack = () => setActiveStep((s) => Math.max(s - 1, 0));
   const currentKey = STEPS[activeStep].key;
 
   function renderScreen() {
@@ -141,6 +202,8 @@ export default function App() {
         <CollectScreen
           config={config}
           projectId={projectId}
+          events={events}
+          setEvents={setEvents}
           analyzeResult={analyzeResult}
           onAnalysisReady={(data, note) => {
             setAnalyzeResult(data);
@@ -180,6 +243,7 @@ export default function App() {
       return (
         <TrainScreen
           projectId={projectId}
+          events={events}
           analyzeResult={analyzeResult}
           pipelineConfig={pipelineConfig}
           pipelineBlocks={pipelineBlocks}
@@ -215,7 +279,36 @@ export default function App() {
 
   return (
     <div className="flex h-screen bg-white text-gray-800 font-mono overflow-hidden">
-      <Sidebar activeStep={activeStep} />
+      <Sidebar
+        activeStep={activeStep}
+        onResetRequest={() => setShowResetConfirm(true)}
+      />
+
+      {/* Reset confirmation overlay */}
+      {showResetConfirm && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
+          <div className="bg-white rounded-xl border border-gray-200 shadow-lg p-6 max-w-sm w-full mx-4">
+            <h2 className="text-sm font-bold text-gray-800 mb-2">Reset Project?</h2>
+            <p className="text-xs text-gray-500 leading-relaxed mb-5">
+              This will clear all data and start a new project. This cannot be undone.
+            </p>
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => setShowResetConfirm(false)}
+                className="px-4 py-2 text-xs border border-gray-200 rounded text-gray-600 hover:border-gray-400 transition-colors"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleReset}
+                className="px-4 py-2 text-xs bg-red-500 text-white rounded hover:bg-red-600 transition-colors"
+              >
+                Reset Project
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Main content */}
       <div className="flex-1 flex flex-col min-h-0">

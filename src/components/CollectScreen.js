@@ -586,7 +586,7 @@ function FileUploadMode({
 
 // ── Main component ────────────────────────────────────────────────────────────
 
-export default function CollectScreen({ config, projectId, analyzeResult, onAnalysisReady, chatHistory, setChatHistory, onApplyAction }) {
+export default function CollectScreen({ config, projectId, events, setEvents, analyzeResult, onAnalysisReady, chatHistory, setChatHistory, onApplyAction }) {
   const activeAxes   = getActiveAxes(config?.sensorType);
   const isFileUpload = (config?.connectionType ?? "").toLowerCase().includes("file");
 
@@ -602,7 +602,6 @@ export default function CollectScreen({ config, projectId, analyzeResult, onAnal
 
   // State
   const [isRecording,   setIsRecording]   = useState(true);
-  const [events,        setEvents]        = useState([]);
   const [classes,       setClasses]       = useState([
     { id: "cls-idle",  name: "idle",  color: CLASS_PALETTE[1] },
     { id: "cls-event", name: "event", color: CLASS_PALETTE[0] },
