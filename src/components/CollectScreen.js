@@ -145,12 +145,16 @@ function parseCSVText(text) {
 }
 
 function detectClassFromFilename(filename, classes, fallbackClassId) {
-  const lower = filename.toLowerCase().replace(/[_\-\s.]/g, " ");
+  // Normalize: strip extension, lowercase, collapse all non-alphanumeric to spaces
+  const norm = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const fnWords = norm(filename.replace(/\.[^.]+$/, "")).split(" ").filter(Boolean);
   for (const cls of classes) {
-    if (lower.includes(cls.name.toLowerCase())) return cls.id;
+    const clsWords = norm(cls.name).split(" ").filter(Boolean);
+    if (clsWords.length > 0 && clsWords.every((cw) => fnWords.includes(cw))) {
+      return { classId: cls.id, detected: true };
+    }
   }
-  // Fall back to active class, then first class
-  return fallbackClassId ?? classes[0]?.id ?? null;
+  return { classId: fallbackClassId ?? classes[0]?.id ?? null, detected: false };
 }
 
 // ── Format guide (collapsible) ───────────────────────────────────────────────
@@ -220,17 +224,19 @@ function FileUploadMode({
           if (result?.error === "pre-processed feature file") {
             note = "Pre-processed feature file — EdgeForge needs raw sensor time series data";
           }
-          // Auto-assign detected class label if available
-          let classId = updated[realIdx].classId;
-          if (result?.detectedLabel && !classId) {
+          // Auto-assign detected class label if available (WISDM activity column)
+          let classId  = updated[realIdx].classId;
+          let detected = updated[realIdx].detected;
+          if (result?.detectedLabel) {
             const match = classes.find((c) => c.name.toLowerCase() === result.detectedLabel.toLowerCase());
-            if (match) classId = match.id;
+            if (match) { classId = match.id; detected = true; }
           }
           updated[realIdx] = {
             ...updated[realIdx],
             parsed,
             note,
             classId,
+            detected,
             error:   parsed ? null : (note ?? "Could not parse — expected timestamp, a_x, a_y, a_z columns"),
             reading: false,
           };
@@ -253,7 +259,7 @@ function FileUploadMode({
       } else {
         const entry = {
           file: f, name: f.name, isZip: false, zipFile: null, zipPath: null,
-          parsed: null, classId: detectClassFromFilename(f.name, classes, activeClassId),
+          parsed: null, ...detectClassFromFilename(f.name, classes, activeClassId),
           error: null, note: null, reading: true,
         };
         initial.push(entry);
@@ -294,7 +300,7 @@ function FileUploadMode({
             zipFile:  zf,
             zipPath:  f.path,
             parsed:   null,
-            classId:  detectClassFromFilename(f.path, classes, activeClassId),
+            ...detectClassFromFilename(f.path, classes, activeClassId),
             error:    null,
             note:     `From ${zf.name} — ${(f.size_bytes / 1024).toFixed(1)} KB`,
             reading:  false,
@@ -325,7 +331,7 @@ function FileUploadMode({
   }
 
   function setEntryClass(idx, classId) {
-    setFileEntries((prev) => prev.map((e, i) => i === idx ? { ...e, classId } : e));
+    setFileEntries((prev) => prev.map((e, i) => i === idx ? { ...e, classId, detected: true } : e));
   }
 
   // Entries we can actually submit (no error, not reading, not a ZIP parent)
@@ -517,6 +523,10 @@ function FileUploadMode({
                   <p className="text-xs text-gray-400 truncate">{entry.name}</p>
                   {entry.error ? (
                     <p className="text-[10px] text-red-500 mt-0.5 leading-tight">{entry.error}</p>
+                  ) : !entry.reading && entry.detected === false ? (
+                    <p className="text-[10px] text-yellow-600 mt-0.5 leading-tight">
+                      No class detected in filename — assigned to {assignedCls?.name ?? "unknown"}. Change if needed.
+                    </p>
                   ) : entry.note ? (
                     <p className="text-[10px] text-blue-500 mt-0.5 leading-tight">{entry.note}</p>
                   ) : entry.parsed ? (
