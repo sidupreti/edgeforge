@@ -63,45 +63,85 @@ function WaveformThumb({ data, color = "#1D9E75", w = 64, h = 28 }) {
   );
 }
 
-// ── CSV parser (browser-side, for preview) ────────────────────────────────────
+// ── CSV parser (browser-side, for preview waveform only) ─────────────────────
 
 const UPLOAD_COL_MAP = {
   t: "timestamp", time: "timestamp", ts: "timestamp", time_us: "timestamp",
-  x: "a_x", ax: "a_x", accel_x: "a_x", acc_x: "a_x",
-  y: "a_y", ay: "a_y", accel_y: "a_y", acc_y: "a_y",
-  z: "a_z", az: "a_z", accel_z: "a_z", acc_z: "a_z",
+  time_ms: "timestamp", time_s: "timestamp", sample_time: "timestamp", elapsed: "timestamp",
+  x: "a_x", ax: "a_x", accel_x: "a_x", acc_x: "a_x", "x-axis": "a_x",
+  y: "a_y", ay: "a_y", accel_y: "a_y", acc_y: "a_y", "y-axis": "a_y",
+  z: "a_z", az: "a_z", accel_z: "a_z", acc_z: "a_z", "z-axis": "a_z",
+  activity: "activity", user: "user",
+};
+
+const WISDM_ACTIVITY_MAP = {
+  A: "Walking", B: "Jogging", C: "Stairs",
+  D: "Sitting", E: "Standing", F: "LyingDown",
 };
 
 function parseCSVText(text) {
   const lines = text.trim().split("\n").filter((l) => l.trim() && !l.startsWith("#"));
   if (lines.length < 2) return null;
-  const sep     = lines[0].includes("\t") ? "\t" : ",";
-  const rawHdrs = lines[0].split(sep).map((h) => h.trim().toLowerCase());
-  const hdrs    = rawHdrs.map((h) => UPLOAD_COL_MAP[h] ?? h);
 
-  const tsIdx = hdrs.indexOf("timestamp");
-  const axIdx = hdrs.indexOf("a_x");
-  const ayIdx = hdrs.indexOf("a_y");
-  const azIdx = hdrs.indexOf("a_z");
+  // Detect separator
+  const first = lines[0];
+  const sep = first.includes("\t") ? "\t"
+    : first.includes(";")          ? ";"
+    : ",";
+
+  const splitLine = (l) => l.split(sep).map((p) => p.trim().replace(/;$/, ""));
+
+  // Detect if first row is all-numeric (headerless)
+  const firstVals = splitLine(first);
+  const firstIsNumeric = firstVals.every((v) => v === "" || !isNaN(parseFloat(v)));
+  const nCols = firstVals.length;
+
+  let rawHdrs, dataStart;
+  if (firstIsNumeric) {
+    // UCI HAR: space-separated, >20 columns — not compatible
+    if (sep === "," && nCols > 20 && firstVals.filter(Boolean).every((v) => !isNaN(v))) {
+      return { error: "pre-processed feature file" };
+    }
+    // Headerless: synthesize column names
+    if (nCols >= 4)      rawHdrs = ["timestamp", "a_x", "a_y", "a_z", ...Array.from({length: nCols - 4}, (_, i) => `col${i}`)];
+    else if (nCols === 3) rawHdrs = ["a_x", "a_y", "a_z"];
+    else if (nCols === 2) rawHdrs = ["a_x", "a_y"];
+    else                  rawHdrs = ["a_x"];
+    dataStart = 0;
+  } else {
+    rawHdrs   = firstVals.map((h) => h.toLowerCase());
+    dataStart = 1;
+  }
+
+  const hdrs = rawHdrs.map((h) => UPLOAD_COL_MAP[h] ?? h);
+  const tsIdx  = hdrs.indexOf("timestamp");
+  const axIdx  = hdrs.indexOf("a_x");
+  const ayIdx  = hdrs.indexOf("a_y");
+  const azIdx  = hdrs.indexOf("a_z");
+  const actIdx = hdrs.indexOf("activity");
   if (axIdx === -1) return null;
 
   const ax = [], ay = [], az = [], ts = [];
-  for (let i = 1; i < lines.length; i++) {
-    const parts = lines[i].split(sep).map((p) => p.trim());
+  let detectedLabel = null;
+  for (let i = dataStart; i < lines.length; i++) {
+    const parts = splitLine(lines[i]);
     const xv = parseFloat(parts[axIdx]);
     if (isNaN(xv)) continue;
     ax.push(xv);
     ay.push(ayIdx >= 0 ? (parseFloat(parts[ayIdx]) || 0) : 0);
     az.push(azIdx >= 0 ? (parseFloat(parts[azIdx]) || 0) : 0);
     ts.push(tsIdx >= 0 ? (parseFloat(parts[tsIdx]) || 10000) : 10000);
+    if (actIdx >= 0 && !detectedLabel) {
+      const raw = (parts[actIdx] ?? "").replace(/;$/, "").trim();
+      detectedLabel = WISDM_ACTIVITY_MAP[raw] ?? (raw || null);
+    }
   }
   if (ax.length < 2) return null;
 
-  // Convert absolute timestamps to diffs if needed
   const tArr = ts[0] > 1e9 ? ts.map((v, i) => (i === 0 ? ts[1] - ts[0] : ts[i] - ts[i - 1])) : ts;
   const durationMs = tArr.reduce((s, v) => s + Math.abs(v), 0) / 1000;
 
-  return { ax, ay, az, rowCount: ax.length, durationMs: Math.round(durationMs) };
+  return { ax, ay, az, rowCount: ax.length, durationMs: Math.round(durationMs), detectedLabel };
 }
 
 function detectClassFromFilename(filename, classes, fallbackClassId) {
@@ -113,6 +153,45 @@ function detectClassFromFilename(filename, classes, fallbackClassId) {
   return fallbackClassId ?? classes[0]?.id ?? null;
 }
 
+// ── Format guide (collapsible) ───────────────────────────────────────────────
+
+function FormatGuide() {
+  const [open, setOpen] = useState(false);
+  const formats = [
+    { label: "EdgeForge native",  cols: "timestamp, a_x, a_y, a_z",         note: "timestamp in µs between samples" },
+    { label: "WISDM",             cols: "user, activity, timestamp, x, y, z", note: "activity column auto-used as class" },
+    { label: "Generic XYZ",       cols: "any cols with time + x/y/z axes",   note: "column names auto-detected" },
+    { label: "Headerless",        cols: "numeric rows, no header",            note: "assumes 100 Hz, columns: ts, x, y, z" },
+    { label: "ZIP archive",       cols: ".zip containing .csv or .txt files", note: "each file becomes a selectable entry" },
+  ];
+  return (
+    <div className="flex-shrink-0">
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="text-xs text-gray-500 hover:text-gray-300 transition-colors flex items-center gap-1"
+      >
+        <svg className={`w-3 h-3 transition-transform ${open ? "rotate-90" : ""}`} fill="none" viewBox="0 0 8 8" stroke="currentColor">
+          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M2 1.5l3 2.5-3 2.5" />
+        </svg>
+        Supported formats
+      </button>
+      {open && (
+        <div className="mt-2 border border-gray-700 rounded-lg overflow-hidden bg-gray-900">
+          {formats.map((f) => (
+            <div key={f.label} className="flex gap-3 px-3 py-2 border-b border-gray-800 last:border-0">
+              <span className="text-[10px] font-semibold text-gray-400 w-28 flex-shrink-0">{f.label}</span>
+              <div className="min-w-0">
+                <code className="text-[10px] text-accent">{f.cols}</code>
+                <p className="text-[10px] text-gray-600 mt-0.5">{f.note}</p>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── File upload mode ──────────────────────────────────────────────────────────
 
 function FileUploadMode({
@@ -120,50 +199,124 @@ function FileUploadMode({
   projectId, analyzeResult, separabilityNote,
   copilot, setCopilot,
 }) {
-  const [fileEntries,  setFileEntries]  = useState([]); // {file, name, parsed, classId, error}
+  // fileEntries: {file, name, isZip, zipFile, zipPath, parsed, classId, error, reading, note}
+  const [fileEntries,  setFileEntries]  = useState([]);
   const [uploading,    setUploading]    = useState(false);
   const [uploadError,  setUploadError]  = useState(null);
   const [dragOver,     setDragOver]     = useState(false);
   const inputRef = useRef(null);
 
-  const addFiles = useCallback((newFiles) => {
-    const entries = Array.from(newFiles).map((f) => ({
-      file: f, name: f.name, parsed: null,
-      classId: detectClassFromFilename(f.name, classes, activeClassId),
-      error: null, reading: true,
-    }));
-
-    // Read file contents async
-    entries.forEach((entry) => {
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const result = parseCSVText(e.target.result);
-        setFileEntries((prev) => {
-          const updated = [...prev];
-          const realIdx = prev.findIndex((p) => p.file === entry.file);
-          if (realIdx >= 0) {
-            updated[realIdx] = {
-              ...updated[realIdx],
-              parsed:  result,
-              error:   result ? null : "Could not parse — expected timestamp,a_x,a_y,a_z columns",
-              reading: false,
-            };
+  // Read a CSV file and update its entry in state
+  function readCsvEntry(file, targetFile = null) {
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const result = parseCSVText(e.target.result);
+      setFileEntries((prev) => {
+        const updated = [...prev];
+        const realIdx = prev.findIndex((p) => p.file === (targetFile ?? file));
+        if (realIdx >= 0) {
+          const parsed = result?.error ? null : result;
+          let note = null;
+          if (result?.error === "pre-processed feature file") {
+            note = "Pre-processed feature file — EdgeForge needs raw sensor time series data";
           }
-          return updated;
-        });
-      };
-      reader.readAsText(entry.file);
-    });
+          // Auto-assign detected class label if available
+          let classId = updated[realIdx].classId;
+          if (result?.detectedLabel && !classId) {
+            const match = classes.find((c) => c.name.toLowerCase() === result.detectedLabel.toLowerCase());
+            if (match) classId = match.id;
+          }
+          updated[realIdx] = {
+            ...updated[realIdx],
+            parsed,
+            note,
+            classId,
+            error:   parsed ? null : (note ?? "Could not parse — expected timestamp, a_x, a_y, a_z columns"),
+            reading: false,
+          };
+        }
+        return updated;
+      });
+    };
+    reader.readAsText(file);
+  }
 
-    setFileEntries((prev) => [...prev, ...entries]);
-  }, [classes, activeClassId]);
+  const addFiles = useCallback(async (newFiles) => {
+    const fileArr = Array.from(newFiles);
+    const initial = [];
+    const csvFiles = [];
+    const zipFiles = [];
+
+    for (const f of fileArr) {
+      if (f.name.toLowerCase().endsWith(".zip")) {
+        zipFiles.push(f);
+      } else {
+        const entry = {
+          file: f, name: f.name, isZip: false, zipFile: null, zipPath: null,
+          parsed: null, classId: detectClassFromFilename(f.name, classes, activeClassId),
+          error: null, note: null, reading: true,
+        };
+        initial.push(entry);
+        csvFiles.push({ entry, file: f });
+      }
+    }
+
+    // Add CSV entries immediately and start reading
+    if (initial.length) {
+      setFileEntries((prev) => [...prev, ...initial]);
+      csvFiles.forEach(({ file }) => readCsvEntry(file));
+    }
+
+    // Handle ZIP files: call /inspect-zip then expand into sub-entries
+    for (const zf of zipFiles) {
+      // Show a loading placeholder for the zip
+      const placeholder = {
+        file: zf, name: zf.name, isZip: true, zipFile: zf, zipPath: null,
+        parsed: null, classId: null, error: null, note: "Inspecting ZIP…", reading: true,
+      };
+      setFileEntries((prev) => [...prev, placeholder]);
+
+      try {
+        const fd = new FormData();
+        fd.append("file", zf);
+        const res  = await fetch(`${API_BASE_URL}/inspect-zip`, { method: "POST", body: fd });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.detail ?? `Error ${res.status}`);
+
+        const { files: found } = data;
+        // Remove the placeholder, add one entry per found CSV
+        setFileEntries((prev) => {
+          const without = prev.filter((e) => e.file !== zf || e.zipPath !== null);
+          const newEntries = found.map((f) => ({
+            file:     zf,             // hold the original zip File object
+            name:     f.path.split("/").pop(),
+            isZip:    true,
+            zipFile:  zf,
+            zipPath:  f.path,
+            parsed:   null,
+            classId:  detectClassFromFilename(f.path, classes, activeClassId),
+            error:    null,
+            note:     `From ${zf.name} — ${(f.size_bytes / 1024).toFixed(1)} KB`,
+            reading:  false,
+            sizeBytes: f.size_bytes,
+          }));
+          return [...without, ...newEntries];
+        });
+      } catch (err) {
+        setFileEntries((prev) => prev.map((e) =>
+          e.file === zf && e.zipPath === null
+            ? { ...e, error: `ZIP error: ${err.message}`, note: null, reading: false }
+            : e
+        ));
+      }
+    }
+  }, [classes, activeClassId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function handleDrop(e) {
     e.preventDefault();
     setDragOver(false);
     if (e.dataTransfer.files.length) addFiles(e.dataTransfer.files);
   }
-
   function handleDragOver(e) { e.preventDefault(); setDragOver(true); }
   function handleDragLeave()  { setDragOver(false); }
 
@@ -175,35 +328,60 @@ function FileUploadMode({
     setFileEntries((prev) => prev.map((e, i) => i === idx ? { ...e, classId } : e));
   }
 
-  const goodEntries = fileEntries.filter((e) => e.parsed && !e.error);
+  // Entries we can actually submit (no error, not reading, not a ZIP parent)
+  const goodEntries = fileEntries.filter((e) => !e.error && !e.reading);
 
   async function addToDataset() {
     if (!goodEntries.length || uploading) return;
     setUploading(true);
     setUploadError(null);
 
-    const formData = new FormData();
-    formData.append("project_id", projectId ?? "demo-project");
-    for (const entry of goodEntries) {
-      formData.append("files", entry.file);
-      const cls = classes.find((c) => c.id === entry.classId);
-      formData.append("labels", cls?.name ?? entry.classId);
-    }
-
     try {
-      const res = await fetch(`${API_BASE_URL}/upload-events`, {
-        method: "POST",
-        body:   formData,
-      });
+      // Group entries: plain CSV vs ZIP sub-files
+      const plainEntries = goodEntries.filter((e) => !e.isZip);
+      const zipEntries   = goodEntries.filter((e) => e.isZip);
+
+      // Build zip_selections: [{path, label}]
+      const zipSelections = zipEntries.map((e) => ({
+        path:  e.zipPath,
+        label: classes.find((c) => c.id === e.classId)?.name ?? "unknown",
+      }));
+
+      // Collect unique zip files used
+      const uniqueZips = [...new Map(zipEntries.map((e) => [e.zipFile.name, e.zipFile])).values()];
+
+      const formData = new FormData();
+      formData.append("project_id", projectId ?? "demo-project");
+
+      // Add plain CSV files
+      for (const entry of plainEntries) {
+        formData.append("files", entry.file);
+        formData.append("labels", classes.find((c) => c.id === entry.classId)?.name ?? "unknown");
+      }
+
+      // Add each unique ZIP once
+      for (const zf of uniqueZips) {
+        formData.append("files", zf);
+        formData.append("labels", "auto");
+      }
+
+      // Attach selections for ZIP sub-files
+      if (zipSelections.length) {
+        formData.append("zip_selections", JSON.stringify(zipSelections));
+      }
+
+      const res = await fetch(`${API_BASE_URL}/upload-events`, { method: "POST", body: formData });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         throw new Error(body.detail?.message ?? body.detail ?? `Server error ${res.status}`);
       }
       const data = await res.json();
 
-      // Add returned events into the events list
+      // Build event objects for the list
       const newEvents = data.events.map((ev) => {
-        const cls   = classes.find((c) => c.name === ev.class_label) ?? classes[0];
+        const cls = classes.find((c) => c.name === ev.class_label)
+          ?? classes.find((c) => c.name.toLowerCase() === ev.class_label?.toLowerCase())
+          ?? classes[0];
         return {
           id:         ev.id,
           classId:    cls?.id    ?? "cls-event",
@@ -215,18 +393,18 @@ function FileUploadMode({
           timestamp:  new Date().toLocaleTimeString(),
           snapshot:   { ax: [], ay: [], az: ev.waveform_az ?? [] },
           filename:   ev.filename,
+          notes:      ev.notes ?? [],
         };
       });
       setEvents((prev) => [...newEvents, ...prev]);
 
-      // Trigger analysis update
       if (data.analysis) {
         onAnalysisReady?.(data.analysis, null);
         setCopilot({ status: "ready", data: data.analysis, error: null });
       }
 
-      // Clear processed files (keep files with errors)
-      setFileEntries((prev) => prev.filter((e) => !e.parsed || e.error));
+      // Clear successfully submitted entries
+      setFileEntries((prev) => prev.filter((e) => e.error));
     } catch (err) {
       setUploadError(err.message);
     } finally {
@@ -256,7 +434,7 @@ function FileUploadMode({
         <input
           ref={inputRef}
           type="file"
-          accept=".csv,.txt"
+          accept=".csv,.txt,.zip"
           multiple
           className="hidden"
           onChange={(e) => { if (e.target.files?.length) addFiles(e.target.files); e.target.value = ""; }}
@@ -269,7 +447,7 @@ function FileUploadMode({
           <p className={`text-sm font-semibold ${dragOver ? "text-accent" : "text-gray-400"}`}>
             {dragOver ? "Drop to upload" : "Drop sensor data files here"}
           </p>
-          <p className="text-xs text-gray-600 mt-0.5">CSV or TXT — columns: timestamp, a_x, a_y, a_z</p>
+          <p className="text-xs text-gray-600 mt-0.5">CSV, TXT, or ZIP — WISDM, EdgeForge native, and more</p>
         </div>
         <div className="flex items-center gap-3">
           <button
@@ -289,83 +467,91 @@ function FileUploadMode({
         </div>
       </div>
 
+      {/* ── Format guide ───────────────────────────────────────────────────── */}
+      <FormatGuide />
+
       {/* ── File cards ─────────────────────────────────────────────────────── */}
       {fileEntries.length > 0 && (
         <div className="flex flex-col gap-2 flex-shrink-0">
-          {fileEntries.map((entry, idx) => (
-            <div
-              key={idx}
-              className={`flex items-center gap-3 px-3 py-2.5 rounded-lg border ${
-                entry.error ? "border-red-200 bg-red-50" : "border-gray-200 bg-white"
-              }`}
-            >
-              {/* Waveform preview */}
-              {entry.parsed ? (
-                <WaveformThumb data={entry.parsed.az} color={AXIS_COLORS.az} w={64} h={28} />
-              ) : entry.reading ? (
-                <div className="w-16 h-7 bg-gray-100 rounded animate-pulse flex-shrink-0" />
-              ) : (
-                <div className="w-16 h-7 bg-red-100 rounded flex-shrink-0 flex items-center justify-center">
-                  <span className="text-xs text-red-400">!</span>
-                </div>
-              )}
-
-              {/* File info — class label prominent, filename secondary */}
-              <div className="flex-1 min-w-0">
-                {(() => {
-                  const assignedCls = classes.find((c) => c.id === entry.classId);
-                  return assignedCls && !entry.error ? (
-                    <div className="flex items-center gap-1.5 mb-0.5">
-                      <span
-                        className="w-2 h-2 rounded-full flex-shrink-0"
-                        style={{ backgroundColor: assignedCls.color }}
-                      />
-                      <span className="text-xs font-bold" style={{ color: assignedCls.color }}>
-                        {assignedCls.name}
-                      </span>
-                    </div>
-                  ) : null;
-                })()}
-                <p className="text-xs text-gray-400 truncate">{entry.name}</p>
-                {entry.error ? (
-                  <p className="text-xs text-red-500 mt-0.5">{entry.error}</p>
-                ) : entry.parsed ? (
-                  <p className="text-[10px] text-gray-300 mt-0.5 tabular-nums">
-                    {entry.parsed.rowCount} rows · {entry.parsed.durationMs} ms
-                  </p>
-                ) : null}
-              </div>
-
-              {/* Class dropdown */}
-              {!entry.error && (
-                <select
-                  value={entry.classId ?? ""}
-                  onChange={(e) => setEntryClass(idx, e.target.value)}
-                  className="text-xs border border-gray-200 rounded px-1.5 py-1 text-gray-600
-                             focus:outline-none focus:border-accent bg-white flex-shrink-0"
-                  style={{ maxWidth: "88px" }}
-                >
-                  {classes.map((cls) => (
-                    <option key={cls.id} value={cls.id}>{cls.name}</option>
-                  ))}
-                </select>
-              )}
-
-              {/* Remove button */}
-              <button
-                onClick={() => removeEntry(idx)}
-                className="text-gray-300 hover:text-red-400 transition-colors flex-shrink-0 text-base leading-none px-1"
+          {fileEntries.map((entry, idx) => {
+            const assignedCls = classes.find((c) => c.id === entry.classId);
+            const isZipEntry  = entry.isZip;
+            return (
+              <div
+                key={idx}
+                className={`flex items-center gap-3 px-3 py-2.5 rounded-lg border ${
+                  entry.error ? "border-red-200 bg-red-50"
+                  : isZipEntry ? "border-blue-100 bg-blue-50/40"
+                  : "border-gray-200 bg-white"
+                }`}
               >
-                ×
-              </button>
-            </div>
-          ))}
+                {/* Waveform or ZIP icon */}
+                {isZipEntry ? (
+                  <div className="w-16 h-7 bg-blue-100 rounded flex-shrink-0 flex items-center justify-center">
+                    <svg className="w-4 h-4 text-blue-400" fill="none" viewBox="0 0 16 16" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.4}
+                        d="M4 1h5l4 4v9a1 1 0 01-1 1H4a1 1 0 01-1-1V2a1 1 0 011-1zM9 1v4h4" />
+                      <path strokeLinecap="round" strokeWidth={1.4} d="M7 7v5M5.5 10.5h3" />
+                    </svg>
+                  </div>
+                ) : entry.reading ? (
+                  <div className="w-16 h-7 bg-gray-100 rounded animate-pulse flex-shrink-0" />
+                ) : entry.error ? (
+                  <div className="w-16 h-7 bg-red-100 rounded flex-shrink-0 flex items-center justify-center">
+                    <span className="text-xs text-red-400">!</span>
+                  </div>
+                ) : entry.parsed ? (
+                  <WaveformThumb data={entry.parsed.az} color={AXIS_COLORS.az} w={64} h={28} />
+                ) : (
+                  <div className="w-16 h-7 bg-gray-100 rounded flex-shrink-0" />
+                )}
 
-          {/* Add to dataset button + error */}
+                {/* File info */}
+                <div className="flex-1 min-w-0">
+                  {assignedCls && !entry.error ? (
+                    <div className="flex items-center gap-1.5 mb-0.5">
+                      <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: assignedCls.color }} />
+                      <span className="text-xs font-bold" style={{ color: assignedCls.color }}>{assignedCls.name}</span>
+                    </div>
+                  ) : null}
+                  <p className="text-xs text-gray-400 truncate">{entry.name}</p>
+                  {entry.error ? (
+                    <p className="text-[10px] text-red-500 mt-0.5 leading-tight">{entry.error}</p>
+                  ) : entry.note ? (
+                    <p className="text-[10px] text-blue-500 mt-0.5 leading-tight">{entry.note}</p>
+                  ) : entry.parsed ? (
+                    <p className="text-[10px] text-gray-300 mt-0.5 tabular-nums">
+                      {entry.parsed.rowCount} rows · {entry.parsed.durationMs} ms
+                    </p>
+                  ) : null}
+                </div>
+
+                {/* Class dropdown */}
+                {!entry.error && !entry.reading && (
+                  <select
+                    value={entry.classId ?? ""}
+                    onChange={(e) => setEntryClass(idx, e.target.value)}
+                    className="text-xs border border-gray-200 rounded px-1.5 py-1 text-gray-600
+                               focus:outline-none focus:border-accent bg-white flex-shrink-0"
+                    style={{ maxWidth: "88px" }}
+                  >
+                    {classes.map((cls) => (
+                      <option key={cls.id} value={cls.id}>{cls.name}</option>
+                    ))}
+                  </select>
+                )}
+
+                <button
+                  onClick={() => removeEntry(idx)}
+                  className="text-gray-300 hover:text-red-400 transition-colors flex-shrink-0 text-base leading-none px-1"
+                >×</button>
+              </div>
+            );
+          })}
+
+          {/* Add to dataset button */}
           <div className="flex items-center gap-3">
-            {uploadError && (
-              <p className="text-xs text-red-500 flex-1">{uploadError}</p>
-            )}
+            {uploadError && <p className="text-xs text-red-500 flex-1">{uploadError}</p>}
             <button
               onClick={addToDataset}
               disabled={!goodEntries.length || uploading}
