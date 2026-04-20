@@ -247,75 +247,30 @@ function FileUploadMode({
     reader.readAsText(file);
   }
 
-  const addFiles = useCallback(async (newFiles) => {
-    const fileArr = Array.from(newFiles);
-    const initial = [];
-    const csvFiles = [];
-    const zipFiles = [];
+  const addFiles = useCallback((newFiles) => {
+    const newEntries = [];
+    const csvToRead  = [];
 
-    for (const f of fileArr) {
+    for (const f of Array.from(newFiles)) {
       if (f.name.toLowerCase().endsWith(".zip")) {
-        zipFiles.push(f);
+        newEntries.push({
+          file: f, name: f.name, isZip: true,
+          parsed: null, classId: null, detected: null,
+          error: null, note: "ZIP — class auto-detected from filenames inside", reading: false,
+        });
       } else {
         const entry = {
-          file: f, name: f.name, isZip: false, zipFile: null, zipPath: null,
+          file: f, name: f.name, isZip: false,
           parsed: null, ...detectClassFromFilename(f.name, classes, activeClassId),
           error: null, note: null, reading: true,
         };
-        initial.push(entry);
-        csvFiles.push({ entry, file: f });
+        newEntries.push(entry);
+        csvToRead.push(f);
       }
     }
 
-    // Add CSV entries immediately and start reading
-    if (initial.length) {
-      setFileEntries((prev) => [...prev, ...initial]);
-      csvFiles.forEach(({ file }) => readCsvEntry(file));
-    }
-
-    // Handle ZIP files: call /inspect-zip then expand into sub-entries
-    for (const zf of zipFiles) {
-      // Show a loading placeholder for the zip
-      const placeholder = {
-        file: zf, name: zf.name, isZip: true, zipFile: zf, zipPath: null,
-        parsed: null, classId: null, error: null, note: "Inspecting ZIP…", reading: true,
-      };
-      setFileEntries((prev) => [...prev, placeholder]);
-
-      try {
-        const fd = new FormData();
-        fd.append("file", zf);
-        const res  = await fetch(`${API_BASE_URL}/inspect-zip`, { method: "POST", body: fd });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.detail ?? `Error ${res.status}`);
-
-        const { files: found } = data;
-        // Remove the placeholder, add one entry per found CSV
-        setFileEntries((prev) => {
-          const without = prev.filter((e) => e.file !== zf || e.zipPath !== null);
-          const newEntries = found.map((f) => ({
-            file:     zf,             // hold the original zip File object
-            name:     f.path.split("/").pop(),
-            isZip:    true,
-            zipFile:  zf,
-            zipPath:  f.path,
-            parsed:   null,
-            ...detectClassFromFilename(f.path, classes, activeClassId),
-            error:    null,
-            note:     `From ${zf.name} — ${(f.size_bytes / 1024).toFixed(1)} KB`,
-            reading:  false,
-            sizeBytes: f.size_bytes,
-          }));
-          return [...without, ...newEntries];
-        });
-      } catch (err) {
-        setFileEntries((prev) => prev.map((e) =>
-          e.file === zf && e.zipPath === null
-            ? { ...e, error: `ZIP error: ${err.message}`, note: null, reading: false }
-            : e
-        ));
-      }
-    }
+    setFileEntries((prev) => [...prev, ...newEntries]);
+    csvToRead.forEach((f) => readCsvEntry(f));
   }, [classes, activeClassId]); // eslint-disable-line react-hooks/exhaustive-deps
 
   function handleDrop(e) {
@@ -343,37 +298,16 @@ function FileUploadMode({
     setUploadError(null);
 
     try {
-      // Group entries: plain CSV vs ZIP sub-files
-      const plainEntries = goodEntries.filter((e) => !e.isZip);
-      const zipEntries   = goodEntries.filter((e) => e.isZip);
-
-      // Build zip_selections: [{path, label}]
-      const zipSelections = zipEntries.map((e) => ({
-        path:  e.zipPath,
-        label: classes.find((c) => c.id === e.classId)?.name ?? "unknown",
-      }));
-
-      // Collect unique zip files used
-      const uniqueZips = [...new Map(zipEntries.map((e) => [e.zipFile.name, e.zipFile])).values()];
-
       const formData = new FormData();
       formData.append("project_id", projectId ?? "demo-project");
 
-      // Add plain CSV files
-      for (const entry of plainEntries) {
+      for (const entry of goodEntries) {
         formData.append("files", entry.file);
-        formData.append("labels", classes.find((c) => c.id === entry.classId)?.name ?? "unknown");
-      }
-
-      // Add each unique ZIP once
-      for (const zf of uniqueZips) {
-        formData.append("files", zf);
-        formData.append("labels", "auto");
-      }
-
-      // Attach selections for ZIP sub-files
-      if (zipSelections.length) {
-        formData.append("zip_selections", JSON.stringify(zipSelections));
+        // ZIPs: always "auto" so backend detects class per file from filename
+        const label = entry.isZip
+          ? "auto"
+          : (classes.find((c) => c.id === entry.classId)?.name ?? "unknown");
+        formData.append("labels", label);
       }
 
       const res = await fetch(`${API_BASE_URL}/upload-events`, { method: "POST", body: formData });
@@ -536,19 +470,25 @@ function FileUploadMode({
                   ) : null}
                 </div>
 
-                {/* Class dropdown */}
+                {/* Class control */}
                 {!entry.error && !entry.reading && (
-                  <select
-                    value={entry.classId ?? ""}
-                    onChange={(e) => setEntryClass(idx, e.target.value)}
-                    className="text-xs border border-gray-200 rounded px-1.5 py-1 text-gray-600
-                               focus:outline-none focus:border-accent bg-white flex-shrink-0"
-                    style={{ maxWidth: "88px" }}
-                  >
-                    {classes.map((cls) => (
-                      <option key={cls.id} value={cls.id}>{cls.name}</option>
-                    ))}
-                  </select>
+                  entry.isZip ? (
+                    <span className="text-[10px] text-blue-500 border border-blue-200 rounded px-1.5 py-1 flex-shrink-0 bg-blue-50">
+                      Auto
+                    </span>
+                  ) : (
+                    <select
+                      value={entry.classId ?? ""}
+                      onChange={(e) => setEntryClass(idx, e.target.value)}
+                      className="text-xs border border-gray-200 rounded px-1.5 py-1 text-gray-600
+                                 focus:outline-none focus:border-accent bg-white flex-shrink-0"
+                      style={{ maxWidth: "88px" }}
+                    >
+                      {classes.map((cls) => (
+                        <option key={cls.id} value={cls.id}>{cls.name}</option>
+                      ))}
+                    </select>
+                  )
                 )}
 
                 <button
