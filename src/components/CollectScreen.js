@@ -289,8 +289,19 @@ function FileUploadMode({
     setFileEntries((prev) => prev.map((e, i) => i === idx ? { ...e, classId, detected: true } : e));
   }
 
-  // Entries we can actually submit (no error, not reading, not a ZIP parent)
+  // Entries we can actually submit (no error, not reading)
   const goodEntries = fileEntries.filter((e) => !e.error && !e.reading);
+
+  function setEventClass(evId, newClassId) {
+    const cls = classes.find((c) => c.id === newClassId);
+    setEvents((prev) => prev.map((e) => e.id !== evId ? e : {
+      ...e,
+      classId:      newClassId,
+      className:    cls?.name  ?? e.className,
+      classColor:   cls?.color ?? e.classColor,
+      autoAssigned: false,
+    }));
+  }
 
   async function addToDataset() {
     if (!goodEntries.length || uploading) return;
@@ -319,21 +330,34 @@ function FileUploadMode({
 
       // Build event objects for the list
       const newEvents = data.events.map((ev) => {
-        const cls = classes.find((c) => c.name === ev.class_label)
-          ?? classes.find((c) => c.name.toLowerCase() === ev.class_label?.toLowerCase())
-          ?? classes[0];
+        // Try exact match, then case-insensitive, then filename fuzzy match
+        const norm = (s) => (s || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+        const matchedCls =
+          classes.find((c) => c.name === ev.class_label) ??
+          classes.find((c) => c.name.toLowerCase() === (ev.class_label || "").toLowerCase()) ??
+          (() => {
+            const fnWords = norm(ev.filename || "").split(" ").filter(Boolean);
+            return classes.find((c) => {
+              const cw = norm(c.name).split(" ").filter(Boolean);
+              return cw.length > 0 && cw.every((w) => fnWords.includes(w));
+            });
+          })();
+        const autoAssigned = !matchedCls;
+        const cls = matchedCls ?? classes[0];
         return {
-          id:         ev.id,
-          classId:    cls?.id    ?? "cls-event",
-          className:  ev.class_label,
-          classColor: cls?.color ?? "#1D9E75",
-          waveform:   ev.waveform_az ?? [],
-          waveColor:  AXIS_COLORS.az,
-          duration:   ev.duration_ms,
-          timestamp:  new Date().toLocaleTimeString(),
-          snapshot:   { ax: [], ay: [], az: ev.waveform_az ?? [] },
-          filename:   ev.filename,
-          notes:      ev.notes ?? [],
+          id:            ev.id,
+          classId:       cls?.id    ?? "cls-event",
+          className:     cls?.name  ?? ev.class_label,
+          classColor:    cls?.color ?? "#1D9E75",
+          waveform:      ev.waveform_az ?? [],
+          waveColor:     AXIS_COLORS.az,
+          duration:      ev.duration_ms,
+          timestamp:     new Date().toLocaleTimeString(),
+          snapshot:      { ax: [], ay: [], az: ev.waveform_az ?? [] },
+          filename:      ev.filename,
+          notes:         ev.notes ?? [],
+          autoAssigned,
+          detectedLabel: ev.class_label,
         };
       });
       setEvents((prev) => [...newEvents, ...prev]);
@@ -397,7 +421,7 @@ function FileUploadMode({
             Browse files
           </button>
           <a
-            href="/sample-data/metal_tap.csv"
+            href="/sample-data.zip"
             download
             onClick={(e) => e.stopPropagation()}
             className="text-xs text-accent hover:text-accent-dark transition-colors"
@@ -552,26 +576,43 @@ function FileUploadMode({
           events.map((ev) => (
             <div
               key={ev.id}
-              className="flex items-center gap-3 px-3 py-2 bg-white border border-gray-100 rounded hover:border-gray-200 group transition-colors"
+              className={`flex items-center gap-2 px-3 py-2 border rounded group transition-colors ${
+                ev.autoAssigned
+                  ? "bg-yellow-50 border-yellow-200"
+                  : "bg-white border-gray-100 hover:border-gray-200"
+              }`}
             >
               <WaveformThumb data={ev.waveform} color={ev.waveColor} />
               <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2">
-                  <span
-                    className="text-xs font-bold px-1.5 py-0.5 rounded"
-                    style={{ color: ev.classColor, backgroundColor: `${ev.classColor}1a` }}
+                <div className="flex items-center gap-1.5 flex-wrap">
+                  <select
+                    value={ev.classId ?? ""}
+                    onChange={(e) => setEventClass(ev.id, e.target.value)}
+                    className="text-xs border rounded px-1 py-0.5 focus:outline-none focus:border-accent bg-white flex-shrink-0"
+                    style={{
+                      color: ev.classColor,
+                      borderColor: `${ev.classColor}60`,
+                      maxWidth: "90px",
+                    }}
                   >
-                    {ev.className}
-                  </span>
+                    {classes.map((c) => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
+                  </select>
                   <span className="text-xs text-gray-400 tabular-nums">{ev.duration} ms</span>
                 </div>
-                {ev.filename && (
+                {ev.autoAssigned && (
+                  <p className="text-[10px] text-yellow-600 mt-0.5 leading-tight">
+                    Auto-assigned to {ev.className} — change if needed
+                  </p>
+                )}
+                {ev.filename && !ev.autoAssigned && (
                   <p className="text-[10px] text-gray-300 mt-0.5 truncate">{ev.filename}</p>
                 )}
               </div>
               <button
                 onClick={() => setEvents((prev) => prev.filter((e) => e.id !== ev.id))}
-                className="opacity-0 group-hover:opacity-100 text-gray-300 hover:text-red-400 transition-all text-base leading-none px-1"
+                className="opacity-0 group-hover:opacity-100 text-gray-300 hover:text-red-400 transition-all text-base leading-none px-1 flex-shrink-0"
                 title="Delete"
               >
                 ×
@@ -586,7 +627,7 @@ function FileUploadMode({
 
 // ── Main component ────────────────────────────────────────────────────────────
 
-export default function CollectScreen({ config, projectId, events, setEvents, analyzeResult, onAnalysisReady, chatHistory, setChatHistory, onApplyAction }) {
+export default function CollectScreen({ config, projectId, classes, setClasses, activeClassId, setActiveClassId, events, setEvents, analyzeResult, onAnalysisReady, chatHistory, setChatHistory, onApplyAction }) {
   const activeAxes   = getActiveAxes(config?.sensorType);
   const isFileUpload = (config?.connectionType ?? "").toLowerCase().includes("file");
 
@@ -600,16 +641,13 @@ export default function CollectScreen({ config, projectId, events, setEvents, an
   const classesRef       = useRef(null);
   const addEventRef      = useRef(null);   // always points to latest callback
 
-  // State
-  const [isRecording,   setIsRecording]   = useState(true);
-  const [classes,       setClasses]       = useState([
-    { id: "cls-idle",  name: "idle",  color: CLASS_PALETTE[1] },
-    { id: "cls-event", name: "event", color: CLASS_PALETTE[0] },
-  ]);
-  const [activeClassId, setActiveClassId] = useState("cls-event");
-  const [newClassName,  setNewClassName]  = useState("");
-  const [showAddClass,  setShowAddClass]  = useState(false);
-  const [timeSinceLast, setTimeSinceLast] = useState(null);
+  // State (classes/activeClassId are now props from App.js for persistence)
+  const [isRecording,     setIsRecording]     = useState(true);
+  const [newClassName,    setNewClassName]    = useState("");
+  const [showAddClass,    setShowAddClass]    = useState(false);
+  const [deletingClassId, setDeletingClassId] = useState(null);
+  const [clearAllConfirm, setClearAllConfirm] = useState(false);
+  const [timeSinceLast,   setTimeSinceLast]   = useState(null);
   const lastEventTimeRef = useRef(null);
 
   const [copilot, setCopilot] = useState({ status: "idle", data: null, error: null });
@@ -900,6 +938,15 @@ export default function CollectScreen({ config, projectId, events, setEvents, an
     setShowAddClass(false);
   }
 
+  function handleDeleteClass(classId) {
+    if (classes.length <= 1) return;
+    setEvents((prev) => prev.filter((e) => e.classId !== classId));
+    const remaining = classes.filter((c) => c.id !== classId);
+    setClasses(remaining);
+    if (activeClassId === classId) setActiveClassId(remaining[0]?.id ?? null);
+    setDeletingClassId(null);
+  }
+
   function deleteEvent(id) {
     setEvents((prev) => prev.filter((e) => e.id !== id));
   }
@@ -998,6 +1045,22 @@ export default function CollectScreen({ config, projectId, events, setEvents, an
           <div className="flex items-center gap-1.5">
             <span className="text-gray-400">events</span>
             <span className="text-gray-200 font-bold tabular-nums">{totalEvents}</span>
+            {totalEvents > 0 && (
+              clearAllConfirm ? (
+                <span className="flex items-center gap-1.5 ml-1">
+                  <span className="text-gray-400">Clear all?</span>
+                  <button onClick={() => { setEvents([]); setClearAllConfirm(false); }}
+                    className="text-red-400 hover:text-red-600 font-semibold">Yes</button>
+                  <button onClick={() => setClearAllConfirm(false)}
+                    className="text-gray-400 hover:text-gray-600">No</button>
+                </span>
+              ) : (
+                <button onClick={() => setClearAllConfirm(true)}
+                  className="text-gray-500 hover:text-red-400 transition-colors ml-1">
+                  Clear all
+                </button>
+              )
+            )}
           </div>
           <div className="w-px h-3 bg-gray-200" />
           <div className="flex items-center gap-1.5">
@@ -1130,46 +1193,74 @@ export default function CollectScreen({ config, projectId, events, setEvents, an
             </div>
           )}
 
-          {/* Class list — scrollable if many classes, capped so panel doesn't grow unbounded */}
+          {/* Class list — scrollable if many classes */}
           <div className="divide-y divide-gray-50 overflow-y-auto" style={{ maxHeight: "220px" }}>
             {classes.map((cls) => {
               const count  = events.filter((e) => e.classId === cls.id).length;
               const pct    = Math.min(100, (count / TARGET_COUNT) * 100);
               const active = cls.id === activeClassId;
+              const isDeleting = deletingClassId === cls.id;
               return (
-                <button
-                  key={cls.id}
-                  onClick={() => setActiveClassId(cls.id)}
-                  className={`w-full text-left px-4 py-3 transition-colors ${
-                    active ? "bg-accent/5" : "hover:bg-gray-50"
-                  }`}
-                >
-                  <div className="flex items-center justify-between mb-2">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <span
-                        className="w-2 h-2 rounded-full flex-shrink-0"
-                        style={{ backgroundColor: cls.color }}
-                      />
-                      <span
-                        className={`text-xs font-semibold truncate ${
-                          active ? "text-gray-800" : "text-gray-500"
+                <div key={cls.id} className={`transition-colors ${active ? "bg-accent/5" : ""}`}>
+                  {isDeleting ? (
+                    /* ── inline delete confirmation ── */
+                    <div className="px-4 py-3">
+                      <p className="text-xs text-red-600 leading-snug mb-2">
+                        Delete <strong>{cls.name}</strong> and its {count} event{count !== 1 ? "s" : ""}?
+                      </p>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => setDeletingClassId(null)}
+                          className="flex-1 text-xs border border-gray-200 rounded py-1 text-gray-500 hover:border-gray-400"
+                        >
+                          Cancel
+                        </button>
+                        <button
+                          onClick={() => handleDeleteClass(cls.id)}
+                          className="flex-1 text-xs bg-red-500 text-white rounded py-1 hover:bg-red-600"
+                        >
+                          Delete
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    /* ── normal class row ── */
+                    <div className="relative group/cls">
+                      <button
+                        onClick={() => setActiveClassId(cls.id)}
+                        className={`w-full text-left px-4 py-3 transition-colors ${
+                          active ? "" : "hover:bg-gray-50"
                         }`}
                       >
-                        {cls.name}
-                      </span>
+                        <div className="flex items-center justify-between mb-2">
+                          <div className="flex items-center gap-2 min-w-0">
+                            <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: cls.color }} />
+                            <span className={`text-xs font-semibold truncate ${active ? "text-gray-800" : "text-gray-500"}`}>
+                              {cls.name}
+                            </span>
+                          </div>
+                          <span className="text-xs text-gray-400 tabular-nums flex-shrink-0 ml-1">
+                            {count}/{TARGET_COUNT}
+                          </span>
+                        </div>
+                        <div className="w-full h-1 bg-gray-100 rounded-full overflow-hidden">
+                          <div className="h-full rounded-full transition-all duration-500"
+                            style={{ width: `${pct}%`, backgroundColor: cls.color }} />
+                        </div>
+                      </button>
+                      {/* Delete button — visible on hover, disabled if only 1 class */}
+                      <button
+                        onClick={(e) => { e.stopPropagation(); if (classes.length > 1) setDeletingClassId(cls.id); }}
+                        title={classes.length <= 1 ? "Need at least one class" : `Delete ${cls.name}`}
+                        className={`absolute top-2 right-2 w-4 h-4 rounded flex items-center justify-center
+                          text-gray-300 opacity-0 group-hover/cls:opacity-100 transition-all
+                          ${classes.length <= 1 ? "cursor-not-allowed" : "hover:text-red-400 hover:bg-red-50"}`}
+                      >
+                        ×
+                      </button>
                     </div>
-                    <span className="text-xs text-gray-400 tabular-nums flex-shrink-0 ml-1">
-                      {count}/{TARGET_COUNT}
-                    </span>
-                  </div>
-                  {/* Progress bar */}
-                  <div className="w-full h-1 bg-gray-100 rounded-full overflow-hidden">
-                    <div
-                      className="h-full rounded-full transition-all duration-500"
-                      style={{ width: `${pct}%`, backgroundColor: cls.color }}
-                    />
-                  </div>
-                </button>
+                  )}
+                </div>
               );
             })}
           </div>

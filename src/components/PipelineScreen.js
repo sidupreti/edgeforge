@@ -235,13 +235,30 @@ function RawPanel({ config }) {
   );
 }
 
-function FilterPanel({ cfg, setCfg }) {
-  const filterType = cfg.filterType ?? "butterworth";
-  const isNone     = filterType === "none";
-  const hasOrder   = filterType !== "moving_average" && filterType !== "none";
+function FilterPanel({ cfg, setCfg, analyzeResult }) {
+  const filterType    = cfg.filterType ?? "butterworth";
+  const isNone        = filterType === "none";
+  const hasOrder      = filterType !== "moving_average" && filterType !== "none";
+  const recommendedHz = analyzeResult?.cutoff_frequency?.recommended_hz ?? null;
 
   return (
     <div className="space-y-6">
+      {/* Copilot recommendation banner */}
+      {recommendedHz != null && (
+        <div className="flex items-center justify-between gap-3 rounded-lg border border-accent/30 bg-accent/5 px-3 py-2.5">
+          <p className="text-xs text-accent leading-snug">
+            <span className="font-bold">◆ Copilot recommends:</span>{" "}
+            Butterworth at {recommendedHz} Hz based on your signal data
+          </p>
+          <button
+            onClick={() => setCfg((c) => ({ ...c, cutoff: Math.round(recommendedHz), filterType: "butterworth" }))}
+            className="flex-shrink-0 text-xs font-bold text-accent border border-accent/40 rounded px-2 py-1 hover:bg-accent/10 transition-colors whitespace-nowrap"
+          >
+            Apply ↗
+          </button>
+        </div>
+      )}
+
       {/* Filter type */}
       <div>
         <SectionLabel>Filter type</SectionLabel>
@@ -314,9 +331,27 @@ function FilterPanel({ cfg, setCfg }) {
 }
 
 function NormalizePanel({ cfg, setCfg, analyzeResult }) {
-  const isNone = cfg.interpolation === "none";
+  const isNone        = cfg.interpolation === "none";
+  const recommendedMs = analyzeResult?.normalization_window?.recommended_ms ?? null;
+
   return (
     <div className="space-y-6">
+      {/* Copilot recommendation banner */}
+      {recommendedMs != null && (
+        <div className="flex items-center justify-between gap-3 rounded-lg border border-accent/30 bg-accent/5 px-3 py-2.5">
+          <p className="text-xs text-accent leading-snug">
+            <span className="font-bold">◆ Copilot recommends:</span>{" "}
+            {recommendedMs} ms window (covers p90 of your event durations)
+          </p>
+          <button
+            onClick={() => setCfg((c) => ({ ...c, window: recommendedMs }))}
+            className="flex-shrink-0 text-xs font-bold text-accent border border-accent/40 rounded px-2 py-1 hover:bg-accent/10 transition-colors whitespace-nowrap"
+          >
+            Apply ↗
+          </button>
+        </div>
+      )}
+
       <DurationCallout analyzeResult={analyzeResult} />
 
       <div>
@@ -1484,7 +1519,7 @@ export default function PipelineScreen({
     }
     switch (activeBlock) {
       case "raw":       return <RawPanel config={config} />;
-      case "filter":    return <FilterPanel cfg={filterCfg} setCfg={setFilterCfgManual} />;
+      case "filter":    return <FilterPanel cfg={filterCfg} setCfg={setFilterCfgManual} analyzeResult={analyzeResult} />;
       case "normalize": return <NormalizePanel cfg={normCfg} setCfg={setNormCfgManual} analyzeResult={analyzeResult} />;
       case "features":  return <FeaturesPanel features={features} setFeatures={setFeaturesManual} />;
       case "model":     return <ModelPanel model={model} setModel={setModelManual} />;
