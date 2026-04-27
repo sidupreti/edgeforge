@@ -359,16 +359,23 @@ export default function TrainScreen({ projectId, events, analyzeResult, pipeline
       .filter(([, v]) => v)
       .map(([k]) => k);
 
-    // Build event payload as fallback in case backend lost in-memory state
+    // Build event payload — include all events that have any axis data.
+    // snapshot.ax/ay/az are now populated from upload response.
     const eventPayload = (events || [])
-      .filter(ev => ev.snapshot?.ax?.length > 0 || ev.snapshot?.az?.length > 0)
-      .map(ev => ({
-        ax:          ev.snapshot?.ax ?? [],
-        ay:          ev.snapshot?.ay ?? [],
-        az:          ev.snapshot?.az ?? ev.waveform ?? [],
-        duration_ms: ev.duration ?? 0,
-        class_label: ev.className ?? "unknown",
-      }));
+      .filter(ev => {
+        const s = ev.snapshot;
+        return (s?.ax?.length > 0) || (s?.ay?.length > 0) || (s?.az?.length > 0) || (ev.waveform?.length > 0);
+      })
+      .map(ev => {
+        const az = ev.snapshot?.az?.length > 0 ? ev.snapshot.az : (ev.waveform ?? []);
+        return {
+          ax:          ev.snapshot?.ax?.length > 0 ? ev.snapshot.ax : az,
+          ay:          ev.snapshot?.ay?.length > 0 ? ev.snapshot.ay : az,
+          az,
+          duration_ms: ev.duration ?? 0,
+          class_label: ev.className ?? "unknown",
+        };
+      });
 
     try {
       const res = await fetch(`${API_BASE_URL}/train`, {
@@ -385,7 +392,7 @@ export default function TrainScreen({ projectId, events, analyzeResult, pipeline
           custom_blocks:     (pipelineBlocks || [])
             .filter(b => !b.skipped && (b.type === "custom" || b.type === "standard") && b.code)
             .map(b => ({ id: b.id, name: b.name, code: b.code })),
-          events:            eventPayload.length > 0 ? eventPayload : undefined,
+          events:            eventPayload.length > 0 ? eventPayload : null,
         }),
       });
       if (!res.ok) {

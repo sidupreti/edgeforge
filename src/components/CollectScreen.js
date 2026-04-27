@@ -367,7 +367,7 @@ function FileUploadMode({
           waveColor:     AXIS_COLORS.az,
           duration:      ev.duration_ms,
           timestamp:     new Date().toLocaleTimeString(),
-          snapshot:      { ax: [], ay: [], az: ev.waveform_az ?? [] },
+          snapshot:      { ax: ev.waveform_ax ?? [], ay: ev.waveform_ay ?? [], az: ev.waveform_az ?? [] },
           filename:      ev.filename,
           notes:         ev.notes ?? [],
           autoAssigned,
@@ -1366,12 +1366,14 @@ export default function CollectScreen({ config, projectId, classes, setClasses, 
             {/* ── error ── */}
             {copilot.status === "error" && (
               <div>
-                <p className="text-xs text-red-500 leading-relaxed">{copilot.error}</p>
+                <p className="text-xs text-gray-400 leading-relaxed">
+                  Upload more events to unlock signal analysis.
+                </p>
                 <button
                   onClick={() => setCopilot({ status: "idle", data: null, error: null })}
                   className="mt-2 text-xs text-accent hover:underline"
                 >
-                  Retry
+                  Dismiss
                 </button>
               </div>
             )}
