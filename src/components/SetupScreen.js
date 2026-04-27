@@ -267,6 +267,14 @@ export default function SetupScreen({ config, setConfig, submitError }) {
             options={CONNECTION_TYPES}
             placeholder="Select connection…"
           />
+          {connectionType === "File Upload (CSV / WAV)" && (
+            <p className="text-xs text-gray-400 mt-1.5 leading-relaxed">
+              Name files with your class as the first word:{" "}
+              <code className="text-accent text-[11px]">metal_tap_01.csv</code>,{" "}
+              <code className="text-accent text-[11px]">wood_sample.csv</code>.{" "}
+              Format: <code className="text-accent text-[11px]">timestamp_us, ax, ay, az</code> — no header row.
+            </p>
+          )}
         </div>
 
         <div>

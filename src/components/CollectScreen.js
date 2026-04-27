@@ -199,15 +199,16 @@ function FormatGuide() {
 // ── File upload mode ──────────────────────────────────────────────────────────
 
 function FileUploadMode({
-  classes, activeClassId, events, setEvents, onAnalysisReady,
+  classes, setClasses, activeClassId, events, setEvents, onAnalysisReady,
   projectId, analyzeResult, separabilityNote,
   copilot, setCopilot,
 }) {
   // fileEntries: {file, name, isZip, zipFile, zipPath, parsed, classId, error, reading, note}
-  const [fileEntries,  setFileEntries]  = useState([]);
-  const [uploading,    setUploading]    = useState(false);
-  const [uploadError,  setUploadError]  = useState(null);
-  const [dragOver,     setDragOver]     = useState(false);
+  const [fileEntries,   setFileEntries]   = useState([]);
+  const [uploading,     setUploading]     = useState(false);
+  const [uploadError,   setUploadError]   = useState(null);
+  const [uploadSuccess, setUploadSuccess] = useState(null);
+  const [dragOver,      setDragOver]      = useState(false);
   const inputRef = useRef(null);
 
   // Read a CSV file and update its entry in state
@@ -307,6 +308,7 @@ function FileUploadMode({
     if (!goodEntries.length || uploading) return;
     setUploading(true);
     setUploadError(null);
+    setUploadSuccess(null);
 
     try {
       const formData = new FormData();
@@ -314,11 +316,8 @@ function FileUploadMode({
 
       for (const entry of goodEntries) {
         formData.append("files", entry.file);
-        // ZIPs: always "auto" so backend detects class per file from filename
-        const label = entry.isZip
-          ? "auto"
-          : (classes.find((c) => c.id === entry.classId)?.name ?? "unknown");
-        formData.append("labels", label);
+        // Always send "auto" — backend extracts class from filename
+        formData.append("labels", "auto");
       }
 
       const res = await fetch(`${API_BASE_URL}/upload-events`, { method: "POST", body: formData });
@@ -328,22 +327,37 @@ function FileUploadMode({
       }
       const data = await res.json();
 
-      // Build event objects for the list
-      const newEvents = data.events.map((ev) => {
-        // Try exact match, then case-insensitive, then filename fuzzy match
-        const norm = (s) => (s || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
-        const matchedCls =
-          classes.find((c) => c.name === ev.class_label) ??
-          classes.find((c) => c.name.toLowerCase() === (ev.class_label || "").toLowerCase()) ??
-          (() => {
-            const fnWords = norm(ev.filename || "").split(" ").filter(Boolean);
-            return classes.find((c) => {
-              const cw = norm(c.name).split(" ").filter(Boolean);
-              return cw.length > 0 && cw.every((w) => fnWords.includes(w));
+      // ── Auto-create any classes returned by backend that don't exist yet ────
+      let allClasses = [...classes];
+      const detectedClassNames = data.detected_classes ?? [];
+      if (detectedClassNames.length > 0) {
+        let colorIdx = allClasses.length;
+        const newCls = [];
+        for (const name of detectedClassNames) {
+          const exists = allClasses.find((c) => c.name.toLowerCase() === name.toLowerCase());
+          if (!exists) {
+            newCls.push({
+              id:    `cls-${name}-${Date.now()}-${colorIdx}`,
+              name,
+              color: CLASS_PALETTE[colorIdx % CLASS_PALETTE.length],
             });
-          })();
-        const autoAssigned = !matchedCls;
-        const cls = matchedCls ?? classes[0];
+            colorIdx++;
+          }
+        }
+        if (newCls.length > 0) {
+          allClasses = [...allClasses, ...newCls];
+          setClasses(allClasses);
+        }
+      }
+
+      // ── Map events to their detected class (using allClasses) ───────────────
+      const newEvents = data.events.map((ev) => {
+        const matchedCls =
+          allClasses.find((c) => c.name === ev.class_label) ??
+          allClasses.find((c) => c.name.toLowerCase() === (ev.class_label || "").toLowerCase());
+        // autoAssigned only when no class_label came back or no match found
+        const autoAssigned = !ev.class_label || !matchedCls;
+        const cls = matchedCls ?? allClasses[0];
         return {
           id:            ev.id,
           classId:       cls?.id    ?? "cls-event",
@@ -361,6 +375,17 @@ function FileUploadMode({
         };
       });
       setEvents((prev) => [...newEvents, ...prev]);
+
+      // ── Build success summary banner ─────────────────────────────────────────
+      const counts = {};
+      for (const ev of newEvents) {
+        counts[ev.className] = (counts[ev.className] ?? 0) + 1;
+      }
+      const parts = Object.entries(counts).map(([name, n]) => `${name} (${n})`);
+      const total = newEvents.length;
+      setUploadSuccess(
+        `Uploaded ${total} event${total !== 1 ? "s" : ""} across ${parts.length} class${parts.length !== 1 ? "es" : ""}: ${parts.join(", ")}`
+      );
 
       if (data.analysis) {
         onAnalysisReady?.(data.analysis, null);
@@ -552,6 +577,18 @@ function FileUploadMode({
               )}
             </button>
           </div>
+
+          {/* Success banner */}
+          {uploadSuccess && (
+            <div className="flex items-center gap-2 px-3 py-2 rounded-lg border border-accent/30 bg-accent/5">
+              <span className="w-1.5 h-1.5 rounded-full bg-accent flex-shrink-0" />
+              <p className="text-xs text-accent leading-snug">{uploadSuccess}</p>
+              <button
+                onClick={() => setUploadSuccess(null)}
+                className="ml-auto text-gray-400 hover:text-gray-600 text-sm leading-none flex-shrink-0"
+              >×</button>
+            </div>
+          )}
         </div>
       )}
 
@@ -576,11 +613,7 @@ function FileUploadMode({
           events.map((ev) => (
             <div
               key={ev.id}
-              className={`flex items-center gap-2 px-3 py-2 border rounded group transition-colors ${
-                ev.autoAssigned
-                  ? "bg-yellow-50 border-yellow-200"
-                  : "bg-white border-gray-100 hover:border-gray-200"
-              }`}
+              className="flex items-center gap-2 px-3 py-2 border rounded group transition-colors bg-white border-gray-100 hover:border-gray-200"
             >
               <WaveformThumb data={ev.waveform} color={ev.waveColor} />
               <div className="flex-1 min-w-0">
@@ -601,13 +634,14 @@ function FileUploadMode({
                   </select>
                   <span className="text-xs text-gray-400 tabular-nums">{ev.duration} ms</span>
                 </div>
-                {ev.autoAssigned && (
+                {ev.autoAssigned ? (
                   <p className="text-[10px] text-yellow-600 mt-0.5 leading-tight">
-                    Auto-assigned to {ev.className} — change if needed
+                    Class not detected — assigned to {ev.className}. Change if needed.
                   </p>
-                )}
-                {ev.filename && !ev.autoAssigned && (
-                  <p className="text-[10px] text-gray-300 mt-0.5 truncate">{ev.filename}</p>
+                ) : (
+                  ev.filename && (
+                    <p className="text-[10px] text-gray-300 mt-0.5 truncate">{ev.filename}</p>
+                  )
                 )}
               </div>
               <button
@@ -983,6 +1017,7 @@ export default function CollectScreen({ config, projectId, classes, setClasses, 
       {isFileUpload ? (
         <FileUploadMode
           classes={classes}
+          setClasses={setClasses}
           activeClassId={activeClassId}
           events={events}
           setEvents={setEvents}
