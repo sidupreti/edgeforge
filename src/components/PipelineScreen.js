@@ -1335,6 +1335,13 @@ export default function PipelineScreen({
   const [designError,    setDesignError]    = useState(null);
   const [dismissed,      setDismissed]      = useState(false);
   const [showAddModal,   setShowAddModal]   = useState(false);
+  // Track which blocks the user has clicked — starts with "filter" since it's auto-selected on mount
+  const [visitedBlocks,  setVisitedBlocks]  = useState(() => new Set(["filter"]));
+
+  function handleBlockClick(blockId) {
+    setActiveBlock(blockId);
+    setVisitedBlocks((prev) => new Set([...prev, blockId]));
+  }
 
   // Consume pendingFlash from App: navigate to the block, flash it for 600ms
   useEffect(() => {
@@ -1616,7 +1623,7 @@ export default function PipelineScreen({
                   block={{ id: "raw", label: "Raw Signal", sublabel: "Source", type: "builtin", skipped: false }}
                   isActive={activeBlock === "raw"}
                   isPast={false}
-                  onClick={() => setActiveBlock("raw")}
+                  onClick={() => handleBlockClick("raw")}
                   isFlashing={false}
                   isAnimating={false}
                   isAiBadged={false}
@@ -1650,7 +1657,7 @@ export default function PipelineScreen({
                                   block={block}
                                   isActive={activeBlock === block.id}
                                   isPast={isPast}
-                                  onClick={() => setActiveBlock(block.id)}
+                                  onClick={() => handleBlockClick(block.id)}
                                   isFlashing={flashingBlock === block.id}
                                   isAnimating={animatingBlock === block.id}
                                   isAiBadged={!!(aiConfiguredBlocks?.[block.id])}
@@ -1687,6 +1694,18 @@ export default function PipelineScreen({
               </div>
             </DragDropContext>
           </div>
+
+          {/* Navigation hint — fades out once user has clicked 2+ blocks */}
+          {visitedBlocks.size < 2 && (
+            <div className="flex items-center justify-center gap-2 -mt-2 mb-1">
+              <svg className="w-3 h-3 text-gray-300 flex-shrink-0" viewBox="0 0 16 16" fill="none">
+                <path d="M8 2v12M3 7l5-5 5 5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
+              </svg>
+              <p className="text-xs text-gray-400 tracking-wide">
+                Configure each stage above, then hit <span className="text-gray-500 font-semibold">Next</span> to train your model
+              </p>
+            </div>
+          )}
 
           {/* Config panel */}
           <div className="border border-gray-200 rounded-xl p-6 bg-white flex-1">
