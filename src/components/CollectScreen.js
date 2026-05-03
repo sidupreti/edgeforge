@@ -380,7 +380,10 @@ function FileUploadMode({
       // ── 2. ZIP entries — extract in browser, upload CSVs in batches of 10 ───
       const zipEntries = goodEntries.filter((e) => e.isZip);
       for (const zipEntry of zipEntries) {
-        const zip = await JSZip.loadAsync(zipEntry.file);
+        // Read into ArrayBuffer BEFORE any other awaits so the file handle
+        // doesn't expire across async gaps (fixes "file not found" on some browsers)
+        const arrayBuffer = await zipEntry.file.arrayBuffer();
+        const zip = await JSZip.loadAsync(arrayBuffer);
 
         // Collect all CSV/TXT entries (skip macOS metadata dirs)
         const zipCsvFiles = [];
