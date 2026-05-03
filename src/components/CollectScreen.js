@@ -1,5 +1,4 @@
 import React, { useRef, useEffect, useState, useCallback } from "react";
-import JSZip from "jszip";
 import API_BASE_URL from "../config";
 import CopilotChat from "./CopilotChat";
 
@@ -167,7 +166,6 @@ function FormatGuide() {
     { label: "WISDM",             cols: "user, activity, timestamp, x, y, z", note: "activity column auto-used as class" },
     { label: "Generic XYZ",       cols: "any cols with time + x/y/z axes",   note: "column names auto-detected" },
     { label: "Headerless",        cols: "numeric rows, no header",            note: "assumes 100 Hz, columns: ts, x, y, z" },
-    { label: "ZIP archive",       cols: ".zip containing .csv or .txt files", note: "each file becomes a selectable entry" },
   ];
   return (
     <div className="flex-shrink-0">
@@ -204,14 +202,12 @@ function FileUploadMode({
   projectId, analyzeResult, separabilityNote,
   copilot, setCopilot,
 }) {
-  // fileEntries: {file, name, isZip, zipFile, zipPath, parsed, classId, error, reading, note}
+  // fileEntries: {file, name, parsed, classId, detected, error, note, reading}
   const [fileEntries,   setFileEntries]   = useState([]);
   const [uploading,     setUploading]     = useState(false);
   const [uploadError,   setUploadError]   = useState(null);
   const [uploadSuccess, setUploadSuccess] = useState(null);
   const [dragOver,      setDragOver]      = useState(false);
-  // zipProgress: { batchNum, totalBatches, filesUploaded, totalFiles } | null
-  const [zipProgress,   setZipProgress]   = useState(null);
   const inputRef = useRef(null);
 
   // Read a CSV file and update its entry in state
@@ -256,21 +252,15 @@ function FileUploadMode({
     const csvToRead  = [];
 
     for (const f of Array.from(newFiles)) {
-      if (f.name.toLowerCase().endsWith(".zip")) {
-        newEntries.push({
-          file: f, name: f.name, isZip: true,
-          parsed: null, classId: null, detected: null,
-          error: null, note: "ZIP — class auto-detected from filenames inside", reading: false,
-        });
-      } else {
-        const entry = {
-          file: f, name: f.name, isZip: false,
-          parsed: null, ...detectClassFromFilename(f.name, classes, activeClassId),
-          error: null, note: null, reading: true,
-        };
-        newEntries.push(entry);
-        csvToRead.push(f);
-      }
+      // Skip zip files — per-class upload (right panel) handles multi-file ingestion
+      if (f.name.toLowerCase().endsWith(".zip")) continue;
+      const entry = {
+        file: f, name: f.name,
+        parsed: null, ...detectClassFromFilename(f.name, classes, activeClassId),
+        error: null, note: null, reading: true,
+      };
+      newEntries.push(entry);
+      csvToRead.push(f);
     }
 
     setFileEntries((prev) => [...prev, ...newEntries]);
@@ -312,29 +302,40 @@ function FileUploadMode({
     setUploading(true);
     setUploadError(null);
     setUploadSuccess(null);
-    setZipProgress(null);
 
-    const BATCH_SIZE = 10;
+    try {
+      const fd = new FormData();
+      fd.append("project_id", projectId ?? "demo-project");
+      for (const entry of goodEntries) {
+        fd.append("files", entry.file);
+        fd.append("labels", "auto");  // backend detects class from filename
+      }
 
-    // Build events from one /upload-events response, accumulating new classes
-    function applyBatchResponse(data, currentClasses) {
-      const detectedClassNames = data.detected_classes ?? [];
-      let updatedClasses = [...currentClasses];
-      let colorIdx = updatedClasses.length;
-      for (const name of detectedClassNames) {
-        if (!updatedClasses.find((c) => c.name.toLowerCase() === name.toLowerCase())) {
-          updatedClasses.push({
-            id:    `cls-${name}-${Date.now()}-${colorIdx}`,
+      const res = await fetch(`${API_BASE_URL}/upload-events`, { method: "POST", body: fd });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.detail?.message ?? body.detail ?? `Server error ${res.status}`);
+      }
+      const data = await res.json();
+
+      // Auto-create any classes returned by backend that don't exist yet
+      let allClasses = [...classes];
+      for (const name of (data.detected_classes ?? [])) {
+        if (!allClasses.find((c) => c.name.toLowerCase() === name.toLowerCase())) {
+          allClasses.push({
+            id:    `cls-${name}-${Date.now()}-${allClasses.length}`,
             name,
-            color: CLASS_PALETTE[colorIdx++ % CLASS_PALETTE.length],
+            color: CLASS_PALETTE[allClasses.length % CLASS_PALETTE.length],
           });
         }
       }
-      const batchEvents = data.events.map((ev) => {
+      if (allClasses.length > classes.length) setClasses(allClasses);
+
+      const newEvents = data.events.map((ev) => {
         const matchedCls =
-          updatedClasses.find((c) => c.name === ev.class_label) ??
-          updatedClasses.find((c) => c.name.toLowerCase() === (ev.class_label || "").toLowerCase());
-        const cls = matchedCls ?? updatedClasses[0];
+          allClasses.find((c) => c.name === ev.class_label) ??
+          allClasses.find((c) => c.name.toLowerCase() === (ev.class_label || "").toLowerCase());
+        const cls = matchedCls ?? allClasses[0];
         return {
           id:            ev.id,
           classId:       cls?.id    ?? "cls-event",
@@ -351,112 +352,20 @@ function FileUploadMode({
           detectedLabel: ev.class_label,
         };
       });
-      return { batchEvents, updatedClasses };
-    }
+      setEvents((prev) => [...newEvents, ...prev]);
 
-    try {
-      const allNewEvents = [];
-      let allClasses = [...classes];
-
-      // ── 1. Plain CSV/TXT entries — single upload (no timeout risk) ──────────
-      const csvEntries = goodEntries.filter((e) => !e.isZip);
-      if (csvEntries.length > 0) {
-        const fd = new FormData();
-        fd.append("project_id", projectId ?? "demo-project");
-        for (const entry of csvEntries) {
-          fd.append("files", entry.file);
-          fd.append("labels", "auto");
-        }
-        const res = await fetch(`${API_BASE_URL}/upload-events`, { method: "POST", body: fd });
-        if (!res.ok) {
-          const body = await res.json().catch(() => ({}));
-          throw new Error(body.detail?.message ?? body.detail ?? `Server error ${res.status}`);
-        }
-        const { batchEvents, updatedClasses } = applyBatchResponse(await res.json(), allClasses);
-        allNewEvents.push(...batchEvents);
-        allClasses = updatedClasses;
-      }
-
-      // ── 2. ZIP entries — extract in browser, upload CSVs in batches of 10 ───
-      const zipEntries = goodEntries.filter((e) => e.isZip);
-      for (const zipEntry of zipEntries) {
-        // Read into ArrayBuffer BEFORE any other awaits so the file handle
-        // doesn't expire across async gaps (fixes "file not found" on some browsers)
-        const arrayBuffer = await zipEntry.file.arrayBuffer();
-        const zip = await JSZip.loadAsync(arrayBuffer);
-
-        // Collect all CSV/TXT entries (skip macOS metadata dirs)
-        const zipCsvFiles = [];
-        zip.forEach((path, obj) => {
-          if (!obj.dir &&
-              !path.startsWith("__MACOSX") &&
-              (path.toLowerCase().endsWith(".csv") || path.toLowerCase().endsWith(".txt"))) {
-            zipCsvFiles.push({ path, obj });
-          }
-        });
-        zipCsvFiles.sort((a, b) => a.path.localeCompare(b.path));
-
-        const totalFiles = zipCsvFiles.length;
-        if (totalFiles === 0) continue;
-
-        // Chunk into batches of BATCH_SIZE
-        const batches = [];
-        for (let i = 0; i < totalFiles; i += BATCH_SIZE) {
-          batches.push(zipCsvFiles.slice(i, i + BATCH_SIZE));
-        }
-
-        for (let bi = 0; bi < batches.length; bi++) {
-          // Update progress BEFORE each batch so the user sees it immediately
-          setZipProgress({
-            batchNum:     bi + 1,
-            totalBatches: batches.length,
-            filesUploaded: bi * BATCH_SIZE,
-            totalFiles,
-          });
-
-          const fd = new FormData();
-          fd.append("project_id", projectId ?? "demo-project");
-          for (const { path, obj } of batches[bi]) {
-            const blob     = await obj.async("blob");
-            const filename = path.split("/").pop();
-            fd.append("files", new File([blob], filename, { type: "text/csv" }));
-            fd.append("labels", "auto");
-          }
-
-          const res = await fetch(`${API_BASE_URL}/upload-events`, { method: "POST", body: fd });
-          if (!res.ok) {
-            const body = await res.json().catch(() => ({}));
-            throw new Error(
-              body.detail?.message ?? body.detail ??
-              `Server error ${res.status} on batch ${bi + 1} of ${batches.length}`
-            );
-          }
-          const { batchEvents, updatedClasses } = applyBatchResponse(await res.json(), allClasses);
-          allNewEvents.push(...batchEvents);
-          allClasses = updatedClasses;
-        }
-        setZipProgress(null);
-      }
-
-      // ── 3. Commit classes + events ───────────────────────────────────────────
-      if (allClasses.length > classes.length) setClasses(allClasses);
-      setEvents((prev) => [...allNewEvents, ...prev]);
-
-      // Build success banner
       const counts = {};
-      for (const ev of allNewEvents) counts[ev.className] = (counts[ev.className] ?? 0) + 1;
+      for (const ev of newEvents) counts[ev.className] = (counts[ev.className] ?? 0) + 1;
       const parts = Object.entries(counts).map(([name, n]) => `${name} (${n})`);
-      const total = allNewEvents.length;
+      const total = newEvents.length;
       setUploadSuccess(
         `Uploaded ${total} event${total !== 1 ? "s" : ""} across ` +
         `${parts.length} class${parts.length !== 1 ? "es" : ""}: ${parts.join(", ")}`
       );
 
-      // Clear successfully submitted entries
       setFileEntries((prev) => prev.filter((e) => e.error));
     } catch (err) {
       setUploadError(err.message);
-      setZipProgress(null);
     } finally {
       setUploading(false);
     }
@@ -484,7 +393,7 @@ function FileUploadMode({
         <input
           ref={inputRef}
           type="file"
-          accept=".csv,.txt,.zip"
+          accept=".csv,.txt"
           multiple
           className="hidden"
           onChange={(e) => { if (e.target.files?.length) addFiles(e.target.files); e.target.value = ""; }}
@@ -495,9 +404,14 @@ function FileUploadMode({
         </svg>
         <div className="text-center">
           <p className={`text-sm font-semibold ${dragOver ? "text-accent" : "text-gray-400"}`}>
-            {dragOver ? "Drop to upload" : "Drop sensor data files here"}
+            {dragOver ? "Drop to upload" : "Drop CSV files here"}
           </p>
-          <p className="text-xs text-gray-600 mt-0.5">CSV, TXT, or ZIP — WISDM, EdgeForge native, and more</p>
+          <p className="text-xs text-gray-600 mt-0.5">
+            Upload CSV files for each class using the buttons in the Classes panel →
+          </p>
+          <p className="text-xs text-gray-700 mt-0.5">
+            Format: <code className="text-accent">timestamp_us,ax,ay,az</code> (no header)
+          </p>
         </div>
         <div className="flex items-center gap-3">
           <button
@@ -525,26 +439,15 @@ function FileUploadMode({
         <div className="flex flex-col gap-2 flex-shrink-0">
           {fileEntries.map((entry, idx) => {
             const assignedCls = classes.find((c) => c.id === entry.classId);
-            const isZipEntry  = entry.isZip;
             return (
               <div
                 key={idx}
                 className={`flex items-center gap-3 px-3 py-2.5 rounded-lg border ${
-                  entry.error ? "border-red-200 bg-red-50"
-                  : isZipEntry ? "border-blue-100 bg-blue-50/40"
-                  : "border-gray-200 bg-white"
+                  entry.error ? "border-red-200 bg-red-50" : "border-gray-200 bg-white"
                 }`}
               >
-                {/* Waveform or ZIP icon */}
-                {isZipEntry ? (
-                  <div className="w-16 h-7 bg-blue-100 rounded flex-shrink-0 flex items-center justify-center">
-                    <svg className="w-4 h-4 text-blue-400" fill="none" viewBox="0 0 16 16" stroke="currentColor">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.4}
-                        d="M4 1h5l4 4v9a1 1 0 01-1 1H4a1 1 0 01-1-1V2a1 1 0 011-1zM9 1v4h4" />
-                      <path strokeLinecap="round" strokeWidth={1.4} d="M7 7v5M5.5 10.5h3" />
-                    </svg>
-                  </div>
-                ) : entry.reading ? (
+                {/* Waveform thumbnail */}
+                {entry.reading ? (
                   <div className="w-16 h-7 bg-gray-100 rounded animate-pulse flex-shrink-0" />
                 ) : entry.error ? (
                   <div className="w-16 h-7 bg-red-100 rounded flex-shrink-0 flex items-center justify-center">
@@ -569,10 +472,8 @@ function FileUploadMode({
                     <p className="text-[10px] text-red-500 mt-0.5 leading-tight">{entry.error}</p>
                   ) : !entry.reading && entry.detected === false ? (
                     <p className="text-[10px] text-yellow-600 mt-0.5 leading-tight">
-                      No class detected in filename — assigned to {assignedCls?.name ?? "unknown"}. Change if needed.
+                      No class detected — assigned to {assignedCls?.name ?? "unknown"}. Change if needed.
                     </p>
-                  ) : entry.note ? (
-                    <p className="text-[10px] text-blue-500 mt-0.5 leading-tight">{entry.note}</p>
                   ) : entry.parsed ? (
                     <p className="text-[10px] text-gray-300 mt-0.5 tabular-nums">
                       {entry.parsed.rowCount} rows · {entry.parsed.durationMs} ms
@@ -580,25 +481,19 @@ function FileUploadMode({
                   ) : null}
                 </div>
 
-                {/* Class control */}
+                {/* Class selector */}
                 {!entry.error && !entry.reading && (
-                  entry.isZip ? (
-                    <span className="text-[10px] text-blue-500 border border-blue-200 rounded px-1.5 py-1 flex-shrink-0 bg-blue-50">
-                      Auto
-                    </span>
-                  ) : (
-                    <select
-                      value={entry.classId ?? ""}
-                      onChange={(e) => setEntryClass(idx, e.target.value)}
-                      className="text-xs border border-gray-200 rounded px-1.5 py-1 text-gray-600
-                                 focus:outline-none focus:border-accent bg-white flex-shrink-0"
-                      style={{ maxWidth: "88px" }}
-                    >
-                      {classes.map((cls) => (
-                        <option key={cls.id} value={cls.id}>{cls.name}</option>
-                      ))}
-                    </select>
-                  )
+                  <select
+                    value={entry.classId ?? ""}
+                    onChange={(e) => setEntryClass(idx, e.target.value)}
+                    className="text-xs border border-gray-200 rounded px-1.5 py-1 text-gray-600
+                               focus:outline-none focus:border-accent bg-white flex-shrink-0"
+                    style={{ maxWidth: "88px" }}
+                  >
+                    {classes.map((cls) => (
+                      <option key={cls.id} value={cls.id}>{cls.name}</option>
+                    ))}
+                  </select>
                 )}
 
                 <button
@@ -626,7 +521,7 @@ function FileUploadMode({
               {uploading ? (
                 <>
                   <span className="w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin" />
-                  {zipProgress ? "Uploading zip…" : "Processing files…"}
+                  Processing files…
                 </>
               ) : (
                 <>
@@ -639,25 +534,6 @@ function FileUploadMode({
             </button>
           </div>
 
-          {/* ZIP batch-upload progress bar */}
-          {zipProgress && (
-            <div className="space-y-1.5">
-              <div className="flex items-center justify-between text-xs">
-                <span className="text-accent font-medium">
-                  Uploading batch {zipProgress.batchNum} of {zipProgress.totalBatches}…
-                </span>
-                <span className="text-gray-400 tabular-nums">
-                  {zipProgress.filesUploaded} / {zipProgress.totalFiles} files
-                </span>
-              </div>
-              <div className="w-full h-1.5 bg-gray-200 rounded-full overflow-hidden">
-                <div
-                  className="h-full bg-accent rounded-full transition-all duration-300"
-                  style={{ width: `${(zipProgress.filesUploaded / Math.max(zipProgress.totalFiles, 1)) * 100}%` }}
-                />
-              </div>
-            </div>
-          )}
 
           {/* Success banner */}
           {uploadSuccess && (
@@ -767,6 +643,54 @@ export default function CollectScreen({ config, projectId, classes, setClasses, 
 
   const [copilot, setCopilot] = useState({ status: "idle", data: null, error: null });
   const separabilityNoteRef  = useRef(null); // updated each render so async effect reads latest
+
+  // Per-class CSV upload state
+  const [classUploading,  setClassUploading]  = useState({});  // { [classId]: boolean }
+  const [classUploadErr,  setClassUploadErr]  = useState({});  // { [classId]: string | null }
+  const classInputRefs = useRef({});  // { [classId]: HTMLInputElement }
+
+  async function handleClassUpload(classId, files) {
+    if (!files?.length) return;
+    const cls = classes.find((c) => c.id === classId);
+    if (!cls) return;
+
+    setClassUploading((prev) => ({ ...prev, [classId]: true }));
+    setClassUploadErr((prev) => ({ ...prev, [classId]: null }));
+    try {
+      const fd = new FormData();
+      fd.append("project_id", projectId ?? "demo-project");
+      for (const file of Array.from(files)) {
+        fd.append("files", file);
+        fd.append("labels", cls.name);  // explicit — no auto-detection needed
+      }
+      const res = await fetch(`${API_BASE_URL}/upload-events`, { method: "POST", body: fd });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.detail?.message ?? body.detail ?? `Server error ${res.status}`);
+      }
+      const data = await res.json();
+      const newEvents = data.events.map((ev) => ({
+        id:            ev.id,
+        classId:       cls.id,
+        className:     cls.name,
+        classColor:    cls.color,
+        waveform:      ev.waveform_az ?? [],
+        waveColor:     AXIS_COLORS.az,
+        duration:      ev.duration_ms,
+        timestamp:     new Date().toLocaleTimeString(),
+        snapshot:      { ax: ev.waveform_ax ?? [], ay: ev.waveform_ay ?? [], az: ev.waveform_az ?? [] },
+        filename:      ev.filename,
+        notes:         ev.notes ?? [],
+        autoAssigned:  false,
+        detectedLabel: cls.name,
+      }));
+      setEvents((prev) => [...newEvents, ...prev]);
+    } catch (err) {
+      setClassUploadErr((prev) => ({ ...prev, [classId]: err.message }));
+    } finally {
+      setClassUploading((prev) => ({ ...prev, [classId]: false }));
+    }
+  }
 
   // Keep refs in sync each render
   isRecordingRef.current   = isRecording;
@@ -1342,9 +1266,25 @@ export default function CollectScreen({ config, projectId, classes, setClasses, 
                   ) : (
                     /* ── normal class row ── */
                     <div className="relative group/cls">
-                      <button
+                      {/* Hidden file input for per-class upload */}
+                      <input
+                        ref={(el) => { if (el) classInputRefs.current[cls.id] = el; }}
+                        type="file"
+                        accept=".csv,.txt"
+                        multiple
+                        className="hidden"
+                        onChange={(e) => {
+                          if (e.target.files?.length) handleClassUpload(cls.id, e.target.files);
+                          e.target.value = "";
+                        }}
+                      />
+                      {/* Clickable area — div so we can nest real buttons */}
+                      <div
+                        role="button"
+                        tabIndex={0}
                         onClick={() => setActiveClassId(cls.id)}
-                        className={`w-full text-left px-4 py-3 transition-colors ${
+                        onKeyDown={(e) => e.key === "Enter" && setActiveClassId(cls.id)}
+                        className={`w-full text-left px-4 py-3 cursor-pointer transition-colors ${
                           active ? "" : "hover:bg-gray-50"
                         }`}
                       >
@@ -1355,16 +1295,29 @@ export default function CollectScreen({ config, projectId, classes, setClasses, 
                               {cls.name}
                             </span>
                           </div>
-                          <span className="text-xs text-gray-400 tabular-nums flex-shrink-0 ml-1">
-                            {count}/{TARGET_COUNT}
-                          </span>
+                          <div className="flex items-center gap-2 flex-shrink-0 ml-1">
+                            {/* Upload button */}
+                            <button
+                              onClick={(e) => { e.stopPropagation(); classInputRefs.current[cls.id]?.click(); }}
+                              disabled={!!classUploading[cls.id]}
+                              className="text-[10px] text-accent border border-accent/30 rounded px-1.5 py-0.5 hover:bg-accent/5 transition-colors disabled:opacity-40"
+                            >
+                              {classUploading[cls.id] ? "…" : "Upload"}
+                            </button>
+                            <span className="text-xs text-gray-400 tabular-nums">{count}/{TARGET_COUNT}</span>
+                          </div>
                         </div>
                         <div className="w-full h-1 bg-gray-100 rounded-full overflow-hidden">
                           <div className="h-full rounded-full transition-all duration-500"
                             style={{ width: `${pct}%`, backgroundColor: cls.color }} />
                         </div>
-                      </button>
-                      {/* Delete button — visible on hover, disabled if only 1 class */}
+                        {classUploadErr[cls.id] && (
+                          <p className="text-[10px] text-red-500 mt-1 leading-tight truncate">
+                            {classUploadErr[cls.id]}
+                          </p>
+                        )}
+                      </div>
+                      {/* Delete button — visible on hover */}
                       <button
                         onClick={(e) => { e.stopPropagation(); if (classes.length > 1) setDeletingClassId(cls.id); }}
                         title={classes.length <= 1 ? "Need at least one class" : `Delete ${cls.name}`}

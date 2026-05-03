@@ -1695,17 +1695,42 @@ export default function PipelineScreen({
             </DragDropContext>
           </div>
 
-          {/* Navigation hint — fades out once user has clicked 2+ blocks */}
-          {visitedBlocks.size < 2 && (
-            <div className="flex items-center justify-center gap-2 -mt-2 mb-1">
-              <svg className="w-3 h-3 text-gray-300 flex-shrink-0" viewBox="0 0 16 16" fill="none">
-                <path d="M8 2v12M3 7l5-5 5 5" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"/>
-              </svg>
-              <p className="text-xs text-gray-400 tracking-wide">
-                Configure each stage above, then hit <span className="text-gray-500 font-semibold">Next</span> to train your model
-              </p>
-            </div>
-          )}
+          {/* Stage breadcrumb — always visible; clicking a stage navigates to it */}
+          <div className="flex items-center justify-center gap-1 -mt-2 mb-1 flex-wrap">
+            {[
+              { id: "filter",    label: "Filter"    },
+              { id: "normalize", label: "Normalize" },
+              { id: "features",  label: "Features"  },
+              { id: "model",     label: "Model"     },
+            ].map(({ id, label }, i) => {
+              const isActive  = activeBlock === id;
+              const isVisited = visitedBlocks.has(id);
+              return (
+                <React.Fragment key={id}>
+                  {i > 0 && (
+                    <svg className="w-2.5 h-2.5 text-gray-200 flex-shrink-0" viewBox="0 0 10 10" fill="none">
+                      <path d="M3 2l4 3-4 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg>
+                  )}
+                  <button
+                    onClick={() => handleBlockClick(id)}
+                    className={`text-xs px-1.5 py-0.5 rounded transition-colors ${
+                      isActive
+                        ? "bg-accent/10 text-accent font-semibold"
+                        : isVisited
+                        ? "text-gray-500 hover:text-gray-700 hover:bg-gray-100"
+                        : "text-gray-300 hover:text-gray-500 hover:bg-gray-50"
+                    }`}
+                  >
+                    {label}
+                  </button>
+                </React.Fragment>
+              );
+            })}
+            <span className="text-gray-300 text-[10px] ml-1.5 tracking-wide">
+              — configure each stage, then hit Next →
+            </span>
+          </div>
 
           {/* Config panel */}
           <div className="border border-gray-200 rounded-xl p-6 bg-white flex-1">
