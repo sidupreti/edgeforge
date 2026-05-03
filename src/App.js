@@ -21,6 +21,15 @@ const STEPS = [
 
 const PLACEHOLDER_META = {};
 
+const CLASS_PALETTE = [
+  "#1D9E75", "#3B82F6", "#F59E0B", "#EF4444", "#8B5CF6", "#EC4899",
+];
+
+const INITIAL_CLASSES = [
+  { id: "cls-idle",  name: "idle",  color: CLASS_PALETTE[1] },
+  { id: "cls-event", name: "event", color: CLASS_PALETTE[0] },
+];
+
 // ── Defaults with sensible pre-selections (Issue 4) ───────────────────────────
 const INITIAL_CONFIG = {
   projectName:            "",
@@ -74,6 +83,8 @@ export default function App() {
 
   const [activeStep,        setActiveStep]        = useState(saved?.activeStep        ?? 0);
   const [config,            setConfig]            = useState(saved?.config            ?? INITIAL_CONFIG);
+  const [classes,           setClasses]           = useState(saved?.classes           ?? INITIAL_CLASSES);
+  const [activeClassId,     setActiveClassId]     = useState(saved?.activeClassId     ?? "cls-event");
   const [events,            setEvents]            = useState(saved?.events            ?? []);
   const [analyzeResult,     setAnalyzeResult]     = useState(saved?.analyzeResult     ?? null);
   const [separabilityNote,  setSeparabilityNote]  = useState(saved?.separabilityNote  ?? null);
@@ -96,6 +107,8 @@ export default function App() {
       localStorage.setItem(STORAGE_KEY, JSON.stringify({
         activeStep,
         config,
+        classes,
+        activeClassId,
         events,
         analyzeResult,
         separabilityNote,
@@ -108,7 +121,7 @@ export default function App() {
     } catch {
       // Ignore quota errors
     }
-  }, [activeStep, config, events, analyzeResult, separabilityNote,
+  }, [activeStep, config, classes, activeClassId, events, analyzeResult, separabilityNote,
       pipelineConfig, chatHistory, aiPipelineDesign, aiConfiguredBlocks, pipelineBlocks]);
 
   // ── Reset project ─────────────────────────────────────────────────────────
@@ -116,6 +129,8 @@ export default function App() {
     localStorage.removeItem(STORAGE_KEY);
     setActiveStep(0);
     setConfig(INITIAL_CONFIG);
+    setClasses(INITIAL_CLASSES);
+    setActiveClassId("cls-event");
     setEvents([]);
     setAnalyzeResult(null);
     setSeparabilityNote(null);
@@ -202,6 +217,10 @@ export default function App() {
         <CollectScreen
           config={config}
           projectId={projectId}
+          classes={classes}
+          setClasses={setClasses}
+          activeClassId={activeClassId}
+          setActiveClassId={setActiveClassId}
           events={events}
           setEvents={setEvents}
           analyzeResult={analyzeResult}
