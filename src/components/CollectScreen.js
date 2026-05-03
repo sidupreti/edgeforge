@@ -1,4 +1,5 @@
 import React, { useRef, useEffect, useState, useCallback } from "react";
+import JSZip from "jszip";
 import API_BASE_URL from "../config";
 import CopilotChat from "./CopilotChat";
 
@@ -209,6 +210,8 @@ function FileUploadMode({
   const [uploadError,   setUploadError]   = useState(null);
   const [uploadSuccess, setUploadSuccess] = useState(null);
   const [dragOver,      setDragOver]      = useState(false);
+  // zipProgress: { batchNum, totalBatches, filesUploaded, totalFiles } | null
+  const [zipProgress,   setZipProgress]   = useState(null);
   const inputRef = useRef(null);
 
   // Read a CSV file and update its entry in state
@@ -309,55 +312,29 @@ function FileUploadMode({
     setUploading(true);
     setUploadError(null);
     setUploadSuccess(null);
+    setZipProgress(null);
 
-    try {
-      const formData = new FormData();
-      formData.append("project_id", projectId ?? "demo-project");
+    const BATCH_SIZE = 10;
 
-      for (const entry of goodEntries) {
-        formData.append("files", entry.file);
-        // Always send "auto" — backend extracts class from filename
-        formData.append("labels", "auto");
-      }
-
-      const res = await fetch(`${API_BASE_URL}/upload-events`, { method: "POST", body: formData });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body.detail?.message ?? body.detail ?? `Server error ${res.status}`);
-      }
-      const data = await res.json();
-
-      // ── Auto-create any classes returned by backend that don't exist yet ────
-      let allClasses = [...classes];
+    // Build events from one /upload-events response, accumulating new classes
+    function applyBatchResponse(data, currentClasses) {
       const detectedClassNames = data.detected_classes ?? [];
-      if (detectedClassNames.length > 0) {
-        let colorIdx = allClasses.length;
-        const newCls = [];
-        for (const name of detectedClassNames) {
-          const exists = allClasses.find((c) => c.name.toLowerCase() === name.toLowerCase());
-          if (!exists) {
-            newCls.push({
-              id:    `cls-${name}-${Date.now()}-${colorIdx}`,
-              name,
-              color: CLASS_PALETTE[colorIdx % CLASS_PALETTE.length],
-            });
-            colorIdx++;
-          }
-        }
-        if (newCls.length > 0) {
-          allClasses = [...allClasses, ...newCls];
-          setClasses(allClasses);
+      let updatedClasses = [...currentClasses];
+      let colorIdx = updatedClasses.length;
+      for (const name of detectedClassNames) {
+        if (!updatedClasses.find((c) => c.name.toLowerCase() === name.toLowerCase())) {
+          updatedClasses.push({
+            id:    `cls-${name}-${Date.now()}-${colorIdx}`,
+            name,
+            color: CLASS_PALETTE[colorIdx++ % CLASS_PALETTE.length],
+          });
         }
       }
-
-      // ── Map events to their detected class (using allClasses) ───────────────
-      const newEvents = data.events.map((ev) => {
+      const batchEvents = data.events.map((ev) => {
         const matchedCls =
-          allClasses.find((c) => c.name === ev.class_label) ??
-          allClasses.find((c) => c.name.toLowerCase() === (ev.class_label || "").toLowerCase());
-        // autoAssigned only when no class_label came back or no match found
-        const autoAssigned = !ev.class_label || !matchedCls;
-        const cls = matchedCls ?? allClasses[0];
+          updatedClasses.find((c) => c.name === ev.class_label) ??
+          updatedClasses.find((c) => c.name.toLowerCase() === (ev.class_label || "").toLowerCase());
+        const cls = matchedCls ?? updatedClasses[0];
         return {
           id:            ev.id,
           classId:       cls?.id    ?? "cls-event",
@@ -370,32 +347,113 @@ function FileUploadMode({
           snapshot:      { ax: ev.waveform_ax ?? [], ay: ev.waveform_ay ?? [], az: ev.waveform_az ?? [] },
           filename:      ev.filename,
           notes:         ev.notes ?? [],
-          autoAssigned,
+          autoAssigned:  !ev.class_label || !matchedCls,
           detectedLabel: ev.class_label,
         };
       });
-      setEvents((prev) => [...newEvents, ...prev]);
+      return { batchEvents, updatedClasses };
+    }
 
-      // ── Build success summary banner ─────────────────────────────────────────
+    try {
+      const allNewEvents = [];
+      let allClasses = [...classes];
+
+      // ── 1. Plain CSV/TXT entries — single upload (no timeout risk) ──────────
+      const csvEntries = goodEntries.filter((e) => !e.isZip);
+      if (csvEntries.length > 0) {
+        const fd = new FormData();
+        fd.append("project_id", projectId ?? "demo-project");
+        for (const entry of csvEntries) {
+          fd.append("files", entry.file);
+          fd.append("labels", "auto");
+        }
+        const res = await fetch(`${API_BASE_URL}/upload-events`, { method: "POST", body: fd });
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          throw new Error(body.detail?.message ?? body.detail ?? `Server error ${res.status}`);
+        }
+        const { batchEvents, updatedClasses } = applyBatchResponse(await res.json(), allClasses);
+        allNewEvents.push(...batchEvents);
+        allClasses = updatedClasses;
+      }
+
+      // ── 2. ZIP entries — extract in browser, upload CSVs in batches of 10 ───
+      const zipEntries = goodEntries.filter((e) => e.isZip);
+      for (const zipEntry of zipEntries) {
+        const zip = await JSZip.loadAsync(zipEntry.file);
+
+        // Collect all CSV/TXT entries (skip macOS metadata dirs)
+        const zipCsvFiles = [];
+        zip.forEach((path, obj) => {
+          if (!obj.dir &&
+              !path.startsWith("__MACOSX") &&
+              (path.toLowerCase().endsWith(".csv") || path.toLowerCase().endsWith(".txt"))) {
+            zipCsvFiles.push({ path, obj });
+          }
+        });
+        zipCsvFiles.sort((a, b) => a.path.localeCompare(b.path));
+
+        const totalFiles = zipCsvFiles.length;
+        if (totalFiles === 0) continue;
+
+        // Chunk into batches of BATCH_SIZE
+        const batches = [];
+        for (let i = 0; i < totalFiles; i += BATCH_SIZE) {
+          batches.push(zipCsvFiles.slice(i, i + BATCH_SIZE));
+        }
+
+        for (let bi = 0; bi < batches.length; bi++) {
+          // Update progress BEFORE each batch so the user sees it immediately
+          setZipProgress({
+            batchNum:     bi + 1,
+            totalBatches: batches.length,
+            filesUploaded: bi * BATCH_SIZE,
+            totalFiles,
+          });
+
+          const fd = new FormData();
+          fd.append("project_id", projectId ?? "demo-project");
+          for (const { path, obj } of batches[bi]) {
+            const blob     = await obj.async("blob");
+            const filename = path.split("/").pop();
+            fd.append("files", new File([blob], filename, { type: "text/csv" }));
+            fd.append("labels", "auto");
+          }
+
+          const res = await fetch(`${API_BASE_URL}/upload-events`, { method: "POST", body: fd });
+          if (!res.ok) {
+            const body = await res.json().catch(() => ({}));
+            throw new Error(
+              body.detail?.message ?? body.detail ??
+              `Server error ${res.status} on batch ${bi + 1} of ${batches.length}`
+            );
+          }
+          const { batchEvents, updatedClasses } = applyBatchResponse(await res.json(), allClasses);
+          allNewEvents.push(...batchEvents);
+          allClasses = updatedClasses;
+        }
+        setZipProgress(null);
+      }
+
+      // ── 3. Commit classes + events ───────────────────────────────────────────
+      if (allClasses.length > classes.length) setClasses(allClasses);
+      setEvents((prev) => [...allNewEvents, ...prev]);
+
+      // Build success banner
       const counts = {};
-      for (const ev of newEvents) {
-        counts[ev.className] = (counts[ev.className] ?? 0) + 1;
-      }
+      for (const ev of allNewEvents) counts[ev.className] = (counts[ev.className] ?? 0) + 1;
       const parts = Object.entries(counts).map(([name, n]) => `${name} (${n})`);
-      const total = newEvents.length;
+      const total = allNewEvents.length;
       setUploadSuccess(
-        `Uploaded ${total} event${total !== 1 ? "s" : ""} across ${parts.length} class${parts.length !== 1 ? "es" : ""}: ${parts.join(", ")}`
+        `Uploaded ${total} event${total !== 1 ? "s" : ""} across ` +
+        `${parts.length} class${parts.length !== 1 ? "es" : ""}: ${parts.join(", ")}`
       );
-
-      if (data.analysis) {
-        onAnalysisReady?.(data.analysis, null);
-        setCopilot({ status: "ready", data: data.analysis, error: null });
-      }
 
       // Clear successfully submitted entries
       setFileEntries((prev) => prev.filter((e) => e.error));
     } catch (err) {
       setUploadError(err.message);
+      setZipProgress(null);
     } finally {
       setUploading(false);
     }
@@ -565,7 +623,7 @@ function FileUploadMode({
               {uploading ? (
                 <>
                   <span className="w-3.5 h-3.5 border-2 border-white/40 border-t-white rounded-full animate-spin" />
-                  Processing files…
+                  {zipProgress ? "Uploading zip…" : "Processing files…"}
                 </>
               ) : (
                 <>
@@ -577,6 +635,26 @@ function FileUploadMode({
               )}
             </button>
           </div>
+
+          {/* ZIP batch-upload progress bar */}
+          {zipProgress && (
+            <div className="space-y-1.5">
+              <div className="flex items-center justify-between text-xs">
+                <span className="text-accent font-medium">
+                  Uploading batch {zipProgress.batchNum} of {zipProgress.totalBatches}…
+                </span>
+                <span className="text-gray-400 tabular-nums">
+                  {zipProgress.filesUploaded} / {zipProgress.totalFiles} files
+                </span>
+              </div>
+              <div className="w-full h-1.5 bg-gray-200 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-accent rounded-full transition-all duration-300"
+                  style={{ width: `${(zipProgress.filesUploaded / Math.max(zipProgress.totalFiles, 1)) * 100}%` }}
+                />
+              </div>
+            </div>
+          )}
 
           {/* Success banner */}
           {uploadSuccess && (
