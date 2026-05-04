@@ -43,6 +43,9 @@ const FILTER_TYPES = [
   { id: "none",           label: "None",             desc: "Skip filtering (hardware already filtered)" },
 ];
 
+const PIPELINE_STEPS = ["filter", "normalize", "features", "model"];
+const NEXT_LABELS    = ["Next: Normalize →", "Next: Features →", "Next: Model →", "Train Model →"];
+
 const STANDARD_BLOCK_TYPES = [
   { id: "bandpass",      label: "Bandpass Filter",  desc: "Keep only a frequency band (1–30 Hz)" },
   { id: "envelope",      label: "Envelope",         desc: "Signal amplitude envelope via Hilbert transform" },
@@ -1327,6 +1330,7 @@ export default function PipelineScreen({
   aiConfiguredBlocks, setAiConfiguredBlocks,
   onGoToSetup,
   pipelineBlocks, setPipelineBlocks,
+  onNext, onBack,
 }) {
   const [activeBlock,    setActiveBlock]    = useState("filter");
   const [flashingBlock,  setFlashingBlock]  = useState(null);
@@ -1337,10 +1341,41 @@ export default function PipelineScreen({
   const [showAddModal,   setShowAddModal]   = useState(false);
   // Track which blocks the user has clicked — starts with "filter" since it's auto-selected on mount
   const [visitedBlocks,  setVisitedBlocks]  = useState(() => new Set(["filter"]));
+  // Internal pipeline step (0=filter, 1=normalize, 2=features, 3=model)
+  const [pipelineStep,   setPipelineStep]   = useState(0);
+
+  function goToStep(step) {
+    setPipelineStep(step);
+    setActiveBlock(PIPELINE_STEPS[step]);
+    setVisitedBlocks((prev) => {
+      const next = new Set(prev);
+      next.add(PIPELINE_STEPS[step]);
+      return next;
+    });
+  }
+
+  function handlePipelineNext() {
+    if (pipelineStep < PIPELINE_STEPS.length - 1) {
+      goToStep(pipelineStep + 1);
+    } else {
+      onNext?.();
+    }
+  }
+
+  function handlePipelineBack() {
+    if (pipelineStep > 0) {
+      goToStep(pipelineStep - 1);
+    } else {
+      onBack?.();
+    }
+  }
 
   function handleBlockClick(blockId) {
     setActiveBlock(blockId);
     setVisitedBlocks((prev) => new Set([...prev, blockId]));
+    // Sync pipelineStep when clicking a main pipeline block
+    const idx = PIPELINE_STEPS.indexOf(blockId);
+    if (idx !== -1) setPipelineStep(idx);
   }
 
   // Consume pendingFlash from App: navigate to the block, flash it for 600ms
@@ -1348,6 +1383,8 @@ export default function PipelineScreen({
     if (!pendingFlash) return;
     setActiveBlock(pendingFlash);
     setFlashingBlock(pendingFlash);
+    const idx = PIPELINE_STEPS.indexOf(pendingFlash);
+    if (idx !== -1) setPipelineStep(idx);
     onFlashConsumed?.();
     const t = setTimeout(() => setFlashingBlock(null), 600);
     return () => clearTimeout(t);
@@ -1789,6 +1826,36 @@ export default function PipelineScreen({
             />
           </div>
         </div>
+      </div>
+
+      {/* ── Pipeline internal navigation ─────────────────────────────────────── */}
+      <div className="flex items-center justify-between py-3 border-t border-gray-100 mt-1 flex-shrink-0">
+        <button
+          onClick={handlePipelineBack}
+          className="px-5 py-2 rounded border text-sm tracking-wide transition-colors border-gray-300 text-gray-600 hover:border-gray-400 hover:text-gray-800"
+        >
+          ← Back
+        </button>
+
+        {/* Step progress dots */}
+        <div className="flex items-center gap-1.5">
+          {PIPELINE_STEPS.map((step, i) => (
+            <span
+              key={step}
+              onClick={() => goToStep(i)}
+              className={`w-2 h-2 rounded-full cursor-pointer transition-colors ${
+                i === pipelineStep ? "bg-accent" : i < pipelineStep ? "bg-accent/40" : "bg-gray-200"
+              }`}
+            />
+          ))}
+        </div>
+
+        <button
+          onClick={handlePipelineNext}
+          className="px-5 py-2 rounded text-sm tracking-wide transition-colors bg-accent text-white hover:bg-accent-dark min-w-[160px] text-center"
+        >
+          {NEXT_LABELS[pipelineStep]}
+        </button>
       </div>
 
       {/* ── Add Block Modal ──────────────────────────────────────────────────── */}

@@ -255,6 +255,8 @@ export default function App() {
           onGoToSetup={() => setActiveStep(0)}
           pipelineBlocks={pipelineBlocks}
           setPipelineBlocks={setPipelineBlocks}
+          onNext={() => setActiveStep((s) => Math.min(s + 1, STEPS.length - 1))}
+          onBack={() => setActiveStep((s) => Math.max(s - 1, 0))}
         />
       );
     }
@@ -363,46 +365,48 @@ export default function App() {
           {renderScreen()}
         </main>
 
-        {/* Bottom nav bar */}
-        <footer className="border-t border-gray-200 px-8 py-4 flex items-center justify-between bg-white">
-          <button
-            onClick={goBack}
-            disabled={activeStep === 0}
-            className={`
-              px-5 py-2 rounded border text-sm tracking-wide transition-colors
-              ${activeStep === 0
-                ? "border-gray-200 text-gray-300 cursor-not-allowed"
-                : "border-gray-300 text-gray-600 hover:border-gray-400 hover:text-gray-800"
-              }
-            `}
-          >
-            ← Back
-          </button>
+        {/* Bottom nav bar — hidden on pipeline (PipelineScreen has its own internal nav) */}
+        {currentKey !== "pipeline" && (
+          <footer className="border-t border-gray-200 px-8 py-4 flex items-center justify-between bg-white">
+            <button
+              onClick={goBack}
+              disabled={activeStep === 0}
+              className={`
+                px-5 py-2 rounded border text-sm tracking-wide transition-colors
+                ${activeStep === 0
+                  ? "border-gray-200 text-gray-300 cursor-not-allowed"
+                  : "border-gray-300 text-gray-600 hover:border-gray-400 hover:text-gray-800"
+                }
+              `}
+            >
+              ← Back
+            </button>
 
-          <span className="text-xs text-gray-400 tracking-widest uppercase">
-            {STEPS[activeStep].label}
-          </span>
+            <span className="text-xs text-gray-400 tracking-widest uppercase">
+              {STEPS[activeStep].label}
+            </span>
 
-          <button
-            onClick={handleNext}
-            disabled={activeStep === STEPS.length - 1 || submitLoading}
-            className={`
-              px-5 py-2 rounded text-sm tracking-wide transition-colors min-w-[90px] text-center
-              ${activeStep === STEPS.length - 1
-                ? "bg-gray-100 text-gray-300 cursor-not-allowed"
-                : submitLoading
-                  ? "bg-accent/60 text-white cursor-wait"
-                  : "bg-accent text-white hover:bg-accent-dark"
-              }
-            `}
-          >
-            {submitLoading
-              ? "Saving…"
-              : activeStep === STEPS.length - 1
-                ? "Done"
-                : "Next →"}
-          </button>
-        </footer>
+            <button
+              onClick={handleNext}
+              disabled={activeStep === STEPS.length - 1 || submitLoading}
+              className={`
+                px-5 py-2 rounded text-sm tracking-wide transition-colors min-w-[90px] text-center
+                ${activeStep === STEPS.length - 1
+                  ? "bg-gray-100 text-gray-300 cursor-not-allowed"
+                  : submitLoading
+                    ? "bg-accent/60 text-white cursor-wait"
+                    : "bg-accent text-white hover:bg-accent-dark"
+                }
+              `}
+            >
+              {submitLoading
+                ? "Saving…"
+                : activeStep === STEPS.length - 1
+                  ? "Done"
+                  : "Next →"}
+            </button>
+          </footer>
+        )}
       </div>
     </div>
   );
