@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from "react";
 import API_BASE_URL from "../config";
 import CopilotChat from "./CopilotChat";
 
-// ── Class colour palette (first class = green, second = amber, third = red, …) ─
+// ── Class colour palette ──────────────────────────────────────────────────────
 
 const PALETTE = ["#1D9E75", "#F59E0B", "#EF4444", "#8B5CF6", "#EC4899", "#3B82F6"];
 const PALETTE_BG = [
@@ -12,7 +12,7 @@ const PALETTE_BG = [
 ];
 
 function useClassColors() {
-  const [map, setMap]   = useState({});       // label → index
+  const [map, setMap]   = useState({});
   const nextIdx         = useRef(0);
   const register        = useCallback((label) => {
     setMap((prev) => {
@@ -26,7 +26,7 @@ function useClassColors() {
   return { register, color, bg };
 }
 
-// ── Signal canvas (multi-axis waveform of last event) ─────────────────────────
+// ── Signal canvas ─────────────────────────────────────────────────────────────
 
 function EventCanvas({ event }) {
   const canvasRef = useRef(null);
@@ -44,7 +44,6 @@ function EventCanvas({ event }) {
     ctx.fillStyle = "#0f172a";
     ctx.fillRect(0, 0, W, H);
 
-    // Grid
     ctx.strokeStyle = "#1e293b";
     ctx.lineWidth = 1;
     for (let g = 0; g <= 4; g++) {
@@ -59,7 +58,6 @@ function EventCanvas({ event }) {
     const axes    = [event.ax, event.ay, event.az].filter((a) => a?.length > 1);
     const axColors = ["#1D9E75", "#3B82F6", "#F59E0B"];
 
-    // Compute global range for consistent scaling
     const allVals = axes.flat();
     const gMin = Math.min(...allVals);
     const gMax = Math.max(...allVals);
@@ -135,6 +133,11 @@ function LogEntry({ entry, color, bg }) {
       <span className="text-xs text-gray-300 tabular-nums flex-shrink-0 w-14">
         {entry.timestamp}
       </span>
+      {entry.source === "live" && (
+        <span className="flex-shrink-0 text-[9px] font-bold text-emerald-600 bg-emerald-50 border border-emerald-200 px-1 py-0.5 rounded tracking-wide">
+          LIVE
+        </span>
+      )}
       <span
         className="text-xs font-semibold px-2 py-0.5 rounded flex-shrink-0"
         style={{ color, backgroundColor: bg }}
@@ -158,13 +161,24 @@ function LogEntry({ entry, color, bg }) {
 
 export default function ValidateScreen({ projectId, chatHistory, setChatHistory, onApplyAction }) {
   const [localProjectId, setLocalProjectId] = useState(null);
-  const [latest,     setLatest]     = useState(null);
-  const [log,        setLog]        = useState([]);
-  const [simulating, setSimulating] = useState(false);
-  const [error,      setError]      = useState(null);
+  const [latest,          setLatest]         = useState(null);
+  const [log,             setLog]            = useState([]);
+  const [simulating,      setSimulating]     = useState(false);
+  const [error,           setError]          = useState(null);
+
+  // ── Serial state ────────────────────────────────────────────────────────────
+  const [serialConnected,  setSerialConnected]  = useState(false);
+  const [serialClassifying, setSerialClassifying] = useState(false);
+  const [serialError,      setSerialError]      = useState(null);
+  const serialPortRef   = useRef(null);
+  const serialReaderRef = useRef(null);
+  const serialActiveRef = useRef(false);   // controls the read loop
+  const lineBufferRef   = useRef([]);      // accumulated lines for current event
+  const serialSupported = typeof navigator !== "undefined" && "serial" in navigator;
+
   const { register, color, bg } = useClassColors();
 
-  // Auto-create demo project if projectId missing (same idempotent slug as TrainScreen)
+  // Auto-create demo project
   useEffect(() => {
     if (projectId || localProjectId) return;
     fetch(`${API_BASE_URL}/project/create`, {
@@ -181,7 +195,163 @@ export default function ValidateScreen({ projectId, chatHistory, setChatHistory,
       .catch(() => {});
   }, [projectId, localProjectId]);
 
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => { serialActiveRef.current = false; };
+  }, []);
+
   const effectiveProjectId = projectId ?? localProjectId;
+
+  // ── Classify a parsed event (used by both live and could be reused) ─────────
+
+  const classifyEvent = useCallback(async ({ ax, ay, az, duration_ms, source }) => {
+    if (!effectiveProjectId) return;
+    try {
+      const res = await fetch(`${API_BASE_URL}/classify`, {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          project_id: effectiveProjectId,
+          event: { ax, ay, az, duration_ms, class_label: "" },
+        }),
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error(body.detail ?? `API ${res.status}`);
+      }
+      const data = await res.json();
+      register(data.label);
+      const entry = {
+        id:         `${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
+        label:      data.label,
+        confidence: data.confidence,
+        metrics:    data.metrics,
+        event:      { ax, ay, az },
+        allProba:   data.all_proba ?? {},
+        timestamp:  new Date().toLocaleTimeString(),
+        source,
+      };
+      setLatest(entry);
+      setLog((prev) => [entry, ...prev].slice(0, 20));
+      setError(null);
+    } catch (err) {
+      setError(err.message);
+    }
+  }, [effectiveProjectId, register]);
+
+  // ── Flush the line buffer as a complete event ────────────────────────────────
+
+  const flushSerialEvent = useCallback(async () => {
+    const lines = lineBufferRef.current;
+    lineBufferRef.current = [];
+    if (lines.length < 2) return;
+
+    const rows = [];
+    for (const line of lines) {
+      const parts = line.split(",");
+      if (parts.length < 2) continue;
+      const nums = parts.map(Number);
+      if (nums.some(isNaN)) continue;
+      if (parts.length >= 4) {
+        rows.push({ ts: nums[0], ax: nums[1], ay: nums[2], az: nums[3] });
+      } else if (parts.length === 2) {
+        rows.push({ ts: nums[0], ax: nums[1], ay: 0, az: 0 });
+      } else if (parts.length === 3) {
+        rows.push({ ts: nums[0], ax: nums[1], ay: nums[2], az: 0 });
+      }
+    }
+    if (rows.length < 2) return;
+
+    const ax = rows.map((r) => r.ax);
+    const ay = rows.map((r) => r.ay);
+    const az = rows.map((r) => r.az);
+    const duration_ms = (rows[rows.length - 1].ts - rows[0].ts) / 1000;
+
+    setSerialClassifying(true);
+    await classifyEvent({ ax, ay, az, duration_ms: Math.max(duration_ms, 1), source: "live" });
+    setSerialClassifying(false);
+  }, [classifyEvent]);
+
+  // ── Serial read loop ─────────────────────────────────────────────────────────
+
+  async function runSerialLoop(port) {
+    const textDecoder = new TextDecoderStream();
+    port.readable.pipeTo(textDecoder.writable).catch(() => {});
+    const reader = textDecoder.readable.getReader();
+    serialReaderRef.current = reader;
+
+    let partial = "";
+    try {
+      while (serialActiveRef.current) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        if (!value) continue;
+
+        partial += value;
+        const parts = partial.split("\n");
+        partial = parts.pop();             // last fragment (may be incomplete)
+
+        for (const rawLine of parts) {
+          const line = rawLine.trim().replace(/\r$/, "");
+          if (!line) continue;
+
+          if (line === "---") {
+            await flushSerialEvent();
+          } else {
+            lineBufferRef.current.push(line);
+          }
+        }
+      }
+    } catch {
+      // Port closed or disconnected
+    } finally {
+      reader.releaseLock();
+    }
+  }
+
+  // ── Connect / Disconnect ─────────────────────────────────────────────────────
+
+  async function connectDevice() {
+    if (!serialSupported) {
+      setSerialError("Web Serial is not supported in this browser. Use Chrome or Edge.");
+      return;
+    }
+    setSerialError(null);
+    try {
+      const port = await navigator.serial.requestPort();
+      await port.open({ baudRate: 115200 });
+      serialPortRef.current   = port;
+      serialActiveRef.current = true;
+      lineBufferRef.current   = [];
+      setSerialConnected(true);
+      runSerialLoop(port).then(() => {
+        // Loop exited — port closed
+        setSerialConnected(false);
+        serialActiveRef.current = false;
+      });
+    } catch (err) {
+      if (err.name !== "NotFoundError") {
+        setSerialError(err.message);
+      }
+    }
+  }
+
+  async function disconnectDevice() {
+    serialActiveRef.current = false;
+    try {
+      serialReaderRef.current?.cancel();
+    } catch {}
+    try {
+      await serialPortRef.current?.close();
+    } catch {}
+    serialPortRef.current   = null;
+    serialReaderRef.current = null;
+    lineBufferRef.current   = [];
+    setSerialConnected(false);
+    setSerialClassifying(false);
+  }
+
+  // ── Simulate ─────────────────────────────────────────────────────────────────
 
   async function simulate() {
     if (!effectiveProjectId || simulating) return;
@@ -207,9 +377,10 @@ export default function ValidateScreen({ projectId, chatHistory, setChatHistory,
         event:      data.event,
         allProba:   data.all_proba ?? {},
         timestamp:  new Date().toLocaleTimeString(),
+        source:     "sim",
       };
       setLatest(entry);
-      setLog((prev) => [entry, ...prev].slice(0, 10));
+      setLog((prev) => [entry, ...prev].slice(0, 20));
     } catch (err) {
       setError(err.message);
     } finally {
@@ -217,7 +388,8 @@ export default function ValidateScreen({ projectId, chatHistory, setChatHistory,
     }
   }
 
-  // ── Summary stats ──
+  // ── Summary stats ─────────────────────────────────────────────────────────────
+
   const totalClassified = log.length;
   const classCount = {};
   log.forEach((e) => { classCount[e.label] = (classCount[e.label] ?? 0) + 1; });
@@ -226,9 +398,8 @@ export default function ValidateScreen({ projectId, chatHistory, setChatHistory,
     ? Math.round((log.reduce((s, e) => s + e.confidence, 0) / log.length) * 100)
     : null;
 
-  const ACCENT       = "#1D9E75";
-  const ACCENT_BG    = "rgba(29,158,117,0.07)";
-
+  const ACCENT    = "#1D9E75";
+  const ACCENT_BG = "rgba(29,158,117,0.07)";
   const canSimulate = Boolean(effectiveProjectId);
 
   return (
@@ -245,8 +416,42 @@ export default function ValidateScreen({ projectId, chatHistory, setChatHistory,
             backgroundColor: latest ? ACCENT_BG : "transparent",
           }}
         >
+          {/* LIVE indicator banner */}
+          {serialConnected && (
+            <div className="flex items-center justify-between mb-4 pb-3 border-b border-accent/15">
+              <div className="flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                <span className="text-xs font-bold text-emerald-600 uppercase tracking-widest">
+                  LIVE — Serial Connected
+                </span>
+                {serialClassifying && (
+                  <span className="flex gap-1 ml-1">
+                    {[0, 1, 2].map((i) => (
+                      <span key={i} className="w-1 h-1 rounded-full bg-emerald-400 animate-bounce"
+                        style={{ animationDelay: `${i * 120}ms` }} />
+                    ))}
+                  </span>
+                )}
+              </div>
+              <button
+                onClick={disconnectDevice}
+                className="text-xs text-gray-400 hover:text-red-500 transition-colors"
+              >
+                Disconnect
+              </button>
+            </div>
+          )}
+
           {latest ? (
             <div className="space-y-4">
+              {/* Source tag */}
+              {latest.source === "live" && (
+                <span className="inline-flex items-center gap-1 text-[9px] font-bold text-emerald-600 bg-emerald-50 border border-emerald-200 px-1.5 py-0.5 rounded tracking-wide">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                  LIVE GESTURE
+                </span>
+              )}
+
               {/* Label */}
               <div>
                 <p className="text-xs text-gray-400 uppercase tracking-widest mb-2">Prediction</p>
@@ -261,7 +466,7 @@ export default function ValidateScreen({ projectId, chatHistory, setChatHistory,
               {/* Confidence */}
               <ConfidenceBar confidence={latest.confidence} color={ACCENT} />
 
-              {/* Per-class probabilities (if multiple) */}
+              {/* Per-class probabilities */}
               {Object.keys(latest.allProba).length > 1 && (
                 <div className="space-y-1.5">
                   {Object.entries(latest.allProba)
@@ -294,7 +499,11 @@ export default function ValidateScreen({ projectId, chatHistory, setChatHistory,
                     d="M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0h10a2 2 0 002-2V9M9 21H5a2 2 0 01-2-2V9m0 0h18" />
                 </svg>
               </div>
-              <p className="text-sm text-gray-400">Hit Simulate to classify an event</p>
+              <p className="text-sm text-gray-400">
+                {serialConnected
+                  ? "Waiting for gesture… (send --- separator after each event)"
+                  : "Hit Simulate or connect a device to classify an event"}
+              </p>
             </div>
           )}
         </div>
@@ -338,50 +547,97 @@ export default function ValidateScreen({ projectId, chatHistory, setChatHistory,
                 </div>
               ))}
             </div>
-            <span className="text-xs text-gray-500">
-              {latest?.event ? `${latest.event.ax?.length ?? 0} samples` : "no event"}
-            </span>
+            <div className="flex items-center gap-3">
+              {serialConnected && (
+                <span className="flex items-center gap-1 text-[10px] font-bold text-emerald-400">
+                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
+                  LIVE
+                </span>
+              )}
+              <span className="text-xs text-gray-500">
+                {latest?.event ? `${latest.event.ax?.length ?? 0} samples` : "no event"}
+              </span>
+            </div>
           </div>
           <EventCanvas event={latest?.event} />
         </div>
 
-        {/* Error banner */}
-        {error && (
+        {/* Error banners */}
+        {(error || serialError) && (
           <div className="border border-red-200 bg-red-50 rounded-lg px-4 py-3 flex items-start gap-2 flex-shrink-0">
             <svg className="w-4 h-4 text-red-400 flex-shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
                 d="M12 9v4m0 4h.01M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" />
             </svg>
-            <p className="text-xs text-red-600 leading-relaxed">{error}</p>
+            <p className="text-xs text-red-600 leading-relaxed">{error ?? serialError}</p>
           </div>
         )}
 
-        {/* Simulate button */}
-        <button
-          onClick={simulate}
-          disabled={!canSimulate || simulating}
-          className={`w-full py-3.5 rounded-xl text-sm font-bold tracking-wide transition-all flex-shrink-0 ${
-            !canSimulate
-              ? "bg-gray-100 text-gray-300 cursor-not-allowed"
-              : simulating
-              ? "bg-accent/60 text-white cursor-wait"
-              : "bg-accent text-white hover:bg-accent-dark shadow-md shadow-accent/25 active:scale-[0.98]"
-          }`}
-        >
-          {simulating ? (
-            <span className="flex items-center justify-center gap-2">
-              <span className="flex gap-1">
-                {[0, 1, 2].map((i) => (
-                  <span key={i} className="w-1 h-1 rounded-full bg-white/70 animate-bounce"
-                    style={{ animationDelay: `${i * 120}ms` }} />
-                ))}
-              </span>
-              Classifying…
-            </span>
+        {/* Action buttons */}
+        <div className="flex gap-3 flex-shrink-0">
+          {/* Connect Device */}
+          {serialConnected ? (
+            <button
+              onClick={disconnectDevice}
+              className="flex-1 py-3.5 rounded-xl text-sm font-bold tracking-wide transition-all border-2 border-emerald-400 text-emerald-600 hover:bg-emerald-50 flex items-center justify-center gap-2"
+            >
+              <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+              LIVE — Disconnect
+            </button>
           ) : (
-            "⚡ Simulate Event"
+            <button
+              onClick={connectDevice}
+              disabled={!serialSupported}
+              title={serialSupported ? "Connect ESP32 via USB serial" : "Web Serial requires Chrome or Edge"}
+              className={`flex-1 py-3.5 rounded-xl text-sm font-bold tracking-wide transition-all border-2 flex items-center justify-center gap-2 ${
+                serialSupported
+                  ? "border-gray-300 text-gray-600 hover:border-accent hover:text-accent hover:bg-accent/5"
+                  : "border-gray-200 text-gray-300 cursor-not-allowed"
+              }`}
+            >
+              {/* Serial/USB icon */}
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
+                  d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z" />
+              </svg>
+              Connect Device
+            </button>
           )}
-        </button>
+
+          {/* Simulate Event */}
+          <button
+            onClick={simulate}
+            disabled={!canSimulate || simulating}
+            className={`flex-1 py-3.5 rounded-xl text-sm font-bold tracking-wide transition-all ${
+              !canSimulate
+                ? "bg-gray-100 text-gray-300 cursor-not-allowed"
+                : simulating
+                ? "bg-accent/60 text-white cursor-wait"
+                : "bg-accent text-white hover:bg-accent-dark shadow-md shadow-accent/25 active:scale-[0.98]"
+            }`}
+          >
+            {simulating ? (
+              <span className="flex items-center justify-center gap-2">
+                <span className="flex gap-1">
+                  {[0, 1, 2].map((i) => (
+                    <span key={i} className="w-1 h-1 rounded-full bg-white/70 animate-bounce"
+                      style={{ animationDelay: `${i * 120}ms` }} />
+                  ))}
+                </span>
+                Classifying…
+              </span>
+            ) : (
+              "⚡ Simulate Event"
+            )}
+          </button>
+        </div>
+
+        {/* Web Serial hint when not supported */}
+        {!serialSupported && (
+          <p className="text-[10px] text-gray-400 text-center -mt-2">
+            Live serial requires Chrome or Edge. Firefox is not supported.
+          </p>
+        )}
       </div>
 
       {/* ── RIGHT PANEL ─────────────────────────────────────────────────────── */}
@@ -401,7 +657,7 @@ export default function ValidateScreen({ projectId, chatHistory, setChatHistory,
               <div className="flex flex-col items-center justify-center h-full gap-2 text-center py-8">
                 <div className="w-8 h-8 rounded-full border-2 border-dashed border-gray-200" />
                 <p className="text-xs text-gray-300 leading-relaxed">
-                  Results will appear here after each simulation.
+                  Results appear here after each classification.
                 </p>
               </div>
             ) : (
@@ -443,7 +699,6 @@ export default function ValidateScreen({ projectId, chatHistory, setChatHistory,
             </div>
           ))}
 
-          {/* Class distribution mini bars */}
           {Object.keys(classCount).length > 1 && (
             <div className="pt-2 border-t border-gray-100 space-y-2">
               {Object.entries(classCount)
