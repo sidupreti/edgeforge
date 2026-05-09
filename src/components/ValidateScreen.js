@@ -159,7 +159,7 @@ function LogEntry({ entry, color, bg }) {
 
 // ── Main component ────────────────────────────────────────────────────────────
 
-export default function ValidateScreen({ projectId, chatHistory, setChatHistory, onApplyAction }) {
+export default function ValidateScreen({ projectId, trainResults, onGoToTrain, chatHistory, setChatHistory, onApplyAction }) {
   const [localProjectId, setLocalProjectId] = useState(null);
   const [latest,          setLatest]         = useState(null);
   const [log,             setLog]            = useState([]);
@@ -401,6 +401,34 @@ export default function ValidateScreen({ projectId, chatHistory, setChatHistory,
   const ACCENT    = "#1D9E75";
   const ACCENT_BG = "rgba(29,158,117,0.07)";
   const canSimulate = Boolean(effectiveProjectId);
+
+  // ── No trained model gate ────────────────────────────────────────────────────
+  if (!trainResults) {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <div className="text-center space-y-4 max-w-sm">
+          <div className="w-14 h-14 rounded-full border-2 border-dashed border-gray-200 flex items-center justify-center mx-auto">
+            <svg className="w-6 h-6 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
+                d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z" />
+            </svg>
+          </div>
+          <div>
+            <p className="text-sm font-semibold text-gray-700 mb-1">No trained model found</p>
+            <p className="text-xs text-gray-400 leading-relaxed">
+              Complete data collection and training first before validating your model.
+            </p>
+          </div>
+          <button
+            onClick={onGoToTrain}
+            className="px-5 py-2.5 bg-accent text-white text-sm font-bold rounded-xl hover:bg-accent-dark transition-colors tracking-wide shadow-md shadow-accent/25"
+          >
+            Go to Training →
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="flex gap-6 h-full min-h-0">

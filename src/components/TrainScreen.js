@@ -298,7 +298,7 @@ const MODEL_TRAIN_STEPS = [
   { id: "nn",   label: "Neural Net" },
 ];
 
-export default function TrainScreen({ projectId, events, analyzeResult, pipelineConfig, pipelineBlocks, onRetrain, chatHistory, setChatHistory, onApplyAction }) {
+export default function TrainScreen({ projectId, events, analyzeResult, pipelineConfig, pipelineBlocks, onRetrain, chatHistory, setChatHistory, onApplyAction, onTrainDone }) {
   const [trainState,    setTrainState]    = useState("idle"); // idle | running | done | error
   const [progress,      setProgress]      = useState(0);
   const [currentModel,  setCurrentModel]  = useState("");
@@ -338,6 +338,7 @@ export default function TrainScreen({ projectId, events, analyzeResult, pipeline
         clearInterval(pollRef.current);
         setResults(data.results);
         setTrainState("done");
+        onTrainDone?.(data.results);
       } else if (data.state === "error") {
         clearInterval(pollRef.current);
         setTrainError(data.error ?? "Training failed.");

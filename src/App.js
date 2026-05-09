@@ -93,6 +93,7 @@ export default function App() {
   const [aiPipelineDesign,  setAiPipelineDesign]  = useState(saved?.aiPipelineDesign  ?? null);
   const [aiConfiguredBlocks,setAiConfiguredBlocks]= useState(saved?.aiConfiguredBlocks?? {});
   const [pipelineBlocks,    setPipelineBlocks]    = useState(saved?.pipelineBlocks    ?? INITIAL_BLOCKS);
+  const [trainResults,      setTrainResults]      = useState(saved?.trainResults      ?? null);
   const [pendingFlash,      setPendingFlash]      = useState(null);
   const [submitLoading,     setSubmitLoading]     = useState(false);
   const [submitError,       setSubmitError]       = useState(null);
@@ -117,15 +118,25 @@ export default function App() {
         aiPipelineDesign,
         aiConfiguredBlocks,
         pipelineBlocks,
+        trainResults,
       }));
     } catch {
       // Ignore quota errors
     }
   }, [activeStep, config, classes, activeClassId, events, analyzeResult, separabilityNote,
-      pipelineConfig, chatHistory, aiPipelineDesign, aiConfiguredBlocks, pipelineBlocks]);
+      pipelineConfig, chatHistory, aiPipelineDesign, aiConfiguredBlocks, pipelineBlocks, trainResults]);
 
   // ── Reset project ─────────────────────────────────────────────────────────
-  const handleReset = useCallback(() => {
+  const handleReset = useCallback(async () => {
+    // Clear backend session (trained model, events, training status)
+    const pid = slugify(config.projectName);
+    if (pid && pid !== "demo") {
+      try {
+        await fetch(`${API_BASE_URL}/session/clear/${pid}`, { method: "POST" });
+      } catch {
+        // Non-fatal — backend may be unreachable; frontend is cleared regardless
+      }
+    }
     localStorage.removeItem(STORAGE_KEY);
     setActiveStep(0);
     setConfig(INITIAL_CONFIG);
@@ -139,8 +150,9 @@ export default function App() {
     setAiPipelineDesign(null);
     setAiConfiguredBlocks({});
     setPipelineBlocks(INITIAL_BLOCKS);
+    setTrainResults(null);
     setShowResetConfirm(false);
-  }, []);
+  }, [config.projectName]);
 
   // ── Copilot action handler ────────────────────────────────────────────────
   function handleApplyAction({ type, value }) {
@@ -272,6 +284,7 @@ export default function App() {
           chatHistory={chatHistory}
           setChatHistory={setChatHistory}
           onApplyAction={handleApplyAction}
+          onTrainDone={(results) => setTrainResults(results)}
         />
       );
     }
@@ -279,6 +292,8 @@ export default function App() {
       return (
         <ValidateScreen
           projectId={projectId}
+          trainResults={trainResults}
+          onGoToTrain={() => setActiveStep(3)}
           chatHistory={chatHistory}
           setChatHistory={setChatHistory}
           onApplyAction={handleApplyAction}
