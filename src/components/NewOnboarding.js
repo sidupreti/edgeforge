@@ -141,11 +141,11 @@ function QuestionBlock({ index, question, children }) {
 }
 
 // ── CSV Drop Zone ─────────────────────────────────────────────────────────────
-function CsvDropZone({ onDetected, onSkip }) {
-  const fileRef   = useRef(null);
-  const [drag,    setDrag]    = useState(false);
-  const [status,  setStatus]  = useState("idle"); // idle | parsing | done | error
-  const [csvMeta, setCsvMeta] = useState(null);
+function CsvDropZone({ onDetected }) {
+  const fileRef    = useRef(null);
+  const [drag,     setDrag]    = useState(false);
+  const [status,   setStatus]  = useState("idle"); // idle | parsing | done | error | skipped
+  const [csvMeta,  setCsvMeta] = useState(null);
 
   function processFile(file) {
     if (!file) return;
@@ -170,6 +170,14 @@ function CsvDropZone({ onDetected, onSkip }) {
     setDrag(false);
     const file = e.dataTransfer.files?.[0];
     if (file) processFile(file);
+  }
+
+  if (status === "skipped") {
+    return (
+      <p className="text-xs" style={{ color: "rgba(255,255,255,0.25)" }}>
+        Skipped — using default format (timestamp_us, ax, ay, az)
+      </p>
+    );
   }
 
   if (status === "done" && csvMeta) {
@@ -237,7 +245,7 @@ function CsvDropZone({ onDetected, onSkip }) {
 
       <button
         type="button"
-        onClick={onSkip}
+        onClick={() => setStatus("skipped")}
         className="text-xs transition-colors"
         style={{ color: "rgba(255,255,255,0.3)" }}
         onMouseEnter={(e) => { e.currentTarget.style.color = "rgba(255,255,255,0.55)"; }}
@@ -255,7 +263,6 @@ export default function NewOnboarding({ onComplete }) {
   const [appDesc,      setAppDesc]      = useState("");
   const [sensor,       setSensor]       = useState("");
   const [mcu,          setMcu]          = useState("ESP32-S3");
-  const [csvSkipped,   setCsvSkipped]   = useState(false);
   const [detectedCsv,  setDetectedCsv]  = useState(null); // { colCount, columnNames, sampleRateHz }
   const [classes,      setClasses]      = useState("");
   const [error,        setError]        = useState("");
@@ -364,10 +371,7 @@ export default function NewOnboarding({ onComplete }) {
             index={3}
             question="Do you have a sample data file? Drop one here and I'll auto-detect the format — or skip if you don't have one yet."
           >
-            <CsvDropZone
-              onDetected={handleCsvDetected}
-              onSkip={() => setCsvSkipped(true)}
-            />
+            <CsvDropZone onDetected={handleCsvDetected} />
           </QuestionBlock>
 
           {/* Q5 — Classes (always visible, but visually highlighted once csv step resolved) */}
