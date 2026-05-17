@@ -1523,6 +1523,7 @@ export default function PipelineScreen({
       const aiFeats = [...(d.features?.time_domain ?? []), ...(d.features?.frequency_domain ?? [])];
       const newF = {};
       ALL_IDS.forEach((id) => { newF[id] = aiFeats.includes(id); });
+      newF.mean = true; // mean is always required — it is used by other features in C export
       setFeatures(newF);
       setAiConfiguredBlocks?.((b) => ({ ...b, features: true }));
     } else if (stageId === "model") {
