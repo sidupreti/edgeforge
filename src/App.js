@@ -172,8 +172,9 @@ export default function App() {
     setActiveStep(2);
   }
 
-  // ── Setup submit ──────────────────────────────────────────────────────────
-  async function handleSetupSubmit() {
+  // ── Setup submit (accepts optional config override for onboarding path) ──
+  async function handleSetupSubmit(cfgOverride) {
+    const cfg = cfgOverride ?? config;
     setSubmitLoading(true);
     setSubmitError(null);
     try {
@@ -181,14 +182,14 @@ export default function App() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          name:                    config.projectName || "demo",
-          sensor_type:             config.sensorType,
-          connection_type:         config.connectionType,
-          trigger_type:            config.triggerType,
-          trigger_config:          config.triggerConfig,
-          target_mcu:              config.targetMcu,
-          application_description: config.applicationDescription || null,
-          hardware_preprocessing:  config.hardwarePreprocessing  || null,
+          name:                    cfg.projectName || "demo",
+          sensor_type:             cfg.sensorType,
+          connection_type:         cfg.connectionType,
+          trigger_type:            cfg.triggerType,
+          trigger_config:          cfg.triggerConfig,
+          target_mcu:              cfg.targetMcu,
+          application_description: cfg.applicationDescription || null,
+          hardware_preprocessing:  cfg.hardwarePreprocessing  || null,
         }),
       });
       if (!res.ok) {
@@ -221,6 +222,12 @@ export default function App() {
           config={config}
           setConfig={setConfig}
           submitError={submitError}
+          onOnboardingComplete={(finalConfig, finalClasses) => {
+            setConfig(finalConfig);
+            setClasses(finalClasses);
+            setActiveClassId(finalClasses[0]?.id ?? "cls-event");
+            handleSetupSubmit(finalConfig);
+          }}
         />
       );
     }

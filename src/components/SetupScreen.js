@@ -1,4 +1,5 @@
-import React from "react";
+import React, { useState } from "react";
+import OnboardingChat from "./OnboardingChat";
 
 const SENSOR_TYPES = [
   "Accelerometer (IMU)",
@@ -228,7 +229,10 @@ function DeviceStatusPanel({ connectionType }) {
   );
 }
 
-export default function SetupScreen({ config, setConfig, submitError }) {
+export default function SetupScreen({ config, setConfig, submitError, onOnboardingComplete }) {
+  // Show onboarding chat for brand-new projects (no project name set yet)
+  const [showOnboarding, setShowOnboarding] = useState(!config.projectName);
+
   const { projectName, sensorType, connectionType, triggerType, triggerConfig, targetMcu } = config;
   const hwType = config.hardwarePreprocessing?.type ?? "none";
 
@@ -236,10 +240,62 @@ export default function SetupScreen({ config, setConfig, submitError }) {
   const setTriggerConfig = (updater) =>
     setConfig((prev) => ({ ...prev, triggerConfig: updater(prev.triggerConfig) }));
 
+  // ── Onboarding mode ───────────────────────────────────────────────────────
+  if (showOnboarding) {
+    return (
+      <div className="flex gap-8 h-full min-h-0">
+        {/* Onboarding chat — takes up the left column */}
+        <div className="flex-1 min-w-0 min-h-0" style={{ maxWidth: 560 }}>
+          <OnboardingChat
+            onComplete={(finalConfig, finalClasses) => {
+              setConfig(finalConfig);
+              onOnboardingComplete?.(finalConfig, finalClasses);
+            }}
+            onManualSetup={() => setShowOnboarding(false)}
+          />
+        </div>
+
+        {/* Right column — static info panel */}
+        <div className="w-64 flex-shrink-0 space-y-4">
+          <div className="border border-gray-200 rounded-xl p-5 space-y-4">
+            <p className="text-xs font-bold text-gray-500 uppercase tracking-widest">How it works</p>
+            <div className="space-y-3">
+              {[
+                ["1 · Describe", "Tell the AI what you're classifying and what sensor you have."],
+                ["2 · Upload",   "Drop a sample CSV and EdgeForge detects your data format automatically."],
+                ["3 · Classes",  "Name your gesture or event classes — circle, shake, anomaly, …"],
+                ["4 · Collect",  "Record or upload labelled examples for each class."],
+                ["5 · Train",    "One click trains and benchmarks multiple classifiers."],
+                ["6 · Export",   "Get a .h C model ready to flash to your target MCU."],
+              ].map(([step, desc]) => (
+                <div key={step} className="flex gap-2.5">
+                  <span className="text-[10px] font-bold text-accent tracking-widest flex-shrink-0 mt-0.5 w-14">{step}</span>
+                  <p className="text-xs text-gray-500 leading-relaxed">{desc}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Manual form mode ──────────────────────────────────────────────────────
   return (
     <div className="flex gap-8 h-full">
       {/* Left column — form */}
       <div className="flex-1 space-y-6 max-w-lg">
+        {/* Guided setup link */}
+        <div className="flex items-center justify-between pb-2 border-b border-gray-100">
+          <p className="text-xs text-gray-400 uppercase tracking-widest">Manual Configuration</p>
+          <button
+            onClick={() => setShowOnboarding(true)}
+            className="text-xs text-accent hover:text-accent-dark transition-colors font-semibold"
+          >
+            ← Use guided setup
+          </button>
+        </div>
+
         <div>
           <Label>Project Name</Label>
           <Input
