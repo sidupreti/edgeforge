@@ -24,11 +24,13 @@ body {
 
 /* ── Dark theme overrides for Tailwind utilities ─────────────────────── */
 
-/* White backgrounds → dark glass panels */
+/* White backgrounds → dark panels.
+   NOTE: backdrop-filter intentionally NOT set here — applying it to every
+   .bg-white element (cards, panels, etc.) stacked over the particle canvas
+   creates severe GPU composite load at 20fps.  Blur is applied only to
+   specific chrome elements (header/footer) via inline styles in App.js. */
 .bg-white {
-  background: rgba(13, 21, 38, 0.92) !important;
-  backdrop-filter: blur(12px) !important;
-  -webkit-backdrop-filter: blur(12px) !important;
+  background: rgba(13, 21, 38, 0.94) !important;
 }
 
 /* Light grays → dark variants */

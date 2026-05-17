@@ -302,6 +302,7 @@ export default function App() {
         <ValidateScreen
           projectId={projectId}
           trainResults={trainResults}
+          pipelineConfig={pipelineConfig}
           onGoToTrain={() => setActiveStep(3)}
           chatHistory={chatHistory}
           setChatHistory={setChatHistory}

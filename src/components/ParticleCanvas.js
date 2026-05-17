@@ -39,13 +39,23 @@ export default function ParticleCanvas() {
       }
     }
 
-    function draw() {
+    // Cap at ~20fps — this is a decorative background, not interactive.
+    // 60fps + O(n²) connections + backdrop-filter on every panel = GPU overload.
+    let lastDraw = 0;
+
+    function draw(timestamp) {
+      animId = requestAnimationFrame(draw);
+
+      // Skip frame if less than 50ms since last draw (~20fps cap)
+      if (timestamp - lastDraw < 50) return;
+      lastDraw = timestamp;
+
       ctx.clearRect(0, 0, canvas.width, canvas.height);
 
-      // Update positions
+      // Update positions (advance at reduced rate to keep visual speed consistent)
       for (const p of particles) {
-        p.x += p.vx;
-        p.y += p.vy;
+        p.x += p.vx * 3; // compensate for ~3x fewer frames
+        p.y += p.vy * 3;
         if (p.x < 0 || p.x > canvas.width)  p.vx *= -1;
         if (p.y < 0 || p.y > canvas.height) p.vy *= -1;
         clampSpeed(p);
@@ -76,19 +86,18 @@ export default function ParticleCanvas() {
         ctx.fillStyle = `rgba(${ACCENT_RGB},0.15)`;
         ctx.fill();
       }
-
-      animId = requestAnimationFrame(draw);
     }
 
     resize();
     initParticles();
-    draw();
+    animId = requestAnimationFrame(draw);
 
-    window.addEventListener("resize", () => { resize(); initParticles(); });
+    function handleResize() { resize(); initParticles(); }
+    window.addEventListener("resize", handleResize);
 
     return () => {
       cancelAnimationFrame(animId);
-      window.removeEventListener("resize", resize);
+      window.removeEventListener("resize", handleResize);
     };
   }, []);
 

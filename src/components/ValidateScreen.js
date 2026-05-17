@@ -168,13 +168,15 @@ function LogEntry({ entry, color, bg }) {
 
 // ── Main component ────────────────────────────────────────────────────────────
 
-export default function ValidateScreen({ projectId, trainResults, onGoToTrain, chatHistory, setChatHistory, onApplyAction }) {
+export default function ValidateScreen({ projectId, trainResults, pipelineConfig, onGoToTrain, chatHistory, setChatHistory, onApplyAction }) {
   const [localProjectId, setLocalProjectId] = useState(null);
   const [latest,          setLatest]         = useState(null);
   const [log,             setLog]            = useState([]);
   const [uploading,       setUploading]      = useState(false);
   const [uploadProgress,  setUploadProgress] = useState(null); // "2 / 5" string
   const [error,           setError]          = useState(null);
+  const [debugOpen,       setDebugOpen]       = useState(false);
+  const [lastResponse,    setLastResponse]    = useState(null);
   const fileInputRef = useRef(null);
 
   // ── Serial state ────────────────────────────────────────────────────────────
@@ -215,22 +217,42 @@ export default function ValidateScreen({ projectId, trainResults, onGoToTrain, c
 
   // ── Classify a parsed event (used by both live and could be reused) ─────────
 
-  const classifyEvent = useCallback(async ({ ax, ay, az, duration_ms, source }) => {
+  const classifyEvent = useCallback(async ({ ax, ay, az, duration_ms, source, filename }) => {
     if (!effectiveProjectId) return;
     try {
+      const reqBody = {
+        project_id: effectiveProjectId,
+        event: { ax, ay, az, duration_ms, class_label: "" },
+      };
+
+      // Debug logging — visible in browser devtools console
+      console.log("[classify] request →", {
+        project_id:       effectiveProjectId,
+        source,
+        filename:         filename ?? null,
+        samples:          ax.length,
+        duration_ms,
+        pipeline_used_by_backend: "(see _saved_pipeline on Railway — /classify ignores frontend config)",
+        pipelineConfig_in_state:  pipelineConfig ?? "(not passed)",
+      });
+
       const res = await fetch(`${API_BASE_URL}/classify`, {
         method:  "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          project_id: effectiveProjectId,
-          event: { ax, ay, az, duration_ms, class_label: "" },
-        }),
+        body: JSON.stringify(reqBody),
       });
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         throw new Error(body.detail ?? `API ${res.status}`);
       }
       const data = await res.json();
+      console.log("[classify] response ←", {
+        label:      data.label,
+        confidence: (data.confidence * 100).toFixed(1) + "%",
+        all_proba:  data.all_proba,
+        metrics:    data.metrics,
+      });
+      setLastResponse({ label: data.label, confidence: data.confidence, all_proba: data.all_proba });
       register(data.label);
       const entry = {
         id:         `${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
@@ -241,14 +263,16 @@ export default function ValidateScreen({ projectId, trainResults, onGoToTrain, c
         allProba:   data.all_proba ?? {},
         timestamp:  new Date().toLocaleTimeString(),
         source,
+        filename,
       };
       setLatest(entry);
       setLog((prev) => [entry, ...prev].slice(0, 20));
       setError(null);
     } catch (err) {
+      console.error("[classify] error:", err.message);
       setError(err.message);
     }
-  }, [effectiveProjectId, register]);
+  }, [effectiveProjectId, register, pipelineConfig]);
 
   // ── Flush the line buffer as a complete event ────────────────────────────────
 
@@ -408,7 +432,6 @@ export default function ValidateScreen({ projectId, trainResults, onGoToTrain, c
     setUploadProgress(null);
 
     const fileList = Array.from(files);
-    let lastEntry  = null;
 
     for (let i = 0; i < fileList.length; i++) {
       const file = fileList[i];
@@ -435,35 +458,7 @@ export default function ValidateScreen({ projectId, trainResults, onGoToTrain, c
 
       const { ax, ay, az, duration_ms } = parsed;
       try {
-        const res = await fetch(`${API_BASE_URL}/classify`, {
-          method:  "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            project_id: effectiveProjectId,
-            event: { ax, ay, az, duration_ms, class_label: "" },
-          }),
-        });
-        if (!res.ok) {
-          const body = await res.json().catch(() => ({}));
-          throw new Error(body.detail ?? `API ${res.status}`);
-        }
-        const data = await res.json();
-        register(data.label);
-        const entry = {
-          id:         `${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
-          label:      data.label,
-          confidence: data.confidence,
-          metrics:    data.metrics,
-          event:      { ax, ay, az },
-          allProba:   data.all_proba ?? {},
-          timestamp:  new Date().toLocaleTimeString(),
-          source:     "upload",
-          filename:   file.name,
-        };
-        lastEntry = entry;
-        setLatest(entry);
-        setLog((prev) => [entry, ...prev].slice(0, 50));
-        setError(null);
+        await classifyEvent({ ax, ay, az, duration_ms, source: "upload", filename: file.name });
       } catch (err) {
         setError(`${file.name}: ${err.message}`);
       }
@@ -471,7 +466,6 @@ export default function ValidateScreen({ projectId, trainResults, onGoToTrain, c
 
     setUploading(false);
     setUploadProgress(null);
-    if (lastEntry) setLatest(lastEntry);
   }
 
   // ── Summary stats ─────────────────────────────────────────────────────────────
@@ -819,6 +813,72 @@ export default function ValidateScreen({ projectId, trainResults, onGoToTrain, c
             onApplyAction={onApplyAction}
             screen="validate"
           />
+        </div>
+
+        {/* Debug panel */}
+        <div className="border border-gray-200 rounded-xl flex-shrink-0 overflow-hidden">
+          <button
+            onClick={() => setDebugOpen((o) => !o)}
+            className="w-full flex items-center justify-between px-4 py-2.5 text-left transition-colors hover:bg-gray-50"
+          >
+            <span className="text-xs text-gray-400 uppercase tracking-widest">Debug</span>
+            <svg
+              className="w-3 h-3 text-gray-400 transition-transform"
+              style={{ transform: debugOpen ? "rotate(180deg)" : "rotate(0deg)" }}
+              fill="none" viewBox="0 0 16 16" stroke="currentColor"
+            >
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.6} d="M4 6l4 4 4-4" />
+            </svg>
+          </button>
+
+          {debugOpen && (
+            <div className="px-4 pb-3 space-y-2 border-t border-gray-100">
+              {[
+                ["project_id",   effectiveProjectId ?? "—"],
+                ["cutoff_hz",    pipelineConfig?.filter?.cutoff ?? "—"],
+                ["filter_order", pipelineConfig?.filter?.order  ?? "—"],
+                ["window_ms",    pipelineConfig?.normalize?.window ?? "—"],
+                ["interpolation",pipelineConfig?.normalize?.interpolation ?? "—"],
+                ["model",        pipelineConfig?.model ?? "—"],
+                ["best_model",   trainResults?.best_model_id ?? "—"],
+                ["features",     Object.entries(pipelineConfig?.features ?? {})
+                                  .filter(([, v]) => v)
+                                  .map(([k]) => k)
+                                  .join(", ") || "—"],
+              ].map(([k, v]) => (
+                <div key={k} className="flex gap-2 text-xs">
+                  <span className="text-gray-400 flex-shrink-0 w-24 font-mono">{k}</span>
+                  <span className="text-gray-600 font-mono break-all">{String(v)}</span>
+                </div>
+              ))}
+
+              {lastResponse && (
+                <div className="mt-2 pt-2 border-t border-gray-100 space-y-1">
+                  <p className="text-[10px] text-gray-400 uppercase tracking-widest">Last response</p>
+                  <div className="flex gap-2 text-xs">
+                    <span className="text-gray-400 font-mono w-24">label</span>
+                    <span className="text-accent font-mono font-bold">{lastResponse.label}</span>
+                  </div>
+                  <div className="flex gap-2 text-xs">
+                    <span className="text-gray-400 font-mono w-24">confidence</span>
+                    <span className="text-gray-600 font-mono">{(lastResponse.confidence * 100).toFixed(1)}%</span>
+                  </div>
+                  {lastResponse.all_proba && (
+                    <div className="space-y-0.5 mt-1">
+                      {Object.entries(lastResponse.all_proba)
+                        .sort((a, b) => b[1] - a[1])
+                        .map(([lbl, p]) => (
+                          <div key={lbl} className="flex gap-2 text-xs">
+                            <span className="text-gray-400 font-mono w-24 truncate">{lbl}</span>
+                            <span className="text-gray-600 font-mono">{(p * 100).toFixed(1)}%</span>
+                          </div>
+                        ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
         </div>
 
         {/* Summary stats */}
