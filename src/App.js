@@ -9,6 +9,8 @@ import TrainScreen from "./components/TrainScreen";
 import ValidateScreen from "./components/ValidateScreen";
 import ExportScreen from "./components/ExportScreen";
 import PlaceholderScreen from "./components/PlaceholderScreen";
+import ParticleCanvas from "./components/ParticleCanvas";
+import NewOnboarding from "./components/NewOnboarding";
 
 const STEPS = [
   { key: "setup",    label: "Setup" },
@@ -320,115 +322,177 @@ export default function App() {
     return <PlaceholderScreen title={meta.title} description={meta.description} />;
   }
 
-  return (
-    <div className="flex h-screen bg-white text-gray-800 font-mono overflow-hidden">
-      <Sidebar
-        activeStep={activeStep}
-        onResetRequest={() => setShowResetConfirm(true)}
-      />
+  // ── Full-screen onboarding for brand-new projects ────────────────────────────
+  if (activeStep === 0 && !config.projectName) {
+    return (
+      <>
+        <ParticleCanvas />
+        <NewOnboarding
+          onComplete={(finalConfig, finalClasses) => {
+            setConfig(finalConfig);
+            setClasses(finalClasses);
+            setActiveClassId(finalClasses[0]?.id ?? "cls-event");
+            handleSetupSubmit(finalConfig);
+          }}
+        />
+      </>
+    );
+  }
 
-      {/* Reset confirmation overlay */}
-      {showResetConfirm && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50">
-          <div className="bg-white rounded-xl border border-gray-200 shadow-lg p-6 max-w-sm w-full mx-4">
-            <h2 className="text-sm font-bold text-gray-800 mb-2">Reset Project?</h2>
-            <p className="text-xs text-gray-500 leading-relaxed mb-5">
-              This will clear all data and start a new project. This cannot be undone.
-            </p>
-            <div className="flex gap-3 justify-end">
-              <button
-                onClick={() => setShowResetConfirm(false)}
-                className="px-4 py-2 text-xs border border-gray-200 rounded text-gray-600 hover:border-gray-400 transition-colors"
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleReset}
-                className="px-4 py-2 text-xs bg-red-500 text-white rounded hover:bg-red-600 transition-colors"
-              >
-                Reset Project
-              </button>
+  return (
+    <div className="flex h-screen font-sans overflow-hidden" style={{ background: "#080d1a", color: "#e2e8f0", position: "relative" }}>
+      <ParticleCanvas />
+
+      {/* Content sits above canvas */}
+      <div className="flex flex-1 min-w-0 h-full" style={{ position: "relative", zIndex: 1 }}>
+        <Sidebar
+          activeStep={activeStep}
+          onResetRequest={() => setShowResetConfirm(true)}
+          onOpenSettings={() => setActiveStep(0)}
+        />
+
+        {/* Reset confirmation overlay */}
+        {showResetConfirm && (
+          <div className="fixed inset-0 flex items-center justify-center z-50" style={{ background: "rgba(0,0,0,0.6)" }}>
+            <div
+              className="rounded-xl p-6 max-w-sm w-full mx-4"
+              style={{
+                background: "rgba(13,21,38,0.95)",
+                border: "1px solid rgba(255,255,255,0.08)",
+                backdropFilter: "blur(16px)",
+              }}
+            >
+              <h2 className="text-sm font-bold mb-2" style={{ color: "#e2e8f0" }}>Reset Project?</h2>
+              <p className="text-xs leading-relaxed mb-5" style={{ color: "rgba(255,255,255,0.4)" }}>
+                This will clear all data and start a new project. This cannot be undone.
+              </p>
+              <div className="flex gap-3 justify-end">
+                <button
+                  onClick={() => setShowResetConfirm(false)}
+                  className="px-4 py-2 text-xs rounded transition-colors"
+                  style={{ border: "1px solid rgba(255,255,255,0.1)", color: "rgba(255,255,255,0.5)" }}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleReset}
+                  className="px-4 py-2 text-xs rounded transition-colors"
+                  style={{ background: "#ef4444", color: "#fff" }}
+                >
+                  Reset Project
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      )}
-
-      {/* Main content */}
-      <div className="flex-1 flex flex-col min-h-0">
-        {/* Top bar */}
-        <header className="border-b border-gray-200 px-8 py-4 flex items-center justify-between bg-white">
-          <div>
-            <h1 className="text-sm font-bold text-gray-800 uppercase tracking-widest">
-              {STEPS[activeStep].label}
-            </h1>
-            <p className="text-xs text-gray-400 mt-0.5">
-              Step {activeStep + 1} of {STEPS.length}
-            </p>
-          </div>
-
-          {/* Step progress dots */}
-          <div className="flex items-center gap-1.5">
-            {STEPS.map((s, i) => (
-              <span
-                key={s.key}
-                className={`
-                  w-2 h-2 rounded-full
-                  ${i === activeStep  ? "bg-accent" : ""}
-                  ${i < activeStep   ? "bg-accent/50" : ""}
-                  ${i > activeStep   ? "bg-gray-200" : ""}
-                `}
-              />
-            ))}
-          </div>
-        </header>
-
-        {/* Screen body */}
-        <main className="flex-1 min-h-0 px-8 py-8 overflow-y-auto">
-          {renderScreen()}
-        </main>
-
-        {/* Bottom nav bar — hidden on pipeline (PipelineScreen has its own internal nav) */}
-        {currentKey !== "pipeline" && (
-          <footer className="border-t border-gray-200 px-8 py-4 flex items-center justify-between bg-white">
-            <button
-              onClick={goBack}
-              disabled={activeStep === 0}
-              className={`
-                px-5 py-2 rounded border text-sm tracking-wide transition-colors
-                ${activeStep === 0
-                  ? "border-gray-200 text-gray-300 cursor-not-allowed"
-                  : "border-gray-300 text-gray-600 hover:border-gray-400 hover:text-gray-800"
-                }
-              `}
-            >
-              ← Back
-            </button>
-
-            <span className="text-xs text-gray-400 tracking-widest uppercase">
-              {STEPS[activeStep].label}
-            </span>
-
-            <button
-              onClick={handleNext}
-              disabled={activeStep === STEPS.length - 1 || submitLoading}
-              className={`
-                px-5 py-2 rounded text-sm tracking-wide transition-colors min-w-[90px] text-center
-                ${activeStep === STEPS.length - 1
-                  ? "bg-gray-100 text-gray-300 cursor-not-allowed"
-                  : submitLoading
-                    ? "bg-accent/60 text-white cursor-wait"
-                    : "bg-accent text-white hover:bg-accent-dark"
-                }
-              `}
-            >
-              {submitLoading
-                ? "Saving…"
-                : activeStep === STEPS.length - 1
-                  ? "Done"
-                  : "Next →"}
-            </button>
-          </footer>
         )}
+
+        {/* Main content */}
+        <div className="flex-1 flex flex-col min-h-0">
+          {/* Top bar */}
+          <header
+            className="px-8 py-4 flex items-center justify-between"
+            style={{
+              borderBottom: "1px solid rgba(255,255,255,0.05)",
+              background: "rgba(8,13,26,0.8)",
+              backdropFilter: "blur(12px)",
+            }}
+          >
+            <div>
+              <h1
+                className="text-sm font-bold uppercase tracking-widest"
+                style={{
+                  fontFamily: "'Plus Jakarta Sans', sans-serif",
+                  color: "#e2e8f0",
+                }}
+              >
+                {STEPS[activeStep].label}
+              </h1>
+              <p className="text-xs mt-0.5" style={{ color: "rgba(255,255,255,0.25)" }}>
+                Step {activeStep + 1} of {STEPS.length}
+              </p>
+            </div>
+
+            {/* Step progress dots */}
+            <div className="flex items-center gap-1.5">
+              {STEPS.map((s, i) => (
+                <span
+                  key={s.key}
+                  className="w-2 h-2 rounded-full transition-colors"
+                  style={{
+                    background: i === activeStep
+                      ? "#1D9E75"
+                      : i < activeStep
+                        ? "rgba(29,158,117,0.4)"
+                        : "rgba(255,255,255,0.1)",
+                  }}
+                />
+              ))}
+            </div>
+          </header>
+
+          {/* Screen body */}
+          <main className="flex-1 min-h-0 px-8 py-8 overflow-y-auto">
+            {renderScreen()}
+          </main>
+
+          {/* Bottom nav bar — hidden on pipeline (PipelineScreen has its own internal nav) */}
+          {currentKey !== "pipeline" && (
+            <footer
+              className="px-8 py-4 flex items-center justify-between"
+              style={{
+                borderTop: "1px solid rgba(255,255,255,0.05)",
+                background: "rgba(8,13,26,0.8)",
+                backdropFilter: "blur(12px)",
+              }}
+            >
+              <button
+                onClick={goBack}
+                disabled={activeStep === 0}
+                className="px-5 py-2 rounded text-sm tracking-wide transition-all"
+                style={{
+                  border: "1px solid rgba(255,255,255,0.08)",
+                  color: activeStep === 0 ? "rgba(255,255,255,0.15)" : "rgba(255,255,255,0.5)",
+                  cursor: activeStep === 0 ? "not-allowed" : "pointer",
+                }}
+              >
+                ← Back
+              </button>
+
+              <span
+                className="text-xs tracking-widest uppercase"
+                style={{ color: "rgba(255,255,255,0.2)" }}
+              >
+                {STEPS[activeStep].label}
+              </span>
+
+              <button
+                onClick={handleNext}
+                disabled={activeStep === STEPS.length - 1 || submitLoading}
+                className="px-5 py-2 rounded text-sm tracking-wide transition-all min-w-[90px] text-center"
+                style={{
+                  background: activeStep === STEPS.length - 1
+                    ? "rgba(255,255,255,0.06)"
+                    : submitLoading
+                      ? "rgba(29,158,117,0.4)"
+                      : "linear-gradient(135deg,#1D9E75,#16866A)",
+                  color: activeStep === STEPS.length - 1
+                    ? "rgba(255,255,255,0.2)"
+                    : "#fff",
+                  cursor: activeStep === STEPS.length - 1 ? "not-allowed" : "pointer",
+                  boxShadow: activeStep < STEPS.length - 1 && !submitLoading
+                    ? "0 0 14px rgba(29,158,117,0.3)"
+                    : "none",
+                }}
+              >
+                {submitLoading
+                  ? "Saving…"
+                  : activeStep === STEPS.length - 1
+                    ? "Done"
+                    : "Next →"}
+              </button>
+            </footer>
+          )}
+        </div>
       </div>
     </div>
   );

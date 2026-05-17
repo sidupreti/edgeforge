@@ -1,8 +1,181 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-* {
-  font-family: 'Courier New', Courier, monospace;
+/* ── Global resets ───────────────────────────────────────────────────── */
+*, *::before, *::after {
   box-sizing: border-box;
+}
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font-family: 'Inter', system-ui, sans-serif;
+  background: #080d1a;
+  color: #e2e8f0;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ── Dark theme overrides for Tailwind utilities ─────────────────────── */
+
+/* White backgrounds → dark glass panels */
+.bg-white {
+  background: rgba(13, 21, 38, 0.92) !important;
+  backdrop-filter: blur(12px) !important;
+  -webkit-backdrop-filter: blur(12px) !important;
+}
+
+/* Light grays → dark variants */
+.bg-gray-50  { background: rgba(255,255,255,0.03) !important; }
+.bg-gray-100 { background: rgba(255,255,255,0.05) !important; }
+.bg-gray-200 { background: rgba(255,255,255,0.08) !important; }
+
+/* Text */
+.text-gray-800 { color: #e2e8f0 !important; }
+.text-gray-700 { color: #cbd5e1 !important; }
+.text-gray-600 { color: #94a3b8 !important; }
+.text-gray-500 { color: #64748b !important; }
+.text-gray-400 { color: #475569 !important; }
+.text-gray-300 { color: #94a3b8 !important; }
+
+/* Borders */
+.border-gray-200 { border-color: rgba(255,255,255,0.08) !important; }
+.border-gray-100 { border-color: rgba(255,255,255,0.05) !important; }
+.border-gray-300 { border-color: rgba(255,255,255,0.12) !important; }
+
+/* Hover states */
+.hover\:border-gray-400:hover { border-color: rgba(255,255,255,0.22) !important; }
+.hover\:text-gray-800:hover   { color: #f1f5f9 !important; }
+.hover\:bg-gray-50:hover      { background: rgba(255,255,255,0.06) !important; }
+.hover\:bg-gray-100:hover     { background: rgba(255,255,255,0.08) !important; }
+
+/* Inputs and selects */
+input, textarea, select {
+  background: rgba(255,255,255,0.04) !important;
+  color: #e2e8f0 !important;
+  border-color: rgba(255,255,255,0.1) !important;
+}
+input::placeholder, textarea::placeholder {
+  color: #475569 !important;
+}
+select option {
+  background: #0d1526;
+  color: #e2e8f0;
+}
+
+/* ── Card gradient borders ────────────────────────────────────────────── */
+.card-glass {
+  background: rgba(13, 21, 38, 0.75);
+  border: 1px solid rgba(255,255,255,0.07);
+  border-radius: 12px;
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+/* Gradient border trick */
+.card-gradient-border {
+  position: relative;
+  border-radius: 12px;
+  background: rgba(13,21,38,0.85);
+}
+.card-gradient-border::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 12px;
+  padding: 1px;
+  background: linear-gradient(135deg, rgba(29,158,117,0.4), rgba(255,255,255,0.06));
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+  pointer-events: none;
+}
+
+/* ── Rounded border overrides ────────────────────────────────────────── */
+.rounded-xl { border-radius: 12px !important; }
+
+/* ── Primary / accent button ─────────────────────────────────────────── */
+.bg-accent {
+  background: linear-gradient(135deg, #1D9E75 0%, #16866A 100%) !important;
+}
+.bg-accent:hover, .hover\:bg-accent-dark:hover {
+  background: linear-gradient(135deg, #22b585 0%, #1D9E75 100%) !important;
+  box-shadow: 0 0 18px rgba(29,158,117,0.45), 0 4px 12px rgba(0,0,0,0.35) !important;
+}
+
+/* ── Glass secondary buttons ─────────────────────────────────────────── */
+button.border-gray-200, button.border-gray-300 {
+  background: rgba(255,255,255,0.04) !important;
+  backdrop-filter: blur(8px);
+}
+button.border-gray-200:hover, button.border-gray-300:hover {
+  background: rgba(255,255,255,0.07) !important;
+}
+
+/* ── Sidebar polish ──────────────────────────────────────────────────── */
+aside {
+  background: #060b17 !important;
+  border-right-color: rgba(29,158,117,0.12) !important;
+}
+
+/* ── Scrollbar (dark) ────────────────────────────────────────────────── */
+::-webkit-scrollbar       { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: rgba(29,158,117,0.4); }
+
+/* ── Code / mono text ────────────────────────────────────────────────── */
+code, .font-mono, pre {
+  font-family: 'JetBrains Mono', 'Courier New', monospace !important;
+}
+
+/* ── Typing indicator dots ───────────────────────────────────────────── */
+.typing-dot:nth-child(1) { animation: pulse-dot 1.4s ease-in-out 0s    infinite; }
+.typing-dot:nth-child(2) { animation: pulse-dot 1.4s ease-in-out 0.2s  infinite; }
+.typing-dot:nth-child(3) { animation: pulse-dot 1.4s ease-in-out 0.4s  infinite; }
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 0.3; transform: scale(0.85); }
+  50%       { opacity: 1;   transform: scale(1); }
+}
+
+/* ── Bubble slide-in ─────────────────────────────────────────────────── */
+@keyframes bubble-in {
+  0%   { opacity: 0; transform: translateX(-28px); }
+  100% { opacity: 1; transform: translateX(0); }
+}
+.animate-bubble-in { animation: bubble-in 0.45s cubic-bezier(0.34,1.56,0.64,1) both; }
+
+/* ── Logo underline grow ─────────────────────────────────────────────── */
+@keyframes underline-grow {
+  from { transform: scaleX(0); }
+  to   { transform: scaleX(1); }
+}
+.animate-underline-grow {
+  display: block;
+  height: 3px;
+  background: linear-gradient(90deg, #1D9E75, #16866A);
+  border-radius: 2px;
+  transform-origin: left;
+  animation: underline-grow 0.7s ease-out 0.3s both;
+}
+
+/* ── Fade up ─────────────────────────────────────────────────────────── */
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(14px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.animate-fade-up { animation: fade-up 0.5s ease-out both; }
+
+/* ── Pipeline block glow when selected ──────────────────────────────── */
+.pipeline-block-active {
+  box-shadow: 0 0 0 2px rgba(29,158,117,0.5), 0 0 20px rgba(29,158,117,0.2) !important;
+  border-color: rgba(29,158,117,0.5) !important;
 }
