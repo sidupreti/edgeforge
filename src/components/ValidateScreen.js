@@ -128,14 +128,23 @@ function ConfidenceBar({ confidence, color }) {
 
 function LogEntry({ entry, color, bg }) {
   const pct = Math.round((entry.confidence ?? 0) * 100);
+  // Trim filename to a readable length for the badge
+  const fileShort = entry.filename
+    ? entry.filename.replace(/\.(csv|txt)$/i, "").slice(0, 12) + (entry.filename.length > 16 ? "…" : "")
+    : null;
   return (
-    <div className="flex items-center gap-3 py-2 border-b border-gray-50 last:border-0">
+    <div className="flex items-center gap-2 py-2 border-b border-gray-50 last:border-0">
       <span className="text-xs text-gray-300 tabular-nums flex-shrink-0 w-14">
         {entry.timestamp}
       </span>
       {entry.source === "live" && (
         <span className="flex-shrink-0 text-[9px] font-bold text-emerald-600 bg-emerald-50 border border-emerald-200 px-1 py-0.5 rounded tracking-wide">
           LIVE
+        </span>
+      )}
+      {entry.source === "upload" && fileShort && (
+        <span className="flex-shrink-0 text-[9px] text-gray-400 bg-gray-50 border border-gray-200 px-1 py-0.5 rounded tracking-wide max-w-[60px] truncate" title={entry.filename}>
+          {fileShort}
         </span>
       )}
       <span
@@ -163,8 +172,10 @@ export default function ValidateScreen({ projectId, trainResults, onGoToTrain, c
   const [localProjectId, setLocalProjectId] = useState(null);
   const [latest,          setLatest]         = useState(null);
   const [log,             setLog]            = useState([]);
-  const [simulating,      setSimulating]     = useState(false);
+  const [uploading,       setUploading]      = useState(false);
+  const [uploadProgress,  setUploadProgress] = useState(null); // "2 / 5" string
   const [error,           setError]          = useState(null);
+  const fileInputRef = useRef(null);
 
   // ── Serial state ────────────────────────────────────────────────────────────
   const [serialConnected,  setSerialConnected]  = useState(false);
@@ -351,41 +362,116 @@ export default function ValidateScreen({ projectId, trainResults, onGoToTrain, c
     setSerialClassifying(false);
   }
 
-  // ── Simulate ─────────────────────────────────────────────────────────────────
+  // ── Parse a CSV file into ax/ay/az arrays ────────────────────────────────────
 
-  async function simulate() {
-    if (!effectiveProjectId || simulating) return;
-    setSimulating(true);
-    setError(null);
-    try {
-      const res = await fetch(`${API_BASE_URL}/classify/simulate`, {
-        method:  "POST",
-        headers: { "Content-Type": "application/json" },
-        body:    JSON.stringify({ project_id: effectiveProjectId }),
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body.detail ?? `API ${res.status}`);
+  function parseCsv(text) {
+    const lines = text
+      .split("\n")
+      .map((l) => l.trim().replace(/\r$/, ""))
+      .filter(Boolean);
+    if (lines.length < 2) return null;
+
+    // Skip header row if first column is non-numeric
+    const firstParts = lines[0].split(",");
+    const hasHeader  = isNaN(parseFloat(firstParts[0]));
+    const dataLines  = hasHeader ? lines.slice(1) : lines;
+    if (dataLines.length < 2) return null;
+
+    const rows = [];
+    for (const line of dataLines) {
+      const parts = line.split(",");
+      const nums  = parts.map(Number);
+      if (nums.some(isNaN)) continue;
+      if (parts.length >= 4) {
+        rows.push({ ts: nums[0], ax: nums[1], ay: nums[2], az: nums[3] });
+      } else if (parts.length === 3) {
+        rows.push({ ts: nums[0], ax: nums[1], ay: nums[2], az: 0 });
+      } else if (parts.length === 2) {
+        rows.push({ ts: nums[0], ax: nums[1], ay: 0, az: 0 });
       }
-      const data = await res.json();
-      register(data.label);
-      const entry = {
-        id:         `${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
-        label:      data.label,
-        confidence: data.confidence,
-        metrics:    data.metrics,
-        event:      data.event,
-        allProba:   data.all_proba ?? {},
-        timestamp:  new Date().toLocaleTimeString(),
-        source:     "sim",
-      };
-      setLatest(entry);
-      setLog((prev) => [entry, ...prev].slice(0, 20));
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setSimulating(false);
     }
+    if (rows.length < 2) return null;
+
+    const ax = rows.map((r) => r.ax);
+    const ay = rows.map((r) => r.ay);
+    const az = rows.map((r) => r.az);
+    const duration_ms = Math.max((rows[rows.length - 1].ts - rows[0].ts) / 1000, 1);
+    return { ax, ay, az, duration_ms };
+  }
+
+  // ── Upload test data ──────────────────────────────────────────────────────────
+
+  async function uploadTestFiles(files) {
+    if (!effectiveProjectId || uploading || !files?.length) return;
+    setUploading(true);
+    setError(null);
+    setUploadProgress(null);
+
+    const fileList = Array.from(files);
+    let lastEntry  = null;
+
+    for (let i = 0; i < fileList.length; i++) {
+      const file = fileList[i];
+      setUploadProgress(`${i + 1} / ${fileList.length}`);
+
+      // Read file text
+      const text = await new Promise((resolve) => {
+        const reader = new FileReader();
+        reader.onload  = (e) => resolve(e.target.result);
+        reader.onerror = ()  => resolve(null);
+        reader.readAsText(file);
+      });
+
+      if (!text) {
+        setError(`Could not read ${file.name}`);
+        continue;
+      }
+
+      const parsed = parseCsv(text);
+      if (!parsed) {
+        setError(`Could not parse ${file.name} — expected timestamp,ax,ay,az`);
+        continue;
+      }
+
+      const { ax, ay, az, duration_ms } = parsed;
+      try {
+        const res = await fetch(`${API_BASE_URL}/classify`, {
+          method:  "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            project_id: effectiveProjectId,
+            event: { ax, ay, az, duration_ms, class_label: "" },
+          }),
+        });
+        if (!res.ok) {
+          const body = await res.json().catch(() => ({}));
+          throw new Error(body.detail ?? `API ${res.status}`);
+        }
+        const data = await res.json();
+        register(data.label);
+        const entry = {
+          id:         `${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
+          label:      data.label,
+          confidence: data.confidence,
+          metrics:    data.metrics,
+          event:      { ax, ay, az },
+          allProba:   data.all_proba ?? {},
+          timestamp:  new Date().toLocaleTimeString(),
+          source:     "upload",
+          filename:   file.name,
+        };
+        lastEntry = entry;
+        setLatest(entry);
+        setLog((prev) => [entry, ...prev].slice(0, 50));
+        setError(null);
+      } catch (err) {
+        setError(`${file.name}: ${err.message}`);
+      }
+    }
+
+    setUploading(false);
+    setUploadProgress(null);
+    if (lastEntry) setLatest(lastEntry);
   }
 
   // ── Summary stats ─────────────────────────────────────────────────────────────
@@ -400,7 +486,6 @@ export default function ValidateScreen({ projectId, trainResults, onGoToTrain, c
 
   const ACCENT    = "#1D9E75";
   const ACCENT_BG = "rgba(29,158,117,0.07)";
-  const canSimulate = Boolean(effectiveProjectId);
 
   // ── No trained model gate ────────────────────────────────────────────────────
   if (!trainResults) {
@@ -479,6 +564,11 @@ export default function ValidateScreen({ projectId, trainResults, onGoToTrain, c
                   LIVE GESTURE
                 </span>
               )}
+              {latest.source === "upload" && latest.filename && (
+                <span className="text-[9px] font-semibold text-gray-400 tracking-wide truncate max-w-xs">
+                  📎 {latest.filename}
+                </span>
+              )}
 
               {/* Label */}
               <div>
@@ -530,7 +620,7 @@ export default function ValidateScreen({ projectId, trainResults, onGoToTrain, c
               <p className="text-sm text-gray-400">
                 {serialConnected
                   ? "Waiting for gesture… (send --- separator after each event)"
-                  : "Hit Simulate or connect a device to classify an event"}
+                  : "Upload CSV files or connect a device to classify events"}
               </p>
             </div>
           )}
@@ -623,7 +713,6 @@ export default function ValidateScreen({ projectId, trainResults, onGoToTrain, c
                   : "border-gray-200 text-gray-300 cursor-not-allowed"
               }`}
             >
-              {/* Serial/USB icon */}
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
                   d="M9 3v2m6-2v2M9 19v2m6-2v2M5 9H3m2 6H3m18-6h-2m2 6h-2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z" />
@@ -632,40 +721,60 @@ export default function ValidateScreen({ projectId, trainResults, onGoToTrain, c
             </button>
           )}
 
-          {/* Simulate Event */}
+          {/* Upload Test Data */}
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept=".csv,.txt"
+            multiple
+            className="hidden"
+            onChange={(e) => {
+              if (e.target.files?.length) uploadTestFiles(e.target.files);
+              e.target.value = "";
+            }}
+          />
           <button
-            onClick={simulate}
-            disabled={!canSimulate || simulating}
-            className={`flex-1 py-3.5 rounded-xl text-sm font-bold tracking-wide transition-all ${
-              !canSimulate
-                ? "bg-gray-100 text-gray-300 cursor-not-allowed"
-                : simulating
+            onClick={() => fileInputRef.current?.click()}
+            disabled={uploading}
+            className={`flex-1 py-3.5 rounded-xl text-sm font-bold tracking-wide transition-all flex items-center justify-center gap-2 ${
+              uploading
                 ? "bg-accent/60 text-white cursor-wait"
                 : "bg-accent text-white hover:bg-accent-dark shadow-md shadow-accent/25 active:scale-[0.98]"
             }`}
           >
-            {simulating ? (
-              <span className="flex items-center justify-center gap-2">
+            {uploading ? (
+              <>
                 <span className="flex gap-1">
                   {[0, 1, 2].map((i) => (
                     <span key={i} className="w-1 h-1 rounded-full bg-white/70 animate-bounce"
                       style={{ animationDelay: `${i * 120}ms` }} />
                   ))}
                 </span>
-                Classifying…
-              </span>
+                {uploadProgress ? `Classifying ${uploadProgress}…` : "Classifying…"}
+              </>
             ) : (
-              "⚡ Simulate Event"
+              <>
+                <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
+                    d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                </svg>
+                Upload Test Data
+              </>
             )}
           </button>
         </div>
 
-        {/* Web Serial hint when not supported */}
-        {!serialSupported && (
-          <p className="text-[10px] text-gray-400 text-center -mt-2">
-            Live serial requires Chrome or Edge. Firefox is not supported.
+        {/* Hints */}
+        <div className="flex items-center justify-between -mt-2 flex-shrink-0">
+          <p className="text-[10px] text-gray-400">
+            CSV format: <code className="text-accent text-[10px]">timestamp_us,ax,ay,az</code>
           </p>
-        )}
+          {!serialSupported && (
+            <p className="text-[10px] text-gray-400">
+              Live serial requires Chrome or Edge
+            </p>
+          )}
+        </div>
       </div>
 
       {/* ── RIGHT PANEL ─────────────────────────────────────────────────────── */}
@@ -685,7 +794,7 @@ export default function ValidateScreen({ projectId, trainResults, onGoToTrain, c
               <div className="flex flex-col items-center justify-center h-full gap-2 text-center py-8">
                 <div className="w-8 h-8 rounded-full border-2 border-dashed border-gray-200" />
                 <p className="text-xs text-gray-300 leading-relaxed">
-                  Results appear here after each classification.
+                  Results appear here after each file or live gesture is classified.
                 </p>
               </div>
             ) : (
