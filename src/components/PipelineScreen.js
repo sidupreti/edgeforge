@@ -205,7 +205,7 @@ function DurationCallout({ analyzeResult }) {
         <p className="text-xs text-gray-600 leading-relaxed">
           A fixed window would{" "}
           <span className="font-semibold text-gray-800">discard the decay tail</span>{" "}
-          on longer events. EdgeForge normalizes each event{" "}
+          on longer events. SensorFlow normalizes each event{" "}
           <span className="font-semibold text-gray-800">individually</span>{" "}
           to preserve signal shape.
         </p>

@@ -162,7 +162,7 @@ function detectClassFromFilename(filename, classes, fallbackClassId) {
 function FormatGuide() {
   const [open, setOpen] = useState(false);
   const formats = [
-    { label: "EdgeForge native",  cols: "timestamp, a_x, a_y, a_z",         note: "timestamp in µs between samples" },
+    { label: "SensorFlow native",  cols: "timestamp, a_x, a_y, a_z",         note: "timestamp in µs between samples" },
     { label: "WISDM",             cols: "user, activity, timestamp, x, y, z", note: "activity column auto-used as class" },
     { label: "Generic XYZ",       cols: "any cols with time + x/y/z axes",   note: "column names auto-detected" },
     { label: "Headerless",        cols: "numeric rows, no header",            note: "assumes 100 Hz, columns: ts, x, y, z" },
@@ -222,7 +222,7 @@ function FileUploadMode({
           const parsed = result?.error ? null : result;
           let note = null;
           if (result?.error === "pre-processed feature file") {
-            note = "Pre-processed feature file — EdgeForge needs raw sensor time series data";
+            note = "Pre-processed feature file — SensorFlow needs raw sensor time series data";
           }
           // Auto-assign detected class label if available (WISDM activity column)
           let classId  = updated[realIdx].classId;

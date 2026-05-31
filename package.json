@@ -1,5 +1,5 @@
 {
-  "name": "edgeforge",
+  "name": "sensorflow",
   "version": "0.1.0",
   "private": true,
   "dependencies": {

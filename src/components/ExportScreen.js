@@ -29,7 +29,7 @@ function generatePythonPreview(projectId, pipelineConfig, trainingStatus) {
 
   return `#!/usr/bin/env python3
 """
-EdgeForge session.py — generated ${date}
+SensorFlow session.py — generated ${date}
 Project : ${projectId ?? "demo-project"}
 Model   : ${modelName}  |  CV accuracy: ${accuracy}
 Classes : ${JSON.stringify(classes)}
@@ -118,7 +118,7 @@ function generateEfpPreview(projectId, pipelineConfig, trainingStatus) {
   const classes = results?.class_labels ?? ["class_0", "class_1"];
 
   return JSON.stringify({
-    format:      "edgeforge-package",
+    format:      "sensorflow-package",
     version:     "1.0",
     project_id:  projectId ?? "demo-project",
     exported_at: new Date().toISOString(),
@@ -156,11 +156,11 @@ function generateCPreview(projectId, pipelineConfig, trainingStatus, chip) {
   const modelName = bestM ? MODEL_LABELS[bestM.id] ?? bestM.id : "Auto-select";
   const chipObj   = CHIPS.find((c) => c.id === chip) ?? CHIPS[0];
   const chipNote  = chipObj.arm
-    ? `/* Target: ${chipObj.label} — consider CMSIS-DSP for ef_dom_freq */`
+    ? `/* Target: ${chipObj.label} — consider CMSIS-DSP for sf_dom_freq */`
     : `/* Target: ${chipObj.label} — IRAM_ATTR on hot paths recommended */`;
 
   return `/*
- * EdgeForge — auto-generated on-device classifier
+ * SensorFlow — auto-generated on-device classifier
  * -----------------------------------------------
  * Project  : ${projectId ?? "demo-project"}
  * Model    : ${modelName}
@@ -171,8 +171,8 @@ function generateCPreview(projectId, pipelineConfig, trainingStatus, chip) {
  * Usage
  * -----
  *   #include "classifier.h"
- *   int8_t idx = ef_classify(ax, ay, az, EF_WINDOW_SAMPLES);
- *   const char *label = EF_CLASSES[idx];
+ *   int8_t idx = sf_classify(ax, ay, az, SF_WINDOW_SAMPLES);
+ *   const char *label = SF_CLASSES[idx];
  *
  * Note: weights are placeholders — download for real values.
  */
@@ -186,12 +186,12 @@ function generateCPreview(projectId, pipelineConfig, trainingStatus, chip) {
 #define EF_SAMPLE_RATE_HZ  100
 #define EF_CUTOFF_HZ       ${cutoff}
 #define EF_WINDOW_MS       ${winMs}
-#define EF_WINDOW_SAMPLES  ${nSamples}
+#define SF_WINDOW_SAMPLES  ${nSamples}
 #define EF_N_CLASSES       ${classes.length}
 #define EF_N_FEATURES      ${featCount}
 
 /* ── Class labels ────────────────────────────────────────────────────────── */
-static const char *EF_CLASSES[${classes.length}] = { ${classes.map((c) => `"${c}"`).join(", ")} };
+static const char *SF_CLASSES[${classes.length}] = { ${classes.map((c) => `"${c}"`).join(", ")} };
 
 /* ── Butterworth IIR coefficients — order 4 ──────────────────────────────── */
 /* (real values computed from cutoff at download time) */
@@ -202,7 +202,7 @@ static const float EF_FILTER_A[5] = { 1.0f, 0.0f, 0.0f, 0.0f, 0.0f };
 /* Download the full header for complete weight arrays */
 
 /* ── Public API ──────────────────────────────────────────────────────────── */
-static int8_t ef_classify(
+static int8_t sf_classify(
     const float *ax, const float *ay, const float *az, uint16_t n);`;
 }
 
@@ -484,7 +484,7 @@ const OPTIONS = [
   },
   {
     id:       "efp",
-    title:    "EdgeForge package",
+    title:    "SensorFlow package",
     subtitle: "Full project bundle — pipeline config, class labels, and training results as a portable .efp file.",
     icon:     (
       <>

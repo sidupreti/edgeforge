@@ -33,10 +33,10 @@ export default function Sidebar({ activeStep, onResetRequest, onOpenSettings }) 
             backgroundClip: "text",
           }}
         >
-          EdgeForge
+          SensorFlow
         </span>
         <p className="text-xs mt-0.5 tracking-wider" style={{ color: "rgba(255,255,255,0.2)" }}>
-          ML Dev Platform
+          Embedded ML Platform
         </p>
       </div>
 

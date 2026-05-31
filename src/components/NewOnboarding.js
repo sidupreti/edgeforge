@@ -328,11 +328,11 @@ export default function NewOnboarding({ onComplete }) {
               backgroundClip: "text",
             }}
           >
-            EDGEFORGE
+            SENSORFLOW
           </h1>
           <span className="animate-underline-grow" style={{ width: 120 }} />
           <p className="text-sm mt-3 tracking-wider" style={{ color: "rgba(255,255,255,0.3)" }}>
-            ML for embedded hardware
+            Embedded ML Platform
           </p>
         </div>
 

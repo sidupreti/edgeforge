@@ -62,7 +62,7 @@ const INITIAL_BLOCKS = [
 ];
 
 // ── localStorage helpers ──────────────────────────────────────────────────────
-const STORAGE_KEY = "edgeforge_state";
+const STORAGE_KEY = "sensorflow_state";
 
 function loadSavedState() {
   try {

@@ -1,0 +1,616 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>SensorFlow — Embedded ML Platform</title>
+  <meta name="description" content="Build, train, and deploy machine learning models directly on microcontrollers. From raw sensor data to optimized C code in minutes." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --accent:     #1D9E75;
+      --accent-dim: #16866A;
+      --navy:       #080d1a;
+      --navy2:      #0d1526;
+      --text:       #e2e8f0;
+      --text-muted: rgba(226,232,240,0.45);
+      --border:     rgba(255,255,255,0.07);
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      font-family: 'Inter', system-ui, sans-serif;
+      background: var(--navy);
+      color: var(--text);
+      -webkit-font-smoothing: antialiased;
+      overflow-x: hidden;
+    }
+
+    /* ── Scrollbar ── */
+    ::-webkit-scrollbar { width: 5px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 3px; }
+
+    /* ── Particle canvas ── */
+    #bg-canvas {
+      position: fixed; inset: 0; width: 100%; height: 100%;
+      pointer-events: none; z-index: 0;
+    }
+
+    /* ── Layout helpers ── */
+    .container { max-width: 1120px; margin: 0 auto; padding: 0 24px; position: relative; z-index: 1; }
+    .section { padding: 96px 0; }
+
+    /* ── NAV ── */
+    nav {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+      border-bottom: 1px solid var(--border);
+      background: rgba(8,13,26,0.85);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+    }
+    .nav-inner {
+      max-width: 1120px; margin: 0 auto; padding: 0 24px;
+      height: 60px; display: flex; align-items: center; justify-content: space-between;
+    }
+    .nav-logo {
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      font-weight: 800; font-size: 18px; letter-spacing: -0.3px;
+      color: #000000;
+      text-decoration: none;
+    }
+    .nav-links { display: flex; align-items: center; gap: 32px; }
+    .nav-links a {
+      font-size: 14px; color: var(--text-muted); text-decoration: none;
+      transition: color .2s;
+    }
+    .nav-links a:hover { color: var(--text); }
+    .nav-cta {
+      padding: 8px 18px; border-radius: 8px; font-size: 13px; font-weight: 600;
+      background: linear-gradient(135deg, var(--accent), var(--accent-dim));
+      color: #fff; text-decoration: none;
+      box-shadow: 0 0 16px rgba(29,158,117,0.3);
+      transition: box-shadow .2s, transform .15s;
+    }
+    .nav-cta:hover { box-shadow: 0 0 24px rgba(29,158,117,0.5); transform: translateY(-1px); }
+
+    /* ── HERO ── */
+    .hero {
+      padding: 160px 0 96px;
+      text-align: center;
+    }
+    .hero-badge {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 6px 14px; border-radius: 99px; margin-bottom: 32px;
+      border: 1px solid rgba(29,158,117,0.3);
+      background: rgba(29,158,117,0.08);
+      font-size: 12px; font-weight: 600; color: var(--accent);
+      letter-spacing: .05em; text-transform: uppercase;
+    }
+    .hero-badge .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); animation: pulse 2s ease-in-out infinite; }
+    @keyframes pulse { 0%,100% { opacity:.4; } 50% { opacity:1; } }
+
+    .hero h1 {
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      font-size: clamp(36px, 6vw, 72px);
+      font-weight: 800;
+      line-height: 1.08;
+      letter-spacing: -1.5px;
+      background: linear-gradient(160deg, #fff 30%, rgba(255,255,255,0.45));
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      max-width: 840px; margin: 0 auto 24px;
+    }
+    .hero h1 em {
+      font-style: normal;
+      background: linear-gradient(135deg, var(--accent), #34d399);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .hero p {
+      font-size: 18px; line-height: 1.7; color: var(--text-muted);
+      max-width: 580px; margin: 0 auto 40px;
+    }
+    .hero-actions { display: flex; align-items: center; gap: 16px; justify-content: center; flex-wrap: wrap; }
+    .btn-primary {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 14px 28px; border-radius: 12px;
+      background: linear-gradient(135deg, var(--accent), var(--accent-dim));
+      color: #fff; font-size: 15px; font-weight: 700;
+      text-decoration: none; letter-spacing: .01em;
+      box-shadow: 0 4px 24px rgba(29,158,117,0.4);
+      transition: box-shadow .2s, transform .15s;
+    }
+    .btn-primary:hover { box-shadow: 0 6px 32px rgba(29,158,117,0.6); transform: translateY(-2px); }
+    .btn-secondary {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 14px 28px; border-radius: 12px;
+      border: 1px solid rgba(255,255,255,0.12);
+      background: rgba(255,255,255,0.04);
+      color: var(--text); font-size: 15px; font-weight: 500;
+      text-decoration: none;
+      transition: border-color .2s, background .2s;
+    }
+    .btn-secondary:hover { border-color: rgba(255,255,255,0.25); background: rgba(255,255,255,0.07); }
+
+    /* ── STATS BAR ── */
+    .stats-bar {
+      border-top: 1px solid var(--border);
+      border-bottom: 1px solid var(--border);
+      padding: 32px 0;
+    }
+    .stats-inner {
+      display: grid; grid-template-columns: repeat(4, 1fr);
+      gap: 24px; text-align: center;
+    }
+    @media (max-width: 640px) { .stats-inner { grid-template-columns: repeat(2, 1fr); } }
+    .stat-num {
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      font-size: 36px; font-weight: 800; color: var(--accent);
+      line-height: 1;
+    }
+    .stat-label { font-size: 13px; color: var(--text-muted); margin-top: 6px; }
+
+    /* ── WORKFLOW ── */
+    .workflow-steps {
+      display: grid; grid-template-columns: repeat(3, 1fr); gap: 2px;
+      border: 1px solid var(--border); border-radius: 16px; overflow: hidden;
+    }
+    @media (max-width: 768px) { .workflow-steps { grid-template-columns: 1fr; } }
+    .workflow-step {
+      padding: 32px 28px;
+      background: rgba(13,21,38,0.6);
+      border-right: 1px solid var(--border);
+      position: relative;
+      transition: background .2s;
+    }
+    .workflow-step:last-child { border-right: none; }
+    .workflow-step:hover { background: rgba(29,158,117,0.05); }
+    .step-num {
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 11px; font-weight: 500;
+      color: var(--accent); letter-spacing: .1em;
+      margin-bottom: 16px;
+    }
+    .step-icon {
+      width: 40px; height: 40px;
+      border: 1px solid rgba(29,158,117,0.3);
+      border-radius: 10px;
+      display: flex; align-items: center; justify-content: center;
+      margin-bottom: 16px;
+      background: rgba(29,158,117,0.08);
+    }
+    .step-icon svg { width: 20px; height: 20px; stroke: var(--accent); }
+    .workflow-step h3 { font-size: 16px; font-weight: 700; margin-bottom: 8px; color: var(--text); }
+    .workflow-step p { font-size: 13px; line-height: 1.6; color: var(--text-muted); }
+
+    /* ── FEATURES ── */
+    .section-label {
+      font-size: 11px; font-weight: 700; letter-spacing: .1em; text-transform: uppercase;
+      color: var(--accent); margin-bottom: 12px;
+    }
+    .section-title {
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      font-size: clamp(28px, 4vw, 44px); font-weight: 800;
+      line-height: 1.15; letter-spacing: -0.8px; margin-bottom: 16px;
+      background: linear-gradient(160deg, #fff 40%, rgba(255,255,255,0.5));
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+    }
+    .section-sub { font-size: 16px; line-height: 1.7; color: var(--text-muted); max-width: 560px; }
+
+    .features-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+    @media (max-width: 768px) { .features-grid { grid-template-columns: 1fr; } }
+    .feature-card {
+      padding: 28px; border-radius: 14px;
+      border: 1px solid var(--border);
+      background: rgba(13,21,38,0.7);
+      transition: border-color .2s, transform .2s;
+      position: relative; overflow: hidden;
+    }
+    .feature-card::before {
+      content: ''; position: absolute; inset: 0; border-radius: 14px; opacity: 0;
+      background: radial-gradient(ellipse at 50% 0%, rgba(29,158,117,0.12), transparent 70%);
+      transition: opacity .3s;
+    }
+    .feature-card:hover { border-color: rgba(29,158,117,0.3); transform: translateY(-2px); }
+    .feature-card:hover::before { opacity: 1; }
+    .feature-icon {
+      width: 44px; height: 44px; border-radius: 10px;
+      background: rgba(29,158,117,0.1); border: 1px solid rgba(29,158,117,0.2);
+      display: flex; align-items: center; justify-content: center;
+      margin-bottom: 16px;
+    }
+    .feature-icon svg { width: 22px; height: 22px; stroke: var(--accent); }
+    .feature-card h3 { font-size: 15px; font-weight: 700; margin-bottom: 8px; }
+    .feature-card p { font-size: 13px; line-height: 1.65; color: var(--text-muted); }
+
+    /* ── MCU TARGETS ── */
+    .mcu-grid {
+      display: flex; flex-wrap: wrap; gap: 10px; margin-top: 32px;
+    }
+    .mcu-chip {
+      padding: 8px 16px; border-radius: 99px;
+      border: 1px solid var(--border);
+      background: rgba(255,255,255,0.03);
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px; color: var(--text-muted);
+      transition: border-color .2s, color .2s;
+    }
+    .mcu-chip:hover { border-color: rgba(29,158,117,0.4); color: var(--accent); }
+
+    /* ── CODE PREVIEW ── */
+    .code-block {
+      background: rgba(5,10,22,0.9);
+      border: 1px solid var(--border);
+      border-radius: 12px; overflow: hidden;
+    }
+    .code-header {
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border);
+      display: flex; align-items: center; gap: 8px;
+    }
+    .code-header .dot { width: 10px; height: 10px; border-radius: 50%; }
+    .code-header .filename {
+      font-family: 'JetBrains Mono', monospace; font-size: 11px;
+      color: var(--text-muted); margin-left: 8px;
+    }
+    pre {
+      padding: 20px; overflow-x: auto;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 12px; line-height: 1.7;
+    }
+    .tok-comment { color: #475569; }
+    .tok-keyword { color: #67e8f9; }
+    .tok-type    { color: #a78bfa; }
+    .tok-fn      { color: var(--accent); }
+    .tok-num     { color: #fbbf24; }
+    .tok-str     { color: #86efac; }
+    .tok-plain   { color: #94a3b8; }
+
+    /* ── TWO-COL ── */
+    .two-col { display: grid; grid-template-columns: 1fr 1fr; gap: 64px; align-items: center; }
+    @media (max-width: 768px) { .two-col { grid-template-columns: 1fr; gap: 40px; } }
+
+    /* ── CTA SECTION ── */
+    .cta-section {
+      text-align: center;
+      padding: 96px 0;
+    }
+    .cta-card {
+      padding: 64px 40px;
+      border-radius: 20px;
+      border: 1px solid rgba(29,158,117,0.2);
+      background: linear-gradient(135deg, rgba(29,158,117,0.08) 0%, rgba(13,21,38,0.95) 60%);
+      position: relative; overflow: hidden;
+    }
+    .cta-card::before {
+      content: ''; position: absolute; top: -80px; left: 50%; transform: translateX(-50%);
+      width: 400px; height: 200px; border-radius: 50%;
+      background: radial-gradient(ellipse, rgba(29,158,117,0.18), transparent 70%);
+      pointer-events: none;
+    }
+    .cta-card h2 {
+      font-family: 'Plus Jakarta Sans', sans-serif;
+      font-size: clamp(28px, 4vw, 48px); font-weight: 800;
+      letter-spacing: -0.8px; margin-bottom: 16px;
+      background: linear-gradient(160deg, #fff 40%, rgba(255,255,255,0.5));
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+    }
+    .cta-card p { font-size: 16px; color: var(--text-muted); margin-bottom: 36px; }
+
+    /* ── FOOTER ── */
+    footer {
+      border-top: 1px solid var(--border);
+      padding: 32px 0; text-align: center;
+    }
+    footer p { font-size: 13px; color: var(--text-muted); }
+    footer a { color: var(--accent); text-decoration: none; }
+
+    /* ── Animations ── */
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(20px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+    .anim-fade-up { animation: fadeUp .6s ease-out both; }
+    .anim-delay-1 { animation-delay: .1s; }
+    .anim-delay-2 { animation-delay: .2s; }
+    .anim-delay-3 { animation-delay: .35s; }
+    .anim-delay-4 { animation-delay: .5s; }
+  </style>
+</head>
+<body>
+
+<canvas id="bg-canvas"></canvas>
+
+<!-- NAV -->
+<nav>
+  <div class="nav-inner">
+    <a href="/" class="nav-logo" style="color:#000000;">SensorFlow</a>
+    <div class="nav-links">
+      <a href="#features">Features</a>
+      <a href="#workflow">How it works</a>
+      <a href="#targets">MCU Targets</a>
+      <a href="/" class="nav-cta">Try Free →</a>
+    </div>
+  </div>
+</nav>
+
+<!-- HERO -->
+<section class="hero container">
+  <div class="hero-badge anim-fade-up">
+    <span class="dot"></span>
+    Embedded ML — No PhD Required
+  </div>
+  <h1 class="anim-fade-up anim-delay-1">
+    From sensor data to<br/><em>on-device AI</em> in minutes
+  </h1>
+  <p class="anim-fade-up anim-delay-2">
+    SensorFlow lets you train gesture, anomaly, and event classifiers
+    directly from raw IMU or microphone data — then exports optimized C
+    code ready to flash to your microcontroller.
+  </p>
+  <div class="hero-actions anim-fade-up anim-delay-3">
+    <a href="/" class="btn-primary">
+      <svg width="16" height="16" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+      Try SensorFlow Free
+    </a>
+    <a href="#workflow" class="btn-secondary">See how it works</a>
+  </div>
+</section>
+
+<!-- STATS -->
+<section class="stats-bar">
+  <div class="container">
+    <div class="stats-inner">
+      <div>
+        <div class="stat-num">7</div>
+        <div class="stat-label">Target MCUs supported</div>
+      </div>
+      <div>
+        <div class="stat-num">&lt;5ms</div>
+        <div class="stat-label">Inference latency on ESP32</div>
+      </div>
+      <div>
+        <div class="stat-num">3</div>
+        <div class="stat-label">ML models (RF · SVM · NN)</div>
+      </div>
+      <div>
+        <div class="stat-num">100%</div>
+        <div class="stat-label">Browser-based, no install</div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- WORKFLOW -->
+<section class="section" id="workflow">
+  <div class="container">
+    <div style="text-align:center; margin-bottom:48px;">
+      <p class="section-label">How it works</p>
+      <h2 class="section-title">Six steps from idea to firmware</h2>
+    </div>
+    <div class="workflow-steps">
+      <div class="workflow-step">
+        <div class="step-num">01 / 06</div>
+        <div class="step-icon"><svg fill="none" viewBox="0 0 24 24" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M10.5 6h9.75M10.5 6a1.5 1.5 0 11-3 0m3 0a1.5 1.5 0 10-3 0M3.75 6H7.5m3 12h9.75m-9.75 0a1.5 1.5 0 01-3 0m3 0a1.5 1.5 0 00-3 0m-3.75 0H7.5"/></svg></div>
+        <h3>Setup</h3>
+        <p>Describe your application, pick your sensor and MCU. The AI onboarding detects your data format automatically.</p>
+      </div>
+      <div class="workflow-step">
+        <div class="step-num">02 / 06</div>
+        <div class="step-icon"><svg fill="none" viewBox="0 0 24 24" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5"/></svg></div>
+        <h3>Collect</h3>
+        <p>Upload labelled CSV files or stream live from your device over Serial, BLE, or Wi-Fi MQTT.</p>
+      </div>
+      <div class="workflow-step">
+        <div class="step-num">03 / 06</div>
+        <div class="step-icon"><svg fill="none" viewBox="0 0 24 24" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 3v11.25A2.25 2.25 0 006 16.5h2.25M3.75 3h-1.5m1.5 0h16.5m0 0h1.5m-1.5 0v11.25A2.25 2.25 0 0118 16.5h-2.25m-7.5 0h7.5m-7.5 0l-1 3m8.5-3l1 3m0 0l.5 1.5m-.5-1.5h-9.5m0 0l-.5 1.5M9 11.25v1.5M12 9v3.75m3-6v6"/></svg></div>
+        <h3>Pipeline</h3>
+        <p>Configure filtering, normalization, and feature extraction. The AI Pipeline Designer recommends optimal settings for your signal type.</p>
+      </div>
+      <div class="workflow-step">
+        <div class="step-num">04 / 06</div>
+        <div class="step-icon"><svg fill="none" viewBox="0 0 24 24" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M9.75 3.104v5.714a2.25 2.25 0 01-.659 1.591L5 14.5M9.75 3.104c-.251.023-.501.05-.75.082m.75-.082a24.301 24.301 0 014.5 0m0 0v5.714c0 .597.237 1.17.659 1.591L19.8 15.3M14.25 3.104c.251.023.501.05.75.082M19.8 15.3l-1.57.393A9.065 9.065 0 0112 15a9.065 9.065 0 00-6.23-.693L5 14.5m14.8.8l1.402 1.402c1.232 1.232.65 3.318-1.067 3.611A48.309 48.309 0 0112 21c-2.773 0-5.491-.235-8.135-.687-1.718-.293-2.3-2.379-1.067-3.61L5 14.5"/></svg></div>
+        <h3>Train</h3>
+        <p>One click trains Random Forest, SVM, and Neural Network classifiers simultaneously. Cross-validated accuracy shown for each.</p>
+      </div>
+      <div class="workflow-step">
+        <div class="step-num">05 / 06</div>
+        <div class="step-icon"><svg fill="none" viewBox="0 0 24 24" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M11.35 3.836c-.065.21-.1.433-.1.664 0 .414.336.75.75.75h4.5a.75.75 0 00.75-.75 2.25 2.25 0 00-.1-.664m-5.8 0A2.251 2.251 0 0113.5 2.25H15c1.012 0 1.867.668 2.15 1.586m-5.8 0c-.376.023-.75.05-1.124.08C9.095 4.01 8.25 4.973 8.25 6.108V8.25m8.9-4.414c.376.023.75.05 1.124.08 1.131.094 1.976 1.057 1.976 2.192V16.5A2.25 2.25 0 0118 18.75h-2.25m-7.5-10.5H4.875c-.621 0-1.125.504-1.125 1.125v11.25c0 .621.504 1.125 1.125 1.125h9.75c.621 0 1.125-.504 1.125-1.125V18.75m-7.5-10.5h6.375c.621 0 1.125.504 1.125 1.125v9.375m-8.25-3l1.5 1.5 3-3.75"/></svg></div>
+        <h3>Validate</h3>
+        <p>Upload test CSV files or stream live from hardware. Confidence scores and per-class probabilities update in real time.</p>
+      </div>
+      <div class="workflow-step">
+        <div class="step-num">06 / 06</div>
+        <div class="step-icon"><svg fill="none" viewBox="0 0 24 24" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M17.25 6.75L22.5 12l-5.25 5.25m-10.5 0L1.5 12l5.25-5.25m7.5-3l-4.5 16.5"/></svg></div>
+        <h3>Export</h3>
+        <p>Download a <code style="font-family:'JetBrains Mono',monospace;color:var(--accent);font-size:11px;">classifier.h</code> C header, Python session script, or SensorFlow package — ready to integrate into your firmware.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- FEATURES -->
+<section class="section" id="features">
+  <div class="container">
+    <div style="max-width:540px; margin-bottom:56px;">
+      <p class="section-label">Features</p>
+      <h2 class="section-title">Everything you need for embedded ML</h2>
+      <p class="section-sub">No Python environment setup. No cloud GPU costs. Just upload your data and get firmware-ready models.</p>
+    </div>
+    <div class="features-grid">
+      <div class="feature-card">
+        <div class="feature-icon"><svg fill="none" viewBox="0 0 24 24" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z"/></svg></div>
+        <h3>AI Pipeline Designer</h3>
+        <p>Describe your application and get domain-specific filter cutoffs, window sizes, and feature selections recommended by Claude.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon"><svg fill="none" viewBox="0 0 24 24" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M17.25 6.75L22.5 12l-5.25 5.25m-10.5 0L1.5 12l5.25-5.25m7.5-3l-4.5 16.5"/></svg></div>
+        <h3>Zero-dependency C export</h3>
+        <p>Generated <code style="font-family:'JetBrains Mono',monospace;color:var(--accent);font-size:11px;">classifier.h</code> uses only standard C99 — no external libraries, no dynamic allocation. Fits in 8KB Flash.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon"><svg fill="none" viewBox="0 0 24 24" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 3v11.25A2.25 2.25 0 006 16.5h2.25M3.75 3h-1.5m1.5 0h16.5m0 0h1.5m-1.5 0v11.25A2.25 2.25 0 0118 16.5h-2.25m-7.5 0h7.5"/></svg></div>
+        <h3>Live serial classification</h3>
+        <p>Connect your ESP32 or Arduino over Web Serial and classify gestures live — no firmware changes required.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon"><svg fill="none" viewBox="0 0 24 24" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M7.5 14.25v2.25m3-4.5v4.5m3-6.75v6.75m3-9v9M6 20.25h12A2.25 2.25 0 0020.25 18V6A2.25 2.25 0 0018 3.75H6A2.25 2.25 0 003.75 6v12A2.25 2.25 0 006 20.25z"/></svg></div>
+        <h3>Three classifiers in one click</h3>
+        <p>Random Forest, SVM, and Neural Network are all trained and cross-validated simultaneously. Pick the best or export all.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon"><svg fill="none" viewBox="0 0 24 24" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M3.75 13.5l10.5-11.25L12 10.5h8.25L9.75 21.75 12 13.5H3.75z"/></svg></div>
+        <h3>Signal analysis</h3>
+        <p>Automatic frequency analysis, event duration statistics, and class separability scoring tell you if your data is ready before training.</p>
+      </div>
+      <div class="feature-card">
+        <div class="feature-icon"><svg fill="none" viewBox="0 0 24 24" stroke-width="1.5"><path stroke-linecap="round" stroke-linejoin="round" d="M8.25 3v1.5M4.5 8.25H3m18 0h-1.5M4.5 12H3m18 0h-1.5m-15 3.75H3m18 0h-1.5M8.25 19.5V21M12 3v1.5m0 15V21m3.75-18v1.5m0 15V21m-9-1.5h10.5a2.25 2.25 0 002.25-2.25V6.75a2.25 2.25 0 00-2.25-2.25H6.75A2.25 2.25 0 004.5 6.75v10.5a2.25 2.25 0 002.25 2.25z"/></svg></div>
+        <h3>Custom DSP blocks</h3>
+        <p>Write Python preprocessing code that runs server-side — bandpass filters, Hilbert transforms, or any NumPy operation.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- CODE PREVIEW -->
+<section class="section">
+  <div class="container">
+    <div class="two-col">
+      <div>
+        <p class="section-label">Export</p>
+        <h2 class="section-title">Firmware-ready in one click</h2>
+        <p class="section-sub" style="margin-bottom:24px;">
+          The generated <code style="font-family:'JetBrains Mono',monospace;color:var(--accent);">classifier.h</code> is pure C99 — no runtime dependencies, no heap allocation. Drop it into any embedded project.
+        </p>
+        <div class="mcu-grid" id="targets">
+          <span class="mcu-chip">ESP32-S3</span>
+          <span class="mcu-chip">STM32L476</span>
+          <span class="mcu-chip">STM32H743</span>
+          <span class="mcu-chip">nRF5340</span>
+          <span class="mcu-chip">Arduino BLE</span>
+          <span class="mcu-chip">RP2040</span>
+          <span class="mcu-chip">ATSAMD51</span>
+        </div>
+      </div>
+      <div class="code-block">
+        <div class="code-header">
+          <span class="dot" style="background:#ef4444"></span>
+          <span class="dot" style="background:#f59e0b"></span>
+          <span class="dot" style="background:#22c55e"></span>
+          <span class="filename">classifier.h</span>
+        </div>
+        <pre><span class="tok-comment">/*
+ * SensorFlow — auto-generated classifier
+ * Model   : Random Forest  (CV acc: 97.3%)
+ * Classes : idle, tap, shake
+ * Features: 21  |  Target: ESP32-S3
+ */</span>
+<span class="tok-keyword">#pragma once</span>
+<span class="tok-keyword">#include</span> <span class="tok-str">&lt;stdint.h&gt;</span>
+
+<span class="tok-keyword">#define</span> <span class="tok-fn">SF_NUM_CLASSES</span>   <span class="tok-num">3</span>
+<span class="tok-keyword">#define</span> <span class="tok-fn">SF_WINDOW_SAMPLES</span> <span class="tok-num">85</span>
+
+<span class="tok-keyword">extern const char</span> *<span class="tok-fn">SF_CLASSES</span>[<span class="tok-fn">SF_NUM_CLASSES</span>];
+
+<span class="tok-comment">/* Classify a single event window.
+ * ax/ay/az: float arrays of length n
+ * Returns class index (0 = idle, 1 = tap ...)
+ */</span>
+<span class="tok-type">int8_t</span> <span class="tok-fn">sf_classify</span>(
+    <span class="tok-keyword">const float</span> *ax,
+    <span class="tok-keyword">const float</span> *ay,
+    <span class="tok-keyword">const float</span> *az,
+    <span class="tok-type">int</span> n
+);</pre>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- CTA -->
+<section class="cta-section">
+  <div class="container">
+    <div class="cta-card">
+      <h2>Ready to deploy ML to your device?</h2>
+      <p>No signup required. Import your CSV and start training in under a minute.</p>
+      <a href="/" class="btn-primary" style="font-size:16px; padding:16px 36px;">
+        Try SensorFlow Free →
+      </a>
+    </div>
+  </div>
+</section>
+
+<!-- FOOTER -->
+<footer>
+  <div class="container">
+    <p>Built with ♥ for embedded engineers · <a href="/">Open the app →</a></p>
+  </div>
+</footer>
+
+<script>
+// Particle canvas — same as app but slightly lighter
+(function() {
+  const canvas = document.getElementById('bg-canvas');
+  const ctx = canvas.getContext('2d');
+  const N = 50, DIST = 130, SPEED = 0.25;
+  let pts = [], animId, last = 0;
+
+  function resize() {
+    canvas.width  = window.innerWidth;
+    canvas.height = window.innerHeight;
+    pts = Array.from({length: N}, () => ({
+      x: Math.random() * canvas.width,
+      y: Math.random() * canvas.height,
+      vx: (Math.random()-.5)*SPEED*2,
+      vy: (Math.random()-.5)*SPEED*2,
+    }));
+  }
+
+  function draw(ts) {
+    animId = requestAnimationFrame(draw);
+    if (ts - last < 50) return; // ~20fps
+    last = ts;
+    ctx.clearRect(0,0,canvas.width,canvas.height);
+    for (const p of pts) {
+      p.x += p.vx*3; p.y += p.vy*3;
+      if (p.x<0||p.x>canvas.width)  p.vx*=-1;
+      if (p.y<0||p.y>canvas.height) p.vy*=-1;
+    }
+    for (let i=0;i<pts.length;i++) {
+      for (let j=i+1;j<pts.length;j++) {
+        const dx=pts[i].x-pts[j].x, dy=pts[i].y-pts[j].y;
+        const d=Math.sqrt(dx*dx+dy*dy);
+        if (d<DIST) {
+          ctx.beginPath();
+          ctx.strokeStyle=`rgba(29,158,117,${((1-d/DIST)*0.07).toFixed(3)})`;
+          ctx.lineWidth=0.6;
+          ctx.moveTo(pts[i].x,pts[i].y);
+          ctx.lineTo(pts[j].x,pts[j].y);
+          ctx.stroke();
+        }
+      }
+    }
+    for (const p of pts) {
+      ctx.beginPath();
+      ctx.arc(p.x,p.y,1.2,0,Math.PI*2);
+      ctx.fillStyle='rgba(29,158,117,0.13)';
+      ctx.fill();
+    }
+  }
+
+  resize();
+  requestAnimationFrame(draw);
+  window.addEventListener('resize', resize);
+})();
+</script>
+</body>
+</html>
