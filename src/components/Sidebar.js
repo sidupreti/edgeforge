@@ -9,39 +9,68 @@ const STEPS = [
   { id: 5, key: "export",   label: "Export",   sub: "Deploy to device" },
 ];
 
+/* Chip-interconnect logo SVG */
+function LogoMark({ size = 28 }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 36 36" fill="none" aria-label="SensorFlow logo">
+      <rect x="10" y="10" width="16" height="16" rx="2.5" fill="#0a0a0a"/>
+      <rect x="13" y="13" width="4" height="4" rx="0.6" fill="white"/>
+      <rect x="19" y="13" width="4" height="4" rx="0.6" fill="white" opacity="0.75"/>
+      <rect x="13" y="19" width="4" height="4" rx="0.6" fill="white" opacity="0.75"/>
+      <rect x="19" y="19" width="4" height="4" rx="0.6" fill="white"/>
+      <line x1="17" y1="15" x2="19" y2="15" stroke="white" strokeWidth="0.8"/>
+      <line x1="15" y1="17" x2="15" y2="19" stroke="white" strokeWidth="0.8"/>
+      <line x1="21" y1="17" x2="21" y2="19" stroke="white" strokeWidth="0.8"/>
+      <line x1="17" y1="21" x2="19" y2="21" stroke="white" strokeWidth="0.8"/>
+      <rect x="14" y="6" width="2" height="4" rx="0.5" fill="#0a0a0a"/>
+      <rect x="20" y="6" width="2" height="4" rx="0.5" fill="#0a0a0a"/>
+      <rect x="14" y="26" width="2" height="4" rx="0.5" fill="#0a0a0a"/>
+      <rect x="20" y="26" width="2" height="4" rx="0.5" fill="#0a0a0a"/>
+      <rect x="6" y="14" width="4" height="2" rx="0.5" fill="#0a0a0a"/>
+      <rect x="6" y="20" width="4" height="2" rx="0.5" fill="#0a0a0a"/>
+      <rect x="26" y="14" width="4" height="2" rx="0.5" fill="#0a0a0a"/>
+      <rect x="26" y="20" width="4" height="2" rx="0.5" fill="#0a0a0a"/>
+    </svg>
+  );
+}
+
 export default function Sidebar({ activeStep, onResetRequest, onOpenSettings }) {
   return (
     <aside
       className="w-64 h-screen flex-shrink-0 flex flex-col overflow-y-auto"
       style={{
-        background: "#060b17",
-        borderRight: "1px solid rgba(29,158,117,0.12)",
+        background:  "#ffffff",
+        borderRight: "1px solid #ebeae5",
       }}
     >
       {/* Logo / brand */}
       <div
-        className="px-6 py-5"
-        style={{ borderBottom: "1px solid rgba(255,255,255,0.05)" }}
+        className="px-5 py-5 flex items-center gap-3"
+        style={{ borderBottom: "1px solid #ebeae5" }}
       >
-        <span
-          className="font-bold text-base tracking-widest uppercase"
-          style={{
-            fontFamily: "'Plus Jakarta Sans', sans-serif",
-            background: "linear-gradient(135deg, #1D9E75 0%, #34d399 100%)",
-            WebkitBackgroundClip: "text",
-            WebkitTextFillColor: "transparent",
-            backgroundClip: "text",
-          }}
-        >
-          SensorFlow
-        </span>
-        <p className="text-xs mt-0.5 tracking-wider" style={{ color: "rgba(255,255,255,0.2)" }}>
-          Embedded ML Platform
-        </p>
+        <LogoMark size={28} />
+        <div>
+          <span
+            className="font-bold text-base"
+            style={{
+              fontFamily: "'Syne', sans-serif",
+              color: "#0a0a0a",
+              letterSpacing: "-0.02em",
+            }}
+          >
+            SensorFlow
+          </span>
+          <p
+            className="text-xs mt-0.5"
+            style={{ fontFamily: "'DM Mono', monospace", color: "#b0afa8", letterSpacing: "0.04em" }}
+          >
+            Embedded ML
+          </p>
+        </div>
       </div>
 
       {/* Step list */}
-      <nav className="flex-1 py-5 px-3 space-y-0.5">
+      <nav className="flex-1 py-4 px-3 space-y-0.5">
         {STEPS.map((step) => {
           const isActive    = step.id === activeStep;
           const isCompleted = step.id < activeStep;
@@ -52,49 +81,52 @@ export default function Sidebar({ activeStep, onResetRequest, onOpenSettings }) 
               key={step.key}
               className="flex items-start gap-3 px-3 py-3 rounded-lg transition-all"
               style={{
-                background:  isActive ? "rgba(29,158,117,0.08)" : "transparent",
-                borderLeft:  isActive ? "2px solid rgba(29,158,117,0.6)" : "2px solid transparent",
-                opacity:     isFuture ? 0.35 : 1,
+                background:  isActive ? "#f8f7f3" : "transparent",
+                borderLeft:  isActive ? "2px solid #0a0a0a" : "2px solid transparent",
+                opacity:     isFuture ? 0.4 : 1,
               }}
             >
-              {/* Step indicator */}
+              {/* Mono step number */}
               <div
-                className="mt-0.5 w-5 h-5 rounded-full flex-shrink-0 flex items-center justify-center text-xs font-bold"
+                className="mt-0.5 w-7 h-7 rounded-full flex-shrink-0 flex items-center justify-center"
                 style={{
-                  background:   isCompleted ? "#1D9E75" : "transparent",
-                  border:       isCompleted
-                                  ? "none"
-                                  : isActive
-                                    ? "1.5px solid #1D9E75"
-                                    : "1.5px solid rgba(255,255,255,0.15)",
-                  color:        isCompleted ? "#fff" : isActive ? "#1D9E75" : "rgba(255,255,255,0.3)",
+                  background:  isCompleted ? "#0a0a0a" : isActive ? "#0a0a0a" : "transparent",
+                  border:      isCompleted || isActive
+                                 ? "none"
+                                 : "1px solid #d8d7d0",
+                  color:       isCompleted || isActive ? "#ffffff" : "#b0afa8",
+                  fontFamily:  "'DM Mono', monospace",
+                  fontSize:    "11px",
+                  fontWeight:  500,
                 }}
               >
                 {isCompleted ? (
-                  <svg viewBox="0 0 12 12" className="w-3 h-3 fill-current">
-                    <path d="M2 6l3 3 5-5" stroke="currentColor" strokeWidth="1.5" fill="none"
-                          strokeLinecap="round" strokeLinejoin="round" />
+                  <svg viewBox="0 0 12 12" className="w-3 h-3" fill="none" stroke="currentColor"
+                       strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M2 6l3 3 5-5" />
                   </svg>
                 ) : (
-                  <span>{step.id + 1}</span>
+                  String(step.id + 1).padStart(2, "0")
                 )}
               </div>
 
               {/* Label */}
               <div>
                 <p
-                  className="text-sm font-semibold tracking-wide"
+                  className="text-sm font-semibold"
                   style={{
-                    color: isActive    ? "#1D9E75"
-                         : isCompleted ? "rgba(255,255,255,0.7)"
-                         :               "rgba(255,255,255,0.3)",
+                    fontFamily: "'Syne', sans-serif",
+                    color: isActive ? "#0a0a0a"
+                         : isCompleted ? "#3a3935"
+                         : "#6b6a63",
+                    letterSpacing: "-0.01em",
                   }}
                 >
                   {step.label}
                 </p>
                 <p
                   className="text-xs mt-0.5"
-                  style={{ color: "rgba(255,255,255,0.18)" }}
+                  style={{ fontFamily: "'DM Mono', monospace", color: "#b0afa8", fontSize: "10px", letterSpacing: "0.02em" }}
                 >
                   {step.sub}
                 </p>
@@ -107,31 +139,32 @@ export default function Sidebar({ activeStep, onResetRequest, onOpenSettings }) 
       {/* Footer */}
       <div
         className="px-4 py-4 space-y-2"
-        style={{ borderTop: "1px solid rgba(255,255,255,0.05)" }}
+        style={{ borderTop: "1px solid #ebeae5" }}
       >
-        {/* Settings gear */}
         {onOpenSettings && (
           <button
             onClick={onOpenSettings}
             className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs transition-all"
             style={{
-              color: "rgba(255,255,255,0.3)",
-              border: "1px solid rgba(255,255,255,0.06)",
+              color:      "#6b6a63",
+              border:     "1px solid #ebeae5",
+              background: "#ffffff",
             }}
             onMouseEnter={(e) => {
-              e.currentTarget.style.color = "rgba(255,255,255,0.6)";
-              e.currentTarget.style.borderColor = "rgba(255,255,255,0.12)";
+              e.currentTarget.style.color       = "#0a0a0a";
+              e.currentTarget.style.borderColor = "#d8d7d0";
+              e.currentTarget.style.background  = "#f8f7f3";
             }}
             onMouseLeave={(e) => {
-              e.currentTarget.style.color = "rgba(255,255,255,0.3)";
-              e.currentTarget.style.borderColor = "rgba(255,255,255,0.06)";
+              e.currentTarget.style.color       = "#6b6a63";
+              e.currentTarget.style.borderColor = "#ebeae5";
+              e.currentTarget.style.background  = "#ffffff";
             }}
           >
             <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.6}
                 d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.6}
-                d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.6} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
             </svg>
             Project Settings
           </button>
@@ -139,28 +172,35 @@ export default function Sidebar({ activeStep, onResetRequest, onOpenSettings }) 
 
         <button
           onClick={onResetRequest}
-          className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs transition-all group"
+          className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs transition-all"
           style={{
-            color: "rgba(255,255,255,0.25)",
-            border: "1px solid rgba(255,255,255,0.05)",
+            color:      "#8a8982",
+            border:     "1px solid #ebeae5",
+            background: "#ffffff",
           }}
           onMouseEnter={(e) => {
-            e.currentTarget.style.color = "#f87171";
-            e.currentTarget.style.borderColor = "rgba(239,68,68,0.25)";
+            e.currentTarget.style.color       = "#ef4444";
+            e.currentTarget.style.borderColor = "rgba(239,68,68,0.3)";
+            e.currentTarget.style.background  = "#fff5f5";
           }}
           onMouseLeave={(e) => {
-            e.currentTarget.style.color = "rgba(255,255,255,0.25)";
-            e.currentTarget.style.borderColor = "rgba(255,255,255,0.05)";
+            e.currentTarget.style.color       = "#8a8982";
+            e.currentTarget.style.borderColor = "#ebeae5";
+            e.currentTarget.style.background  = "#ffffff";
           }}
         >
           <svg className="w-3.5 h-3.5 flex-shrink-0" fill="none" viewBox="0 0 16 16" stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.6}
-              d="M4 4l8 8M12 4l-8 8" />
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.6} d="M4 4l8 8M12 4l-8 8" />
           </svg>
           Reset Project
         </button>
 
-        <p className="text-xs px-1" style={{ color: "rgba(255,255,255,0.12)" }}>v0.1.0-alpha</p>
+        <p
+          className="text-xs px-1"
+          style={{ fontFamily: "'DM Mono', monospace", color: "#d8d7d0", fontSize: "10px" }}
+        >
+          v0.1.0-alpha
+        </p>
       </div>
     </aside>
   );

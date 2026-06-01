@@ -150,7 +150,7 @@ function DurationCallout({ analyzeResult }) {
       {/* Left accent bar */}
       <div className="absolute inset-y-0 left-0 w-1 bg-accent" />
 
-      <div className="pl-5 pr-4 py-4" style={{ background: "linear-gradient(to right, rgba(29,158,117,0.06), transparent)" }}>
+      <div className="pl-5 pr-4 py-4" style={{ background: "linear-gradient(to right, rgba(10,10,10,0.03), transparent)" }}>
         {/* Header */}
         <div className="flex items-center gap-2 mb-3">
           <svg className="w-3.5 h-3.5 text-accent flex-shrink-0" viewBox="0 0 16 16" fill="none">
@@ -511,7 +511,7 @@ function FilterViz({ analyzeResult, cutoffHz }) {
     }
     ctx.lineTo(cutoffX, h - 4);
     ctx.closePath();
-    ctx.fillStyle = "rgba(29,158,117,0.18)";
+    ctx.fillStyle = "rgba(10,10,10,0.10)";
     ctx.fill();
 
     // Red fill (noise region)
@@ -523,7 +523,7 @@ function FilterViz({ analyzeResult, cutoffHz }) {
     }
     ctx.lineTo(w, h - 4);
     ctx.closePath();
-    ctx.fillStyle = "rgba(239,68,68,0.12)";
+    ctx.fillStyle = "rgba(239,68,68,0.10)";
     ctx.fill();
 
     // Spectrum line
@@ -532,7 +532,7 @@ function FilterViz({ analyzeResult, cutoffHz }) {
       const y = h - 4 - specY((x / w) * nyquist) * (h - 14);
       x === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
     }
-    ctx.strokeStyle = "#9CA3AF";
+    ctx.strokeStyle = "#b0afa8";
     ctx.lineWidth   = 1.5;
     ctx.stroke();
 
@@ -540,7 +540,7 @@ function FilterViz({ analyzeResult, cutoffHz }) {
     ctx.beginPath();
     ctx.moveTo(cutoffX, 4);
     ctx.lineTo(cutoffX, h - 4);
-    ctx.strokeStyle = "rgba(29,158,117,0.8)";
+    ctx.strokeStyle = "rgba(10,10,10,0.6)";
     ctx.lineWidth   = 1.5;
     ctx.setLineDash([3, 3]);
     ctx.stroke();
@@ -550,7 +550,7 @@ function FilterViz({ analyzeResult, cutoffHz }) {
     ctx.beginPath();
     ctx.moveTo(0, h - 4);
     ctx.lineTo(w, h - 4);
-    ctx.strokeStyle = "#E5E7EB";
+    ctx.strokeStyle = "#d8d7d0";
     ctx.lineWidth   = 1;
     ctx.stroke();
   }, [cutoffHz, nyquist]);
@@ -558,16 +558,16 @@ function FilterViz({ analyzeResult, cutoffHz }) {
   return (
     <div className="space-y-2">
       <p className="text-[10px] text-gray-400 uppercase tracking-widest">Frequency Spectrum</p>
-      <canvas ref={canvasRef} className="w-full block rounded" style={{ height: "80px" }} />
+      <canvas ref={canvasRef} className="w-full block rounded" style={{ height: "80px", border: "1px solid #ebeae5" }} />
       <div className="flex items-center justify-between text-[10px] text-gray-400">
         <span>0 Hz</span>
-        <span className="text-accent font-bold tabular-nums">{cutoffHz} Hz cutoff</span>
+        <span className="text-sf-black font-bold tabular-nums">{cutoffHz} Hz cutoff</span>
         <span>{nyquist} Hz</span>
       </div>
       <div className="flex gap-3 text-[10px]">
         <span className="flex items-center gap-1">
-          <span className="w-2 h-2 rounded-sm" style={{ background: "rgba(29,158,117,0.35)" }} />
-          <span className="text-accent font-semibold">{energyPct}% signal</span>
+          <span className="w-2 h-2 rounded-sm" style={{ background: "rgba(10,10,10,0.25)" }} />
+          <span className="text-sf-black font-semibold">{energyPct}% signal</span>
         </span>
         <span className="flex items-center gap-1">
           <span className="w-2 h-2 rounded-sm" style={{ background: "rgba(239,68,68,0.3)" }} />
@@ -620,7 +620,7 @@ function NormalizeViz({ analyzeResult, windowMs }) {
       const x  = i * (barW + 1);
       const bh = (heights[i] / maxH) * (h - 14);
       const ms = minMs * 0.85 + (i + 0.5) * span / NUM;
-      ctx.fillStyle = ms <= windowMs ? "rgba(29,158,117,0.55)" : "rgba(156,163,175,0.3)";
+      ctx.fillStyle = ms <= windowMs ? "rgba(10,10,10,0.45)" : "rgba(10,10,10,0.12)";
       ctx.fillRect(x, h - 10 - bh, barW, bh);
     }
 
@@ -630,7 +630,7 @@ function NormalizeViz({ analyzeResult, windowMs }) {
       ctx.beginPath();
       ctx.moveTo(wx, 4);
       ctx.lineTo(wx, h - 10);
-      ctx.strokeStyle = "#1D9E75";
+      ctx.strokeStyle = "#0a0a0a";
       ctx.lineWidth   = 2;
       ctx.stroke();
     }
@@ -761,13 +761,13 @@ function AiDesignerPanel({ design, config, onApplyStage, onApplyAll, onDismiss, 
 
   return (
     <div
-      className="rounded-xl border border-accent/30 overflow-hidden mb-5"
-      style={{ background: "linear-gradient(135deg, rgba(29,158,117,0.04) 0%, transparent 55%)" }}
+      className="rounded-xl border border-sf-gray-100 overflow-hidden mb-5"
+      style={{ background: "#fbfaf6" }}
     >
       {/* Header */}
-      <div className="flex items-center gap-3 px-5 py-3 border-b border-accent/15">
-        <div className="w-3.5 h-3.5 rounded-full bg-accent/20 flex items-center justify-center flex-shrink-0">
-          <div className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" />
+      <div className="flex items-center gap-3 px-5 py-3 border-b border-sf-gray-100">
+        <div className="w-3.5 h-3.5 rounded-full bg-sf-gray-100 flex items-center justify-center flex-shrink-0">
+          <div className="w-1.5 h-1.5 rounded-full bg-sf-black animate-pulse" />
         </div>
         <div className="flex-1 min-w-0">
           <span className="text-xs font-bold text-gray-800 uppercase tracking-widest">AI-Designed Pipeline</span>
@@ -942,7 +942,7 @@ function AddBlockModal({ projectId, onAdd, onClose }) {
                 <>
                   <div>
                     <label className="text-xs text-gray-400 uppercase tracking-widest block mb-2">Generated code (editable)</label>
-                    <div className="rounded-lg overflow-hidden border border-gray-800" style={{ background: "#1a1a2e" }}>
+                    <div className="rounded-lg overflow-hidden border border-sf-gray-200" style={{ background: "#fbfaf6" }}>
                       <Editor
                         value={generatedCode}
                         onValueChange={setGeneratedCode}
@@ -952,7 +952,7 @@ function AddBlockModal({ projectId, onAdd, onClose }) {
                           fontFamily: "'Fira Code', 'Fira Mono', 'Cascadia Code', monospace",
                           fontSize: 13,
                           lineHeight: 1.6,
-                          color: "#e2e8f0",
+                          color: "#0a0a0a",
                           minHeight: 200,
                         }}
                       />
@@ -981,7 +981,7 @@ function CustomBlockPanel({ block, onUpdateCode }) {
     <div className="space-y-4">
       <div>
         <SectionLabel>Processing code</SectionLabel>
-        <div className="rounded-lg overflow-hidden border border-gray-800" style={{ background: "#1a1a2e" }}>
+        <div className="rounded-lg overflow-hidden border border-sf-gray-200" style={{ background: "#fbfaf6" }}>
           <Editor
             value={block.code || "# No code — click 'Edit' to regenerate"}
             onValueChange={onUpdateCode}
@@ -991,7 +991,7 @@ function CustomBlockPanel({ block, onUpdateCode }) {
               fontFamily: "'Fira Code', 'Fira Mono', 'Cascadia Code', monospace",
               fontSize: 13,
               lineHeight: 1.6,
-              color: "#e2e8f0",
+              color: "#0a0a0a",
               minHeight: 200,
             }}
           />
@@ -1240,11 +1240,11 @@ function PipelineBlock({
         `}
         style={
           isSkipped      ? {}
-          : highlighted  ? { backgroundColor: "rgba(29,158,117,0.12)" }
-          : isActive && isCustom ? { backgroundColor: "rgba(124,58,237,0.06)" }
-          : isActive     ? { backgroundColor: "rgba(29,158,117,0.06)" }
-          : isPast       ? { backgroundColor: "rgba(29,158,117,0.02)" }
-          : isCustom     ? { backgroundColor: "rgba(124,58,237,0.02)" }
+          : highlighted  ? { backgroundColor: "rgba(10,10,10,0.08)" }
+          : isActive && isCustom ? { backgroundColor: "rgba(10,10,10,0.05)" }
+          : isActive     ? { backgroundColor: "rgba(10,10,10,0.04)" }
+          : isPast       ? { backgroundColor: "rgba(10,10,10,0.02)" }
+          : isCustom     ? { backgroundColor: "rgba(10,10,10,0.02)" }
           : {}
         }
       >
@@ -1605,10 +1605,10 @@ export default function PipelineScreen({
 
       {/* Loading state */}
       {isDesigning && (
-        <div className="border border-accent/25 rounded-xl px-5 py-4 flex items-center gap-3"
-             style={{ background: "rgba(29,158,117,0.04)" }}>
-          <div className="w-3.5 h-3.5 rounded-full bg-accent/20 flex items-center justify-center flex-shrink-0">
-            <div className="w-1.5 h-1.5 rounded-full bg-accent animate-ping" />
+        <div className="border border-sf-gray-100 rounded-xl px-5 py-4 flex items-center gap-3"
+             style={{ background: "#f8f7f3" }}>
+          <div className="w-3.5 h-3.5 rounded-full bg-sf-gray-100 flex items-center justify-center flex-shrink-0">
+            <div className="w-1.5 h-1.5 rounded-full bg-sf-black animate-ping" />
           </div>
           <p className="text-xs text-gray-600">Analyzing your application and signal data…</p>
         </div>

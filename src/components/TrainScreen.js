@@ -117,9 +117,9 @@ function ConfusionMatrix({ matrix, classLabels }) {
                   const isCorrect = ri === ci;
                   const intensity = cell / maxVal;
                   const bg = isCorrect
-                    ? `rgba(29,158,117,${0.12 + intensity * 0.55})`
+                    ? `rgba(10,10,10,${0.06 + intensity * 0.40})`
                     : cell > 0
-                    ? `rgba(239,68,68,${0.08 + intensity * 0.35})`
+                    ? `rgba(239,68,68,${0.06 + intensity * 0.28})`
                     : "transparent";
                   return (
                     <td
@@ -127,7 +127,7 @@ function ConfusionMatrix({ matrix, classLabels }) {
                       className="px-2 py-2 text-center font-bold tabular-nums rounded"
                       style={{
                         backgroundColor: bg,
-                        color: isCorrect ? (intensity > 0.4 ? "#0f5c42" : "#1D9E75") : cell > 0 ? "#b91c1c" : "#9ca3af",
+                        color: isCorrect ? (intensity > 0.4 ? "#0a0a0a" : "#3a3935") : cell > 0 ? "#b91c1c" : "#b0afa8",
                       }}
                     >
                       {cell}
@@ -153,10 +153,10 @@ function ModelCard({ result, isBest }) {
     <div
       className={`relative rounded-xl border-2 p-5 flex flex-col gap-3 transition-all ${
         isBest
-          ? "border-accent shadow-sm shadow-accent/20"
+          ? "border-sf-black"
           : "border-gray-200"
       }`}
-      style={isBest ? { backgroundColor: "rgba(29,158,117,0.04)" } : {}}
+      style={isBest ? { backgroundColor: "rgba(10,10,10,0.03)" } : {}}
     >
       {isBest && (
         <div className="absolute -top-3 left-4">

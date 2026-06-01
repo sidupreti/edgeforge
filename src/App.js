@@ -10,7 +10,7 @@ import TrainScreen from "./components/TrainScreen";
 import ValidateScreen from "./components/ValidateScreen";
 import ExportScreen from "./components/ExportScreen";
 import PlaceholderScreen from "./components/PlaceholderScreen";
-import ParticleCanvas from "./components/ParticleCanvas";
+import FlowFieldBackground from "./components/FlowFieldBackground";
 import NewOnboarding from "./components/NewOnboarding";
 import LandingPage from "./components/LandingPage";
 
@@ -341,7 +341,7 @@ function AppContent() {
   if (activeStep === 0 && !config.projectName) {
     return (
       <>
-        <ParticleCanvas />
+        <FlowFieldBackground />
         <NewOnboarding
           onComplete={(finalConfig, finalClasses) => {
             setConfig(finalConfig);
@@ -355,8 +355,8 @@ function AppContent() {
   }
 
   return (
-    <div className="flex h-screen font-sans overflow-hidden" style={{ background: "#080d1a", color: "#e2e8f0", position: "relative" }}>
-      <ParticleCanvas />
+    <div className="flex h-screen font-sans overflow-hidden" style={{ background: "#ffffff", color: "#0a0a0a", position: "relative" }}>
+      <FlowFieldBackground />
 
       {/* Content sits above canvas */}
       <div className="flex flex-1 min-w-0 h-full" style={{ position: "relative", zIndex: 1 }}>
@@ -368,24 +368,24 @@ function AppContent() {
 
         {/* Reset confirmation overlay */}
         {showResetConfirm && (
-          <div className="fixed inset-0 flex items-center justify-center z-50" style={{ background: "rgba(0,0,0,0.6)" }}>
+          <div className="fixed inset-0 flex items-center justify-center z-50" style={{ background: "rgba(10,10,10,0.45)" }}>
             <div
               className="rounded-xl p-6 max-w-sm w-full mx-4"
               style={{
-                background: "rgba(13,21,38,0.95)",
-                border: "1px solid rgba(255,255,255,0.08)",
-                backdropFilter: "blur(16px)",
+                background: "#ffffff",
+                border: "1px solid #ebeae5",
+                boxShadow: "0 24px 60px rgba(0,0,0,0.12)",
               }}
             >
-              <h2 className="text-sm font-bold mb-2" style={{ color: "#e2e8f0" }}>Reset Project?</h2>
-              <p className="text-xs leading-relaxed mb-5" style={{ color: "rgba(255,255,255,0.4)" }}>
+              <h2 className="text-sm font-bold mb-2" style={{ fontFamily: "'Syne', sans-serif", color: "#0a0a0a" }}>Reset Project?</h2>
+              <p className="text-xs leading-relaxed mb-5" style={{ color: "#6b6a63" }}>
                 This will clear all data and start a new project. This cannot be undone.
               </p>
               <div className="flex gap-3 justify-end">
                 <button
                   onClick={() => setShowResetConfirm(false)}
                   className="px-4 py-2 text-xs rounded transition-colors"
-                  style={{ border: "1px solid rgba(255,255,255,0.1)", color: "rgba(255,255,255,0.5)" }}
+                  style={{ border: "1px solid #d8d7d0", color: "#6b6a63", background: "#ffffff" }}
                 >
                   Cancel
                 </button>
@@ -407,8 +407,8 @@ function AppContent() {
           <header
             className="px-8 py-4 flex items-center justify-between"
             style={{
-              borderBottom: "1px solid rgba(255,255,255,0.05)",
-              background: "rgba(8,13,26,0.8)",
+              borderBottom: "1px solid #ebeae5",
+              background: "rgba(255,255,255,0.90)",
               backdropFilter: "blur(12px)",
             }}
           >
@@ -416,14 +416,15 @@ function AppContent() {
               <h1
                 className="text-sm font-bold uppercase tracking-widest"
                 style={{
-                  fontFamily: "'Plus Jakarta Sans', sans-serif",
-                  color: "#e2e8f0",
+                  fontFamily: "'Syne', sans-serif",
+                  color: "#0a0a0a",
+                  letterSpacing: "0.12em",
                 }}
               >
                 {STEPS[activeStep].label}
               </h1>
-              <p className="text-xs mt-0.5" style={{ color: "rgba(255,255,255,0.25)" }}>
-                Step {activeStep + 1} of {STEPS.length}
+              <p className="text-xs mt-0.5" style={{ color: "#8a8982", fontFamily: "'DM Mono', monospace" }}>
+                {String(activeStep + 1).padStart(2, "0")} / {String(STEPS.length).padStart(2, "0")}
               </p>
             </div>
 
@@ -435,10 +436,10 @@ function AppContent() {
                   className="w-2 h-2 rounded-full transition-colors"
                   style={{
                     background: i === activeStep
-                      ? "#1D9E75"
+                      ? "#0a0a0a"
                       : i < activeStep
-                        ? "rgba(29,158,117,0.4)"
-                        : "rgba(255,255,255,0.1)",
+                        ? "#b0afa8"
+                        : "#ebeae5",
                   }}
                 />
               ))}
@@ -455,8 +456,8 @@ function AppContent() {
             <footer
               className="px-8 py-4 flex items-center justify-between"
               style={{
-                borderTop: "1px solid rgba(255,255,255,0.05)",
-                background: "rgba(8,13,26,0.8)",
+                borderTop: "1px solid #ebeae5",
+                background: "rgba(255,255,255,0.90)",
                 backdropFilter: "blur(12px)",
               }}
             >
@@ -465,9 +466,10 @@ function AppContent() {
                 disabled={activeStep === 0}
                 className="px-5 py-2 rounded text-sm tracking-wide transition-all"
                 style={{
-                  border: "1px solid rgba(255,255,255,0.08)",
-                  color: activeStep === 0 ? "rgba(255,255,255,0.15)" : "rgba(255,255,255,0.5)",
+                  border: "1px solid #d8d7d0",
+                  color: activeStep === 0 ? "#d8d7d0" : "#6b6a63",
                   cursor: activeStep === 0 ? "not-allowed" : "pointer",
+                  background: "#ffffff",
                 }}
               >
                 ← Back
@@ -475,7 +477,7 @@ function AppContent() {
 
               <span
                 className="text-xs tracking-widest uppercase"
-                style={{ color: "rgba(255,255,255,0.2)" }}
+                style={{ color: "#b0afa8", fontFamily: "'DM Mono', monospace" }}
               >
                 {STEPS[activeStep].label}
               </span>
@@ -486,17 +488,19 @@ function AppContent() {
                 className="px-5 py-2 rounded text-sm tracking-wide transition-all min-w-[90px] text-center"
                 style={{
                   background: activeStep === STEPS.length - 1
-                    ? "rgba(255,255,255,0.06)"
+                    ? "#ebeae5"
                     : submitLoading
-                      ? "rgba(29,158,117,0.4)"
-                      : "linear-gradient(135deg,#1D9E75,#16866A)",
+                      ? "#6b6a63"
+                      : "#0a0a0a",
                   color: activeStep === STEPS.length - 1
-                    ? "rgba(255,255,255,0.2)"
-                    : "#fff",
+                    ? "#b0afa8"
+                    : "#ffffff",
                   cursor: activeStep === STEPS.length - 1 ? "not-allowed" : "pointer",
                   boxShadow: activeStep < STEPS.length - 1 && !submitLoading
-                    ? "0 0 14px rgba(29,158,117,0.3)"
+                    ? "0 4px 14px rgba(0,0,0,0.14)"
                     : "none",
+                  fontFamily: "'Syne', sans-serif",
+                  fontWeight: 600,
                 }}
               >
                 {submitLoading

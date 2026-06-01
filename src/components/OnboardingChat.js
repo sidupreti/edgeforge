@@ -150,8 +150,8 @@ function UserBubble({ text }) {
 function SummaryCard({ data, onConfirm }) {
   return (
     <div
-      className="bg-white border border-accent/25 rounded-xl p-5 space-y-4"
-      style={{ background: "linear-gradient(135deg, rgba(29,158,117,0.04) 0%, transparent 70%)" }}
+      className="bg-white border border-sf-gray-100 rounded-xl p-5 space-y-4"
+      style={{ background: "#f8f7f3" }}
     >
       <div className="flex items-center gap-2">
         <div className="w-2 h-2 rounded-full bg-accent animate-pulse" />

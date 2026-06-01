@@ -1,147 +1,131 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Syne:wght@400;500;600;700;800&family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;1,9..40,300&family=Inter:wght@300;400;500;600;700&family=Plus+Jakarta+Sans:wght@600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap');
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 /* ── Global resets ───────────────────────────────────────────────────── */
-*, *::before, *::after {
-  box-sizing: border-box;
-}
+*, *::before, *::after { box-sizing: border-box; }
 
-html, body, #root {
-  height: 100%;
-  margin: 0;
-}
+html, body, #root { height: 100%; margin: 0; }
 
 body {
-  font-family: 'Inter', system-ui, sans-serif;
-  background: #080d1a;
-  color: #e2e8f0;
+  font-family: 'DM Sans', system-ui, sans-serif;
+  background: #ffffff;
+  color: #0a0a0a;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
 
-/* ── Dark theme overrides for Tailwind utilities ─────────────────────── */
+::selection { background: #0a0a0a; color: #ffffff; }
 
-/* White backgrounds → dark panels.
-   NOTE: backdrop-filter intentionally NOT set here — applying it to every
-   .bg-white element (cards, panels, etc.) stacked over the particle canvas
-   creates severe GPU composite load at 20fps.  Blur is applied only to
-   specific chrome elements (header/footer) via inline styles in App.js. */
-.bg-white {
-  background: rgba(13, 21, 38, 0.94) !important;
-}
+/* ── Light-theme Tailwind overrides ─────────────────────────────────── */
 
-/* Light grays → dark variants */
-.bg-gray-50  { background: rgba(255,255,255,0.03) !important; }
-.bg-gray-100 { background: rgba(255,255,255,0.05) !important; }
-.bg-gray-200 { background: rgba(255,255,255,0.08) !important; }
+/* Body and root backgrounds */
+.bg-white    { background: #ffffff !important; }
+.bg-gray-50  { background: #f8f7f3 !important; }
+.bg-gray-100 { background: #ebeae5 !important; }
+.bg-gray-200 { background: #d8d7d0 !important; }
 
 /* Text */
-.text-gray-800 { color: #e2e8f0 !important; }
-.text-gray-700 { color: #cbd5e1 !important; }
-.text-gray-600 { color: #94a3b8 !important; }
-.text-gray-500 { color: #64748b !important; }
-.text-gray-400 { color: #475569 !important; }
-.text-gray-300 { color: #94a3b8 !important; }
+.text-gray-800 { color: #0a0a0a !important; }
+.text-gray-700 { color: #141414 !important; }
+.text-gray-600 { color: #3a3935 !important; }
+.text-gray-500 { color: #6b6a63 !important; }
+.text-gray-400 { color: #8a8982 !important; }
+.text-gray-300 { color: #b0afa8 !important; }
 
 /* Borders */
-.border-gray-200 { border-color: rgba(255,255,255,0.08) !important; }
-.border-gray-100 { border-color: rgba(255,255,255,0.05) !important; }
-.border-gray-300 { border-color: rgba(255,255,255,0.12) !important; }
+.border-gray-100 { border-color: #ebeae5 !important; }
+.border-gray-200 { border-color: #d8d7d0 !important; }
+.border-gray-300 { border-color: #b0afa8 !important; }
 
 /* Hover states */
-.hover\:border-gray-400:hover { border-color: rgba(255,255,255,0.22) !important; }
-.hover\:text-gray-800:hover   { color: #f1f5f9 !important; }
-.hover\:bg-gray-50:hover      { background: rgba(255,255,255,0.06) !important; }
-.hover\:bg-gray-100:hover     { background: rgba(255,255,255,0.08) !important; }
+.hover\:border-gray-400:hover { border-color: #8a8982 !important; }
+.hover\:text-gray-800:hover   { color: #0a0a0a !important; }
+.hover\:bg-gray-50:hover      { background: #f8f7f3 !important; }
+.hover\:bg-gray-100:hover     { background: #ebeae5 !important; }
 
 /* Inputs and selects */
 input, textarea, select {
-  background: rgba(255,255,255,0.04) !important;
-  color: #e2e8f0 !important;
-  border-color: rgba(255,255,255,0.1) !important;
+  background: #ffffff !important;
+  color: #0a0a0a !important;
+  border-color: #d8d7d0 !important;
 }
-input::placeholder, textarea::placeholder {
-  color: #475569 !important;
-}
-select option {
-  background: #0d1526;
-  color: #e2e8f0;
-}
+input::placeholder, textarea::placeholder { color: #8a8982 !important; }
+select option { background: #ffffff; color: #0a0a0a; }
 
-/* ── Card gradient borders ────────────────────────────────────────────── */
-.card-glass {
-  background: rgba(13, 21, 38, 0.75);
-  border: 1px solid rgba(255,255,255,0.07);
-  border-radius: 12px;
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
+/* ── Shared card / panel ─────────────────────────────────────────────── */
+.card {
+  background: #ffffff;
+  border: 1px solid #ebeae5;
+  border-radius: 14px;
 }
-
-/* Gradient border trick */
-.card-gradient-border {
+/* Hover accent: thin black top border like landing page feature cards */
+.card-hover {
+  transition: background 0.25s;
   position: relative;
-  border-radius: 12px;
-  background: rgba(13,21,38,0.85);
+  overflow: hidden;
 }
-.card-gradient-border::before {
+.card-hover::before {
   content: '';
   position: absolute;
-  inset: 0;
-  border-radius: 12px;
-  padding: 1px;
-  background: linear-gradient(135deg, rgba(29,158,117,0.4), rgba(255,255,255,0.06));
-  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-  -webkit-mask-composite: xor;
-  mask-composite: exclude;
-  pointer-events: none;
+  top: 0; left: 0;
+  width: 0; height: 2px;
+  background: #0a0a0a;
+  transition: width 0.35s ease;
+}
+.card-hover:hover { background: #fbfaf6; }
+.card-hover:hover::before { width: 100%; }
+
+/* Legacy class alias kept for any components that still use it */
+.card-glass {
+  background: #ffffff;
+  border: 1px solid #ebeae5;
+  border-radius: 14px;
 }
 
-/* ── Rounded border overrides ────────────────────────────────────────── */
-.rounded-xl { border-radius: 12px !important; }
-
-/* ── Primary / accent button ─────────────────────────────────────────── */
+/* ── Primary button (black) ──────────────────────────────────────────── */
 .bg-accent {
-  background: linear-gradient(135deg, #1D9E75 0%, #16866A 100%) !important;
+  background: #0a0a0a !important;
+  color: #ffffff !important;
 }
-.bg-accent:hover, .hover\:bg-accent-dark:hover {
-  background: linear-gradient(135deg, #22b585 0%, #1D9E75 100%) !important;
-  box-shadow: 0 0 18px rgba(29,158,117,0.45), 0 4px 12px rgba(0,0,0,0.35) !important;
+.bg-accent:hover {
+  background: #141414 !important;
+  box-shadow: 0 6px 20px rgba(0,0,0,0.18) !important;
+  transform: translateY(-1px);
 }
 
-/* ── Glass secondary buttons ─────────────────────────────────────────── */
+/* ── Secondary buttons (light border) ───────────────────────────────── */
 button.border-gray-200, button.border-gray-300 {
-  background: rgba(255,255,255,0.04) !important;
-  backdrop-filter: blur(8px);
+  background: #ffffff !important;
 }
 button.border-gray-200:hover, button.border-gray-300:hover {
-  background: rgba(255,255,255,0.07) !important;
+  background: #f8f7f3 !important;
+  border-color: #8a8982 !important;
 }
 
-/* ── Sidebar polish ──────────────────────────────────────────────────── */
+/* ── Sidebar ─────────────────────────────────────────────────────────── */
 aside {
-  background: #060b17 !important;
-  border-right-color: rgba(29,158,117,0.12) !important;
+  background: #ffffff !important;
+  border-right-color: #ebeae5 !important;
 }
 
-/* ── Scrollbar (dark) ────────────────────────────────────────────────── */
+/* ── Scrollbar (light) ───────────────────────────────────────────────── */
 ::-webkit-scrollbar       { width: 5px; height: 5px; }
 ::-webkit-scrollbar-track { background: transparent; }
-::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 3px; }
-::-webkit-scrollbar-thumb:hover { background: rgba(29,158,117,0.4); }
+::-webkit-scrollbar-thumb { background: #d8d7d0; border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: #8a8982; }
 
-/* ── Code / mono text ────────────────────────────────────────────────── */
+/* ── Code / mono ─────────────────────────────────────────────────────── */
 code, .font-mono, pre {
-  font-family: 'JetBrains Mono', 'Courier New', monospace !important;
+  font-family: 'DM Mono', 'JetBrains Mono', 'Courier New', monospace !important;
 }
 
 /* ── Typing indicator dots ───────────────────────────────────────────── */
-.typing-dot:nth-child(1) { animation: pulse-dot 1.4s ease-in-out 0s    infinite; }
-.typing-dot:nth-child(2) { animation: pulse-dot 1.4s ease-in-out 0.2s  infinite; }
-.typing-dot:nth-child(3) { animation: pulse-dot 1.4s ease-in-out 0.4s  infinite; }
+.typing-dot:nth-child(1) { animation: pulse-dot 1.4s ease-in-out 0s   infinite; }
+.typing-dot:nth-child(2) { animation: pulse-dot 1.4s ease-in-out 0.2s infinite; }
+.typing-dot:nth-child(3) { animation: pulse-dot 1.4s ease-in-out 0.4s infinite; }
 
 @keyframes pulse-dot {
   0%, 100% { opacity: 0.3; transform: scale(0.85); }
@@ -162,8 +146,8 @@ code, .font-mono, pre {
 }
 .animate-underline-grow {
   display: block;
-  height: 3px;
-  background: linear-gradient(90deg, #1D9E75, #16866A);
+  height: 2px;
+  background: #0a0a0a;
   border-radius: 2px;
   transform-origin: left;
   animation: underline-grow 0.7s ease-out 0.3s both;
@@ -176,8 +160,20 @@ code, .font-mono, pre {
 }
 .animate-fade-up { animation: fade-up 0.5s ease-out both; }
 
-/* ── Pipeline block glow when selected ──────────────────────────────── */
+/* ── Pipeline block: selected state ─────────────────────────────────── */
 .pipeline-block-active {
-  box-shadow: 0 0 0 2px rgba(29,158,117,0.5), 0 0 20px rgba(29,158,117,0.2) !important;
-  border-color: rgba(29,158,117,0.5) !important;
+  box-shadow: 0 0 0 2px rgba(10,10,10,0.5) !important;
+  border-color: rgba(10,10,10,0.5) !important;
 }
+
+/* ── Section mono label (DM Mono, uppercase, spaced) ────────────────── */
+.mono-label {
+  font-family: 'DM Mono', monospace;
+  font-size: 11px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: #b0afa8;
+}
+
+/* ── Rounded override ────────────────────────────────────────────────── */
+.rounded-xl { border-radius: 12px !important; }

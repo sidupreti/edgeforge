@@ -77,7 +77,7 @@ function TriggerConfig({ triggerType, triggerConfig, setTriggerConfig }) {
 
   if (triggerType === "Threshold") {
     return (
-      <div className="mt-4 pl-3 border-l-2 border-accent/40 space-y-3">
+      <div className="mt-4 pl-3 border-l-2 border-sf-gray-200 space-y-3">
         <p className="text-xs text-gray-400 uppercase tracking-widest mb-2">Threshold config</p>
         <div>
           <Label>Onset (mg)</Label>
@@ -112,7 +112,7 @@ function TriggerConfig({ triggerType, triggerConfig, setTriggerConfig }) {
 
   if (triggerType === "Firmware Marker") {
     return (
-      <div className="mt-4 pl-3 border-l-2 border-accent/40 space-y-3">
+      <div className="mt-4 pl-3 border-l-2 border-sf-gray-200 space-y-3">
         <p className="text-xs text-gray-400 uppercase tracking-widest mb-2">Marker config</p>
         <div>
           <Label>Marker string</Label>
@@ -128,7 +128,7 @@ function TriggerConfig({ triggerType, triggerConfig, setTriggerConfig }) {
 
   if (triggerType === "Periodic") {
     return (
-      <div className="mt-4 pl-3 border-l-2 border-accent/40 space-y-3">
+      <div className="mt-4 pl-3 border-l-2 border-sf-gray-200 space-y-3">
         <p className="text-xs text-gray-400 uppercase tracking-widest mb-2">Periodic config</p>
         <div>
           <Label>Window length (ms)</Label>
@@ -398,7 +398,7 @@ export default function SetupScreen({ config, setConfig, submitError, onOnboardi
               </select>
 
               {(hwType === "lowpass" || hwType === "highpass") && (
-                <div className="mt-3 pl-3 border-l-2 border-accent/40">
+                <div className="mt-3 pl-3 border-l-2 border-sf-gray-200">
                   <Label>Cutoff frequency (Hz)</Label>
                   <Input
                     type="number"
@@ -409,7 +409,7 @@ export default function SetupScreen({ config, setConfig, submitError, onOnboardi
                 </div>
               )}
               {hwType === "custom" && (
-                <div className="mt-3 pl-3 border-l-2 border-accent/40">
+                <div className="mt-3 pl-3 border-l-2 border-sf-gray-200">
                   <Label>Describe what's applied</Label>
                   <Input
                     value={config.hardwarePreprocessing?.description ?? ""}

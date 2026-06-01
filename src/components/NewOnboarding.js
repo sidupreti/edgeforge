@@ -99,8 +99,8 @@ function ChipSelect({ options, value, onChange }) {
             onClick={() => onChange(opt.value)}
             className={`text-sm px-3.5 py-1.5 rounded-full border font-medium transition-all ${
               active
-                ? "border-accent text-accent bg-accent/10"
-                : "border-white/10 text-white/50 hover:border-white/25 hover:text-white/75"
+                ? "border-sf-black text-sf-black bg-sf-black/10"
+                : "border-sf-gray-200 text-sf-gray-400 hover:border-sf-gray-300 hover:text-sf-black"
             }`}
           >
             {opt.label}
@@ -120,16 +120,16 @@ function QuestionBlock({ index, question, children }) {
       <div className="flex items-start gap-3">
         <div
           className="w-7 h-7 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5"
-          style={{ background: "rgba(29,158,117,0.18)" }}
+          style={{ background: "#ebeae5" }}
         >
-          <div className="w-2.5 h-2.5 rounded-full bg-accent" />
+          <div className="w-2.5 h-2.5 rounded-full bg-sf-black" />
         </div>
         <div className="flex-1 space-y-3">
           <div
             className="inline-block rounded-2xl rounded-tl-sm px-4 py-3"
-            style={{ background: "rgba(255,255,255,0.05)", border: "1px solid rgba(255,255,255,0.07)" }}
+            style={{ background: "#f8f7f3", border: "1px solid #ebeae5" }}
           >
-            <p className="text-sm leading-relaxed" style={{ color: "rgba(255,255,255,0.8)" }}>
+            <p className="text-sm leading-relaxed" style={{ color: "#0a0a0a" }}>
               {question}
             </p>
           </div>
@@ -174,7 +174,7 @@ function CsvDropZone({ onDetected }) {
 
   if (status === "skipped") {
     return (
-      <p className="text-xs" style={{ color: "rgba(255,255,255,0.25)" }}>
+      <p className="text-xs" style={{ color: "#b0afa8" }}>
         Skipped — using default format (timestamp_us, ax, ay, az)
       </p>
     );
@@ -186,18 +186,18 @@ function CsvDropZone({ onDetected }) {
     return (
       <div
         className="rounded-xl px-4 py-3 space-y-1"
-        style={{ background: "rgba(29,158,117,0.1)", border: "1px solid rgba(29,158,117,0.3)" }}
+        style={{ background: "#f8f7f3", border: "1px solid #d8d7d0" }}
       >
         <div className="flex items-center gap-2">
-          <svg className="w-3.5 h-3.5 flex-shrink-0" viewBox="0 0 16 16" fill="none" stroke="#1D9E75">
+          <svg className="w-3.5 h-3.5 flex-shrink-0" viewBox="0 0 16 16" fill="none" stroke="#0a0a0a">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M3 8l3.5 3.5L13 4.5" />
           </svg>
-          <p className="text-xs font-semibold" style={{ color: "#1D9E75" }}>
+          <p className="text-xs font-semibold" style={{ color: "#0a0a0a" }}>
             Detected: {rateStr}{csvMeta.colCount} columns
           </p>
         </div>
-        <p className="text-xs pl-5.5" style={{ color: "rgba(255,255,255,0.45)" }}>
-          columns: <span className="font-mono" style={{ color: "rgba(255,255,255,0.65)" }}>{colsStr}</span>
+        <p className="text-xs pl-5.5" style={{ color: "#8a8982" }}>
+          columns: <span className="font-mono" style={{ color: "#0a0a0a" }}>{colsStr}</span>
         </p>
       </div>
     );
@@ -220,23 +220,23 @@ function CsvDropZone({ onDetected }) {
         onDrop={onDrop}
         className="rounded-xl px-4 py-5 text-center cursor-pointer transition-all"
         style={{
-          border: `2px dashed ${drag ? "rgba(29,158,117,0.6)" : "rgba(255,255,255,0.1)"}`,
-          background: drag ? "rgba(29,158,117,0.06)" : "rgba(255,255,255,0.02)",
+          border: `2px dashed ${drag ? "#0a0a0a" : "#d8d7d0"}`,
+          background: drag ? "rgba(10,10,10,0.04)" : "#fbfaf6",
         }}
       >
         {status === "parsing" ? (
-          <p className="text-xs" style={{ color: "rgba(255,255,255,0.4)" }}>Parsing…</p>
+          <p className="text-xs" style={{ color: "#6b6a63" }}>Parsing…</p>
         ) : (
           <>
-            <svg className="w-5 h-5 mx-auto mb-2" style={{ color: "rgba(255,255,255,0.25)" }}
+            <svg className="w-5 h-5 mx-auto mb-2" style={{ color: "#b0afa8" }}
               fill="none" viewBox="0 0 24 24" stroke="currentColor">
               <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
                 d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
             </svg>
-            <p className="text-xs font-medium" style={{ color: "rgba(255,255,255,0.35)" }}>
+            <p className="text-xs font-medium" style={{ color: "#6b6a63" }}>
               {status === "error" ? "Couldn't parse that file — try another CSV" : "Drop a CSV file here or click to browse"}
             </p>
-            <p className="text-xs mt-0.5" style={{ color: "rgba(255,255,255,0.18)" }}>
+            <p className="text-xs mt-0.5" style={{ color: "#b0afa8" }}>
               format: timestamp_us, ax, ay, az
             </p>
           </>
@@ -247,9 +247,9 @@ function CsvDropZone({ onDetected }) {
         type="button"
         onClick={() => setStatus("skipped")}
         className="text-xs transition-colors"
-        style={{ color: "rgba(255,255,255,0.3)" }}
-        onMouseEnter={(e) => { e.currentTarget.style.color = "rgba(255,255,255,0.55)"; }}
-        onMouseLeave={(e) => { e.currentTarget.style.color = "rgba(255,255,255,0.3)"; }}
+        style={{ color: "#8a8982" }}
+        onMouseEnter={(e) => { e.currentTarget.style.color = "#0a0a0a"; }}
+        onMouseLeave={(e) => { e.currentTarget.style.color = "#8a8982"; }}
       >
         Skip →
       </button>
@@ -321,17 +321,15 @@ export default function NewOnboarding({ onComplete }) {
           <h1
             className="text-4xl font-bold tracking-tight mb-2"
             style={{
-              fontFamily: "'Plus Jakarta Sans', sans-serif",
-              background: "linear-gradient(135deg, #ffffff 30%, rgba(255,255,255,0.55))",
-              WebkitBackgroundClip: "text",
-              WebkitTextFillColor: "transparent",
-              backgroundClip: "text",
+              fontFamily: "'Syne', sans-serif",
+              color: "#0a0a0a",
+              letterSpacing: "-0.03em",
             }}
           >
             SENSORFLOW
           </h1>
           <span className="animate-underline-grow" style={{ width: 120 }} />
-          <p className="text-sm mt-3 tracking-wider" style={{ color: "rgba(255,255,255,0.3)" }}>
+          <p className="text-sm mt-3 tracking-wider" style={{ color: "#8a8982", fontFamily: "'DM Mono', monospace", fontSize: "12px" }}>
             Embedded ML Platform
           </p>
         </div>
@@ -349,9 +347,9 @@ export default function NewOnboarding({ onComplete }) {
               className="w-full rounded-xl px-4 py-3 text-sm leading-relaxed resize-none transition-colors
                          focus:outline-none focus:ring-2 focus:ring-accent/40"
               style={{
-                background: "rgba(255,255,255,0.05)",
-                border: "1px solid rgba(255,255,255,0.1)",
-                color: "#e2e8f0",
+                background: "#ffffff",
+                border: "1px solid #d8d7d0",
+                color: "#0a0a0a",
               }}
             />
           </QuestionBlock>
@@ -384,9 +382,9 @@ export default function NewOnboarding({ onComplete }) {
               className="w-full rounded-xl px-4 py-3 text-sm transition-colors
                          focus:outline-none focus:ring-2 focus:ring-accent/40"
               style={{
-                background: "rgba(255,255,255,0.05)",
-                border: "1px solid rgba(255,255,255,0.1)",
-                color: "#e2e8f0",
+                background: "#ffffff",
+                border: "1px solid #d8d7d0",
+                color: "#0a0a0a",
               }}
             />
             {classes.trim() && (
@@ -414,9 +412,9 @@ export default function NewOnboarding({ onComplete }) {
             <p
               className="text-xs px-4 py-2.5 rounded-lg animate-fade-up"
               style={{
-                background: "rgba(239,68,68,0.1)",
-                border: "1px solid rgba(239,68,68,0.2)",
-                color: "#fca5a5",
+                background: "#fff5f5",
+                border: "1px solid rgba(239,68,68,0.25)",
+                color: "#ef4444",
               }}
             >
               {error}
@@ -432,16 +430,16 @@ export default function NewOnboarding({ onComplete }) {
               type="submit"
               className="w-full py-4 rounded-2xl text-white font-bold text-base tracking-wide transition-all"
               style={{
-                fontFamily: "'Plus Jakarta Sans', sans-serif",
-                background: "linear-gradient(135deg, #1D9E75 0%, #16866A 100%)",
-                boxShadow: "0 4px 24px rgba(29,158,117,0.35)",
+                fontFamily: "'Syne', sans-serif",
+                background: "#0a0a0a",
+                boxShadow: "0 4px 20px rgba(0,0,0,0.16)",
               }}
               onMouseEnter={(e) => {
-                e.currentTarget.style.boxShadow = "0 6px 32px rgba(29,158,117,0.55)";
+                e.currentTarget.style.boxShadow = "0 6px 28px rgba(0,0,0,0.24)";
                 e.currentTarget.style.transform = "translateY(-1px)";
               }}
               onMouseLeave={(e) => {
-                e.currentTarget.style.boxShadow = "0 4px 24px rgba(29,158,117,0.35)";
+                e.currentTarget.style.boxShadow = "0 4px 20px rgba(0,0,0,0.16)";
                 e.currentTarget.style.transform = "translateY(0)";
               }}
             >

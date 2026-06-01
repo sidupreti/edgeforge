@@ -214,10 +214,10 @@ function OptionCard({ id, selected, onSelect, icon, title, subtitle, tag, tagCol
       onClick={() => onSelect(id)}
       className={`relative text-left rounded-xl border-2 p-5 transition-all w-full ${
         selected
-          ? "border-accent shadow-sm shadow-accent/20"
+          ? "border-sf-black"
           : "border-gray-200 hover:border-gray-300"
       }`}
-      style={selected ? { backgroundColor: "rgba(29,158,117,0.04)" } : {}}
+      style={selected ? { backgroundColor: "rgba(10,10,10,0.03)" } : {}}
     >
       {tag && (
         <span
@@ -230,12 +230,12 @@ function OptionCard({ id, selected, onSelect, icon, title, subtitle, tag, tagCol
       {/* Icon */}
       <div
         className={`w-9 h-9 rounded-lg flex items-center justify-center mb-4 ${
-          selected ? "bg-accent/15" : "bg-gray-100"
+          selected ? "bg-sf-gray-100" : "bg-gray-100"
         }`}
       >
         <svg
           viewBox="0 0 20 20"
-          className={`w-5 h-5 ${selected ? "text-accent" : "text-gray-400"}`}
+          className={`w-5 h-5 ${selected ? "text-sf-black" : "text-gray-400"}`}
           fill="none"
         >
           {icon}
@@ -301,10 +301,10 @@ function CodePreview({ code, language = "python" }) {
       {/* Code body */}
       <div
         className="overflow-auto"
-        style={{ maxHeight: "360px", background: "#0f172a" }}
+        style={{ maxHeight: "360px", background: "#fbfaf6", border: "1px solid #ebeae5" }}
       >
         <pre
-          className="text-xs leading-relaxed p-5 text-gray-300 font-mono"
+          className="text-xs leading-relaxed p-5 text-sf-near-black font-mono"
           style={{ tabSize: 4 }}
         >
           {code}

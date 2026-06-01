@@ -32,7 +32,7 @@ function getActiveAxes(sensorType = "") {
 
 function WaveformThumb({ data, color = "#1D9E75", w = 64, h = 28 }) {
   if (!data?.length) {
-    return <div style={{ width: w, height: h }} className="bg-gray-800 rounded" />;
+    return <div style={{ width: w, height: h }} className="bg-gray-100 rounded" />;
   }
   const min   = Math.min(...data);
   const max   = Math.max(...data);
@@ -49,7 +49,7 @@ function WaveformThumb({ data, color = "#1D9E75", w = 64, h = 28 }) {
       width={w}
       height={h}
       className="flex-shrink-0 rounded overflow-hidden"
-      style={{ background: "#0f172a" }}
+      style={{ background: "#f8f7f3", border: "1px solid #ebeae5" }}
     >
       <polyline
         points={pts}
@@ -551,10 +551,10 @@ function FileUploadMode({
 
       {/* ── Analysis banner ─────────────────────────────────────────────────── */}
       {analyzeResult && (
-        <div className="flex-shrink-0 flex items-center gap-2.5 px-3 py-2 rounded-lg border border-accent/25 text-xs"
-             style={{ background: "rgba(29,158,117,0.05)" }}>
-          <span className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse flex-shrink-0" />
-          <span className="text-accent font-semibold">Signal analyzed</span>
+        <div className="flex-shrink-0 flex items-center gap-2.5 px-3 py-2 rounded-lg border border-sf-gray-100 text-xs"
+             style={{ background: "#f8f7f3" }}>
+          <span className="w-1.5 h-1.5 rounded-full bg-sf-black animate-pulse flex-shrink-0" />
+          <span className="text-sf-black font-semibold">Signal analyzed</span>
           <span className="text-gray-500">— AI pipeline design ready on the next screen →</span>
         </div>
       )}
@@ -888,11 +888,11 @@ export default function CollectScreen({ config, projectId, classes, setClasses, 
       ctx.clearRect(0, 0, W, H);
 
       // Background
-      ctx.fillStyle = "#0f172a";
+      ctx.fillStyle = "#fbfaf6";
       ctx.fillRect(0, 0, W, H);
 
       // Horizontal grid
-      ctx.strokeStyle = "#1e293b";
+      ctx.strokeStyle = "rgba(10,10,10,0.06)";
       ctx.lineWidth   = 1;
       ctx.setLineDash([]);
       for (let g = 0; g <= 4; g++) {
@@ -904,7 +904,7 @@ export default function CollectScreen({ config, projectId, classes, setClasses, 
       }
 
       // Centre line (dashed)
-      ctx.strokeStyle = "#334155";
+      ctx.strokeStyle = "rgba(10,10,10,0.12)";
       ctx.setLineDash([3, 6]);
       ctx.beginPath();
       ctx.moveTo(0, H / 2);
@@ -916,10 +916,10 @@ export default function CollectScreen({ config, projectId, classes, setClasses, 
       if (capturing) {
         const progress = 1 - captureFrames / CAPTURE_WIN;
         const bandW    = progress * W;
-        ctx.fillStyle  = "rgba(29,158,117,0.07)";
+        ctx.fillStyle  = "rgba(10,10,10,0.04)";
         ctx.fillRect(W - bandW, 0, bandW, H);
         // Leading edge
-        ctx.strokeStyle = "rgba(29,158,117,0.35)";
+        ctx.strokeStyle = "rgba(10,10,10,0.25)";
         ctx.lineWidth   = 1;
         ctx.beginPath();
         ctx.moveTo(W - bandW, 0);
@@ -953,7 +953,7 @@ export default function CollectScreen({ config, projectId, classes, setClasses, 
 
       // Burst flash overlay
       if (burstActive && burstStrength > 0.25) {
-        ctx.fillStyle = `rgba(29,158,117,${(burstStrength * 0.055).toFixed(3)})`;
+        ctx.fillStyle = `rgba(10,10,10,${(burstStrength * 0.04).toFixed(3)})`;
         ctx.fillRect(0, 0, W, H);
       }
 
@@ -1139,10 +1139,10 @@ export default function CollectScreen({ config, projectId, classes, setClasses, 
 
         {/* AI pipeline design ready banner */}
         {analyzeResult && (
-          <div className="flex-shrink-0 flex items-center gap-2.5 px-3 py-2 rounded-lg border border-accent/25 text-xs"
-               style={{ background: "rgba(29,158,117,0.05)" }}>
-            <span className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse flex-shrink-0" />
-            <span className="text-accent font-semibold">Signal analyzed</span>
+          <div className="flex-shrink-0 flex items-center gap-2.5 px-3 py-2 rounded-lg border border-sf-gray-100 text-xs"
+               style={{ background: "#f8f7f3" }}>
+            <span className="w-1.5 h-1.5 rounded-full bg-sf-black animate-pulse flex-shrink-0" />
+            <span className="text-sf-black font-semibold">Signal analyzed</span>
             <span className="text-gray-500">— AI pipeline design ready on the next screen →</span>
           </div>
         )}

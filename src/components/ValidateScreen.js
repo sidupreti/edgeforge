@@ -41,16 +41,16 @@ function EventCanvas({ event }) {
     const W = canvas.width;
     const H = canvas.height;
 
-    ctx.fillStyle = "#0f172a";
+    ctx.fillStyle = "#fbfaf6";
     ctx.fillRect(0, 0, W, H);
 
-    ctx.strokeStyle = "#1e293b";
+    ctx.strokeStyle = "rgba(10,10,10,0.06)";
     ctx.lineWidth = 1;
     for (let g = 0; g <= 4; g++) {
       const y = Math.round((g / 4) * H) + 0.5;
       ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
     }
-    ctx.strokeStyle = "#334155";
+    ctx.strokeStyle = "rgba(10,10,10,0.10)";
     ctx.setLineDash([3, 6]);
     ctx.beginPath(); ctx.moveTo(0, H / 2); ctx.lineTo(W, H / 2); ctx.stroke();
     ctx.setLineDash([]);
@@ -80,7 +80,7 @@ function EventCanvas({ event }) {
     <canvas
       ref={canvasRef}
       className="w-full block rounded-b-lg"
-      style={{ height: "130px", background: "#0f172a" }}
+      style={{ height: "130px", background: "#fbfaf6", border: "1px solid #ebeae5" }}
     />
   );
 }
@@ -478,8 +478,8 @@ export default function ValidateScreen({ projectId, trainResults, pipelineConfig
     ? Math.round((log.reduce((s, e) => s + e.confidence, 0) / log.length) * 100)
     : null;
 
-  const ACCENT    = "#1D9E75";
-  const ACCENT_BG = "rgba(29,158,117,0.07)";
+  const ACCENT    = "#0a0a0a";
+  const ACCENT_BG = "rgba(10,10,10,0.03)";
 
   // ── No trained model gate ────────────────────────────────────────────────────
   if (!trainResults) {
@@ -519,7 +519,7 @@ export default function ValidateScreen({ projectId, trainResults, pipelineConfig
         <div
           className="border rounded-xl p-6 transition-all duration-500 flex-shrink-0"
           style={{
-            borderColor: latest ? "rgba(29,158,117,0.30)" : "#e5e7eb",
+            borderColor: latest ? "#0a0a0a" : "#ebeae5",
             backgroundColor: latest ? ACCENT_BG : "transparent",
           }}
         >
