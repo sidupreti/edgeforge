@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from "react";
+import { Routes, Route } from "react-router-dom";
 import "./index.css";
 import API_BASE_URL from "./config";
 import Sidebar from "./components/Sidebar";
@@ -11,6 +12,7 @@ import ExportScreen from "./components/ExportScreen";
 import PlaceholderScreen from "./components/PlaceholderScreen";
 import ParticleCanvas from "./components/ParticleCanvas";
 import NewOnboarding from "./components/NewOnboarding";
+import LandingPage from "./components/LandingPage";
 
 const STEPS = [
   { key: "setup",    label: "Setup" },
@@ -79,8 +81,20 @@ function slugify(name) {
   return s || "demo";
 }
 
-// ── App ───────────────────────────────────────────────────────────────────────
+// ── Router shell ─────────────────────────────────────────────────────────────
 export default function App() {
+  return (
+    <Routes>
+      <Route path="/" element={<LandingPage />} />
+      <Route path="/app/*" element={<AppContent />} />
+      {/* Catch-all: redirect unknown paths to landing */}
+      <Route path="*" element={<LandingPage />} />
+    </Routes>
+  );
+}
+
+// ── App content (existing tool — unchanged in behavior) ───────────────────────
+function AppContent() {
   const saved = loadSavedState();
 
   const [activeStep,        setActiveStep]        = useState(saved?.activeStep        ?? 0);
