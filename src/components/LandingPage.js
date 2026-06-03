@@ -597,7 +597,7 @@ export default function LandingPage() {
               <svg viewBox="0 0 20 20"><rect x="2.5" y="2.5" width="6.5" height="6.5" rx="1"/><rect x="11" y="2.5" width="6.5" height="6.5" rx="1"/><rect x="2.5" y="11" width="6.5" height="6.5" rx="1"/><rect x="11" y="11" width="6.5" height="6.5" rx="1"/></svg>
             </div>
             <div className="feature-title">Variable-Duration Normalization</div>
-            <div className="feature-desc">Cubic spline interpolation preserves the true signal decay shape across events of different lengths — a detail fixed-window approaches lose.</div>
+            <div className="feature-desc">Proprietary normalization preserves the true signal shape across events of different lengths — a detail fixed-window approaches lose.</div>
           </div>
           <div className="feature-card">
             <div className="feature-icon">
@@ -665,15 +665,14 @@ export default function LandingPage() {
           </div>
           <div className="diff-visual">
             <div className="win-dots"><span /><span /><span /></div>
-            <code className="cl"><span className="c-com"># normalize_df_period.py</span></code>
+            <code className="cl"><span className="c-com"># normalize_event.py</span></code>
             <code className="cl"> </code>
-            <code className="cl"><span className="c-key">def</span> <span className="c-fn">normalize_df_period</span><span className="c-par">(</span></code>
+            <code className="cl"><span className="c-key">def</span> <span className="c-fn">normalize_event</span><span className="c-par">(</span></code>
             <code className="cl">    <span className="c-par">df,</span></code>
             <code className="cl">    <span className="c-par">target_len</span>=<span className="c-par">100,</span></code>
-            <code className="cl">    <span className="c-par">method</span>=<span className="c-str">'cubic'</span></code>
             <code className="cl"><span className="c-par">):</span></code>
             <code className="cl"> </code>
-            <code className="cl"><span className="c-com">    # preserves decay shape</span></code>
+            <code className="cl"><span className="c-com">    # shape-preserving resampling</span></code>
             <code className="cl"><span className="c-com">    # across variable-length</span></code>
             <code className="cl"><span className="c-com">    # sensor events</span><span className="cursor-blink" /></code>
           </div>
