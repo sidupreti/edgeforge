@@ -13,6 +13,7 @@ import PlaceholderScreen from "./components/PlaceholderScreen";
 import FlowFieldBackground from "./components/FlowFieldBackground";
 import NewOnboarding from "./components/NewOnboarding";
 import LandingPage from "./components/LandingPage";
+import ContactPage from "./components/ContactPage";
 
 const STEPS = [
   { key: "setup",    label: "Setup" },
@@ -86,6 +87,7 @@ export default function App() {
   return (
     <Routes>
       <Route path="/" element={<LandingPage />} />
+      <Route path="/contact" element={<ContactPage />} />
       <Route path="/app/*" element={<AppContent />} />
       {/* Catch-all: redirect unknown paths to landing */}
       <Route path="*" element={<LandingPage />} />

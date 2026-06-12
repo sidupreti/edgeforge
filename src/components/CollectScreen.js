@@ -338,6 +338,7 @@ function FileUploadMode({
         const cls = matchedCls ?? allClasses[0];
         return {
           id:            ev.id,
+          datasetId:     ev.dataset_id ?? null,   // SQLite Dataset.id — used for AI relabeling
           classId:       cls?.id    ?? "cls-event",
           className:     cls?.name  ?? ev.class_label,
           classColor:    cls?.color ?? "#1D9E75",
@@ -671,6 +672,7 @@ export default function CollectScreen({ config, projectId, classes, setClasses, 
       const data = await res.json();
       const newEvents = data.events.map((ev) => ({
         id:            ev.id,
+        datasetId:     ev.dataset_id ?? null,   // SQLite Dataset.id — used for AI relabeling
         classId:       cls.id,
         className:     cls.name,
         classColor:    cls.color,
@@ -1504,6 +1506,10 @@ export default function CollectScreen({ config, projectId, classes, setClasses, 
                 projectId={projectId}
                 onApplyAction={onApplyAction}
                 screen="collect"
+                events={events}
+                classes={classes}
+                setEvents={setEvents}
+                setClasses={setClasses}
               />
             </div>
           </div>

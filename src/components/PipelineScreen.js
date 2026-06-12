@@ -4,7 +4,7 @@ import Editor from "react-simple-code-editor";
 import { highlight, languages } from "prismjs/components/prism-core";
 import "prismjs/components/prism-clike";
 import "prismjs/components/prism-python";
-import "prismjs/themes/prism-tomorrow.css";
+import "prismjs/themes/prism.css";
 import "./CodeEditorTheme.css";
 import CopilotChat from "./CopilotChat";
 import API_BASE_URL from "../config";

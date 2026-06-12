@@ -531,6 +531,7 @@ export default function LandingPage() {
           <li><a href="#features">Features</a></li>
           <li><a href="#how-it-works">How it works</a></li>
           <li><a href="#pricing">Get started</a></li>
+          <li><Link to="/contact" style={{ color: "#6b6a63", textDecoration: "none", fontSize: "14px" }}>Contact</Link></li>
           <li>
             <Link to="/app" className="nav-cta">Try free →</Link>
           </li>
@@ -705,6 +706,7 @@ export default function LandingPage() {
           <li><a href="#how-it-works">How it works</a></li>
           <li><a href="#pricing">Pricing</a></li>
           <li><Link to="/app">Launch app</Link></li>
+          <li><Link to="/contact">Contact</Link></li>
         </ul>
       </footer>
     </div>
