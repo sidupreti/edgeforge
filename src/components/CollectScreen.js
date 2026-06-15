@@ -200,7 +200,7 @@ function FormatGuide() {
 function FileUploadMode({
   classes, setClasses, activeClassId, events, setEvents, onAnalysisReady,
   projectId, analyzeResult, separabilityNote,
-  copilot, setCopilot,
+  copilot, setCopilot, setDetectedSampleRate,
 }) {
   // fileEntries: {file, name, parsed, classId, detected, error, note, reading}
   const [fileEntries,   setFileEntries]   = useState([]);
@@ -318,30 +318,24 @@ function FileUploadMode({
       }
       const data = await res.json();
 
-      // Auto-create any classes returned by backend that don't exist yet
-      let allClasses = [...classes];
-      for (const name of (data.detected_classes ?? [])) {
-        if (!allClasses.find((c) => c.name.toLowerCase() === name.toLowerCase())) {
-          allClasses.push({
-            id:    `cls-${name}-${Date.now()}-${allClasses.length}`,
-            name,
-            color: CLASS_PALETTE[allClasses.length % CLASS_PALETTE.length],
-          });
-        }
-      }
-      if (allClasses.length > classes.length) setClasses(allClasses);
+      // Update detected sample rate from the upload response (computed from
+      // actual timestamp deltas in the file, not a declared default).
+      const uploadedSr = data.analysis?.sample_rate?.declared_hz;
+      if (uploadedSr && uploadedSr > 0) setDetectedSampleRate(uploadedSr);
 
+      // No auto-class creation. Only match events to classes that already
+      // exist — files uploaded here are unassigned until the user places them
+      // via a class-specific Upload button or renames them manually.
       const newEvents = data.events.map((ev) => {
         const matchedCls =
-          allClasses.find((c) => c.name === ev.class_label) ??
-          allClasses.find((c) => c.name.toLowerCase() === (ev.class_label || "").toLowerCase());
-        const cls = matchedCls ?? allClasses[0];
+          classes.find((c) => c.name === ev.class_label) ??
+          classes.find((c) => c.name.toLowerCase() === (ev.class_label || "").toLowerCase());
         return {
           id:            ev.id,
-          datasetId:     ev.dataset_id ?? null,   // SQLite Dataset.id — used for AI relabeling
-          classId:       cls?.id    ?? "cls-event",
-          className:     cls?.name  ?? ev.class_label,
-          classColor:    cls?.color ?? "#1D9E75",
+          datasetId:     ev.dataset_id ?? null,
+          classId:       matchedCls?.id    ?? null,
+          className:     matchedCls?.name  ?? "Unassigned",
+          classColor:    matchedCls?.color ?? "#b0afa8",
           waveform:      ev.waveform_az ?? [],
           waveColor:     AXIS_COLORS.az,
           duration:      ev.duration_ms,
@@ -349,19 +343,15 @@ function FileUploadMode({
           snapshot:      { ax: ev.waveform_ax ?? [], ay: ev.waveform_ay ?? [], az: ev.waveform_az ?? [] },
           filename:      ev.filename,
           notes:         ev.notes ?? [],
-          autoAssigned:  !ev.class_label || !matchedCls,
-          detectedLabel: ev.class_label,
+          autoAssigned:  true,
+          detectedLabel: null,
         };
       });
       setEvents((prev) => [...newEvents, ...prev]);
 
-      const counts = {};
-      for (const ev of newEvents) counts[ev.className] = (counts[ev.className] ?? 0) + 1;
-      const parts = Object.entries(counts).map(([name, n]) => `${name} (${n})`);
       const total = newEvents.length;
       setUploadSuccess(
-        `Uploaded ${total} event${total !== 1 ? "s" : ""} across ` +
-        `${parts.length} class${parts.length !== 1 ? "es" : ""}: ${parts.join(", ")}`
+        `Uploaded ${total} event${total !== 1 ? "s" : ""} — assign them a class using the Upload button next to each class.`
       );
 
       setFileEntries((prev) => prev.filter((e) => e.error));
@@ -643,6 +633,10 @@ export default function CollectScreen({ config, projectId, classes, setClasses, 
   const lastEventTimeRef = useRef(null);
 
   const [copilot, setCopilot] = useState({ status: "idle", data: null, error: null });
+  // Tracks the sample rate computed from actual uploaded file timestamps.
+  // Updated after every successful /upload-events response. Starts at the
+  // hardware default (100 Hz) but is overwritten the moment real files land.
+  const [detectedSampleRate, setDetectedSampleRate] = useState(SAMPLE_RATE);
   const separabilityNoteRef  = useRef(null); // updated each render so async effect reads latest
 
   // Per-class CSV upload state
@@ -670,9 +664,14 @@ export default function CollectScreen({ config, projectId, classes, setClasses, 
         throw new Error(body.detail?.message ?? body.detail ?? `Server error ${res.status}`);
       }
       const data = await res.json();
+
+      // Capture computed sample rate from this upload's timestamps
+      const classSr = data.analysis?.sample_rate?.declared_hz;
+      if (classSr && classSr > 0) setDetectedSampleRate(classSr);
+
       const newEvents = data.events.map((ev) => ({
         id:            ev.id,
-        datasetId:     ev.dataset_id ?? null,   // SQLite Dataset.id — used for AI relabeling
+        datasetId:     ev.dataset_id ?? null,
         classId:       cls.id,
         className:     cls.name,
         classColor:    cls.color,
@@ -749,7 +748,7 @@ export default function CollectScreen({ config, projectId, classes, setClasses, 
       try {
         const payload = {
           project_id: projectId ?? undefined,
-          sample_rate_hz: SAMPLE_RATE,
+          sample_rate_hz: detectedSampleRate,
           events: events.map((ev) => ({
             ax:          ev.snapshot?.ax ?? [],
             ay:          ev.snapshot?.ay ?? [],
@@ -782,7 +781,7 @@ export default function CollectScreen({ config, projectId, classes, setClasses, 
       cancelled = true;
       clearTimeout(timer);
     };
-  }, [events]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [events, detectedSampleRate]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Canvas animation ────────────────────────────────────────────────────────
   useEffect(() => {
@@ -1034,6 +1033,7 @@ export default function CollectScreen({ config, projectId, classes, setClasses, 
           separabilityNote={separabilityNote}
           copilot={copilot}
           setCopilot={setCopilot}
+          setDetectedSampleRate={setDetectedSampleRate}
         />
       ) : (
       <div className="flex-1 flex flex-col min-h-0 gap-3">
@@ -1425,7 +1425,7 @@ export default function CollectScreen({ config, projectId, classes, setClasses, 
                     <p className="text-sm font-bold text-gray-800 tabular-nums">
                       {sr.measured_hz} Hz
                     </p>
-                    <p className="text-xs text-gray-400 mt-0.5">declared {sr.declared_hz} Hz</p>
+                    <p className="text-xs text-gray-400 mt-0.5">computed from timestamps</p>
                   </div>
 
                   <div className="w-full h-px bg-gray-200" />
