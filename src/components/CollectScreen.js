@@ -67,6 +67,7 @@ function WaveformThumb({ data, color = "#1D9E75", w = 64, h = 28 }) {
 
 const UPLOAD_COL_MAP = {
   t: "timestamp", time: "timestamp", ts: "timestamp", time_us: "timestamp",
+  timestamp_us: "timestamp",   // native SensorFlow format
   time_ms: "timestamp", time_s: "timestamp", sample_time: "timestamp", elapsed: "timestamp",
   x: "a_x", ax: "a_x", accel_x: "a_x", acc_x: "a_x", "x-axis": "a_x",
   y: "a_y", ay: "a_y", accel_y: "a_y", acc_y: "a_y", "y-axis": "a_y",
@@ -138,14 +139,27 @@ function parseCSVText(text) {
   }
   if (ax.length < 2) return null;
 
-  const tArr = ts[0] > 1e9 ? ts.map((v, i) => (i === 0 ? ts[1] - ts[0] : ts[i] - ts[i - 1])) : ts;
+  // Convert absolute timestamps → consecutive diffs.
+  // ts[0] > 1e9  → Unix-epoch µs (original check, kept)
+  // ts[2] > ts[1]*1.5 → relative-from-0 absolute µs, e.g. [0,40000,80000,…]
+  //   (ts[0] is often 0, replaced by 10000 fallback, so we compare ts[2] vs ts[1]
+  //    which are unaffected: for absolute, ts[2] ≈ 2*ts[1]; for deltas, ts[2] ≈ ts[1])
+  const isAbsolute = ts[0] > 1e9 || (ts.length >= 3 && ts[2] > ts[1] * 1.5);
+  const tArr = isAbsolute
+    ? ts.slice(1).map((v, i) => v - ts[i])
+    : ts;
   const durationMs = tArr.reduce((s, v) => s + Math.abs(v), 0) / 1000;
 
-  // Per-file sample rate: n_samples / duration_s.
-  // Both rowCount and durationMs are already correct per-file, so this is
-  // guaranteed to match what the detail view shows (no timestamp-unit guessing).
-  const durationS = Math.round(durationMs) / 1000;
-  const sampleRateHz = durationS > 0 ? Math.round((ax.length / durationS) * 10) / 10 : null;
+  // Per-file sample rate via median consecutive delta (µs) → Hz.
+  // Median is robust to the one corrupted first diff caused by ts[0]=0→10000 fallback.
+  const validDeltas = tArr.filter((d) => d > 0 && d < 2_000_000);
+  let sampleRateHz = null;
+  if (validDeltas.length >= 2) {
+    const sorted = [...validDeltas].sort((a, b) => a - b);
+    const mid = Math.floor(sorted.length / 2);
+    const medianDelta = sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+    if (medianDelta > 0) sampleRateHz = Math.round((1_000_000 / medianDelta) * 10) / 10;
+  }
 
   return { ax, ay, az, rowCount: ax.length, durationMs: Math.round(durationMs), detectedLabel, sampleRateHz };
 }
