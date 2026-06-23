@@ -141,7 +141,17 @@ function parseCSVText(text) {
   const tArr = ts[0] > 1e9 ? ts.map((v, i) => (i === 0 ? ts[1] - ts[0] : ts[i] - ts[i - 1])) : ts;
   const durationMs = tArr.reduce((s, v) => s + Math.abs(v), 0) / 1000;
 
-  return { ax, ay, az, rowCount: ax.length, durationMs: Math.round(durationMs), detectedLabel };
+  // Per-file sample rate: median of positive deltas (assumed µs) → Hz
+  const validDeltas = tArr.filter((d) => d > 0 && d < 2_000_000);
+  let sampleRateHz = null;
+  if (validDeltas.length >= 2) {
+    const sorted = [...validDeltas].sort((a, b) => a - b);
+    const mid = Math.floor(sorted.length / 2);
+    const medianDelta = sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
+    if (medianDelta > 0) sampleRateHz = Math.round((1_000_000 / medianDelta) * 10) / 10;
+  }
+
+  return { ax, ay, az, rowCount: ax.length, durationMs: Math.round(durationMs), detectedLabel, sampleRateHz };
 }
 
 function detectClassFromFilename(filename, classes, fallbackClassId) {
@@ -155,6 +165,196 @@ function detectClassFromFilename(filename, classes, fallbackClassId) {
     }
   }
   return { classId: fallbackClassId ?? classes[0]?.id ?? null, detected: false };
+}
+
+// ── Stat helpers ─────────────────────────────────────────────────────────────
+
+function computeAxisStats(arr) {
+  if (!arr?.length) return null;
+  const n    = arr.length;
+  const mean = arr.reduce((s, v) => s + v, 0) / n;
+  const std  = Math.sqrt(arr.reduce((s, v) => s + (v - mean) ** 2, 0) / n);
+  return { mean, std, min: Math.min(...arr), max: Math.max(...arr) };
+}
+
+// ── Signal plot (3-axis, larger) ─────────────────────────────────────────────
+
+function SignalPlotRow({ data, color, label, height = 36 }) {
+  if (!data?.length) return null;
+  const VW = 400; const VH = height;
+  const mn = Math.min(...data); const mx = Math.max(...data);
+  const range = (mx - mn) || 0.001;
+  const pts = data
+    .map((v, i) => {
+      const x = ((i / (data.length - 1)) * VW).toFixed(1);
+      const y = (VH - 1 - ((v - mn) / range) * (VH - 2)).toFixed(1);
+      return `${x},${y}`;
+    })
+    .join(" ");
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 3 }}>
+      <span style={{ fontFamily: "'DM Mono', monospace", fontSize: 9, color, width: 14, flexShrink: 0, textAlign: "right" }}>
+        {label}
+      </span>
+      <svg
+        viewBox={`0 0 ${VW} ${VH}`}
+        style={{ flex: 1, height: VH, display: "block", background: "#f8f7f3", border: "1px solid #ebeae5", borderRadius: 4 }}
+        preserveAspectRatio="none"
+      >
+        <polyline
+          points={pts}
+          fill="none"
+          stroke={color}
+          strokeWidth="2"
+          strokeLinejoin="round"
+          strokeLinecap="round"
+          vectorEffect="non-scaling-stroke"
+        />
+      </svg>
+    </div>
+  );
+}
+
+// ── File detail overlay ───────────────────────────────────────────────────────
+
+function FileDetailPanel({ ev, allEvents, onClose, onAskCopilot }) {
+  const snap  = ev.snapshot ?? {};
+  const axes  = ["ax", "ay", "az"].filter((k) => snap[k]?.length > 0);
+  const stats = {};
+  for (const axis of axes) stats[axis] = computeAxisStats(snap[axis]);
+
+  // Quality flags
+  const flags = [];
+  for (const axis of axes) {
+    const s = stats[axis];
+    if (!s) continue;
+    if (s.std < 0.005)              flags.push(`${axis}: flatline (std = ${s.std.toFixed(5)})`);
+    if (s.max > 15 || s.min < -15)  flags.push(`${axis}: possible clipping (range ${s.min.toFixed(2)} → ${s.max.toFixed(2)})`);
+  }
+  const allRates    = [...new Set(allEvents.map((e) => e.sampleRateHz).filter(Boolean))];
+  const otherRates  = allRates.filter((r) => r !== ev.sampleRateHz);
+  if (ev.sampleRateHz && otherRates.length > 0) {
+    flags.push(`Sample rate ${ev.sampleRateHz} Hz differs from other files (${otherRates.join(", ")} Hz)`);
+  }
+
+  const copilotMsg = [
+    `Analyze signal "${ev.filename ?? "unknown"}"`,
+    ev.sampleRateHz ? `${ev.sampleRateHz} Hz` : null,
+    `${ev.duration} ms`,
+    `${snap.ax?.length ?? 0} samples`,
+    axes.map((a) => `${a}: mean=${stats[a]?.mean.toFixed(3)}, std=${stats[a]?.std.toFixed(3)}, min=${stats[a]?.min.toFixed(3)}, max=${stats[a]?.max.toFixed(3)}`).join("; "),
+    flags.length ? `Flags: ${flags.join("; ")}` : null,
+    "Any data quality concerns?",
+  ].filter(Boolean).join(" · ");
+
+  const FMT = (v) => v?.toFixed(3) ?? "—";
+
+  return (
+    <div style={{
+      position: "absolute", inset: 0, background: "#ffffff", zIndex: 10,
+      display: "flex", flexDirection: "column", overflow: "hidden",
+      border: "1px solid #ebeae5", borderRadius: 8,
+    }}>
+      {/* Header */}
+      <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 12px", borderBottom: "1px solid #ebeae5", flexShrink: 0 }}>
+        <button
+          onClick={onClose}
+          style={{ background: "none", border: "none", cursor: "pointer", padding: "0 2px", color: "#b0afa8", fontSize: 16, lineHeight: 1, flexShrink: 0 }}
+          title="Back to list"
+        >←</button>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <p style={{ fontFamily: "'DM Mono', monospace", fontSize: 11, color: "#0a0a0a", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+            {ev.filename ?? "Signal"}
+          </p>
+          <p style={{ fontFamily: "'DM Mono', monospace", fontSize: 9, color: "#b0afa8", marginTop: 1 }}>
+            {[ev.sampleRateHz ? `${ev.sampleRateHz} Hz` : null, `${ev.duration} ms`, snap.ax?.length ? `${snap.ax.length} samples` : null].filter(Boolean).join(" · ")}
+          </p>
+        </div>
+        <span style={{
+          fontSize: 9, padding: "2px 8px", borderRadius: 20,
+          background: `${ev.classColor}1a`, color: ev.classColor,
+          fontFamily: "'DM Mono', monospace", flexShrink: 0,
+        }}>
+          {ev.className}
+        </span>
+      </div>
+
+      <div style={{ flex: 1, overflowY: "auto", padding: "12px 14px" }}>
+        {/* Signal plots */}
+        <p style={{ fontFamily: "'DM Mono', monospace", fontSize: 9, color: "#b0afa8", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 }}>Signal</p>
+        <div style={{ marginBottom: 14 }}>
+          {axes.map((axis) => (
+            <SignalPlotRow
+              key={axis}
+              data={snap[axis]}
+              color={AXIS_COLORS[axis]}
+              label={AXIS_LABELS[axis]}
+              height={36}
+            />
+          ))}
+        </div>
+
+        {/* Per-axis stats */}
+        <p style={{ fontFamily: "'DM Mono', monospace", fontSize: 9, color: "#b0afa8", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 }}>Per-axis stats</p>
+        <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: 14 }}>
+          <thead>
+            <tr>
+              {["", "mean", "std", "min", "max"].map((h) => (
+                <th key={h} style={{ fontFamily: "'DM Mono', monospace", fontSize: 9, color: "#b0afa8", textAlign: h === "" ? "left" : "right", padding: "2px 4px", fontWeight: 500 }}>
+                  {h}
+                </th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {axes.map((axis) => {
+              const s = stats[axis];
+              if (!s) return null;
+              return (
+                <tr key={axis} style={{ borderTop: "1px solid #f0efe9" }}>
+                  <td style={{ fontFamily: "'DM Mono', monospace", fontSize: 10, color: AXIS_COLORS[axis], padding: "3px 4px", fontWeight: 600 }}>{axis}</td>
+                  {[s.mean, s.std, s.min, s.max].map((v, i) => (
+                    <td key={i} style={{ fontFamily: "'DM Mono', monospace", fontSize: 10, color: "#3a3935", textAlign: "right", padding: "3px 4px" }}>{FMT(v)}</td>
+                  ))}
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+
+        {/* Flags */}
+        {flags.length > 0 && (
+          <div style={{ marginBottom: 14 }}>
+            <p style={{ fontFamily: "'DM Mono', monospace", fontSize: 9, color: "#b0afa8", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 4 }}>Flags</p>
+            {flags.map((msg, i) => (
+              <div key={i} style={{ display: "flex", alignItems: "flex-start", gap: 6, marginBottom: 4, padding: "5px 8px", background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 6 }}>
+                <span style={{ fontSize: 11, flexShrink: 0 }}>⚠</span>
+                <p style={{ fontFamily: "'DM Mono', monospace", fontSize: 10, color: "#92400e", lineHeight: 1.45 }}>{msg}</p>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {/* Ask Copilot */}
+        {onAskCopilot && (
+          <button
+            onClick={() => onAskCopilot(copilotMsg)}
+            style={{
+              width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
+              padding: "9px 12px", background: "#0a0a0a", color: "#ffffff",
+              border: "none", borderRadius: 6, cursor: "pointer",
+              fontFamily: "'Syne', sans-serif", fontSize: 11, fontWeight: 600,
+            }}
+          >
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" style={{ width: 12, height: 12, flexShrink: 0 }}>
+              <circle cx="8" cy="8" r="6.5" /><path d="M8 5.5v3M8 10.5h.01" />
+            </svg>
+            Ask Copilot about this signal
+          </button>
+        )}
+      </div>
+    </div>
+  );
 }
 
 // ── Format guide (collapsible) ───────────────────────────────────────────────
@@ -200,14 +400,15 @@ function FormatGuide() {
 function FileUploadMode({
   classes, setClasses, activeClassId, events, setEvents, onAnalysisReady,
   projectId, analyzeResult, separabilityNote,
-  copilot, setCopilot, setDetectedSampleRate,
+  copilot, setCopilot, setDetectedSampleRate, onAskCopilot,
 }) {
   // fileEntries: {file, name, parsed, classId, detected, error, note, reading}
-  const [fileEntries,   setFileEntries]   = useState([]);
-  const [uploading,     setUploading]     = useState(false);
-  const [uploadError,   setUploadError]   = useState(null);
-  const [uploadSuccess, setUploadSuccess] = useState(null);
-  const [dragOver,      setDragOver]      = useState(false);
+  const [fileEntries,    setFileEntries]    = useState([]);
+  const [uploading,      setUploading]      = useState(false);
+  const [uploadError,    setUploadError]    = useState(null);
+  const [uploadSuccess,  setUploadSuccess]  = useState(null);
+  const [dragOver,       setDragOver]       = useState(false);
+  const [selectedEventId, setSelectedEventId] = useState(null);
   const inputRef = useRef(null);
 
   // Read a CSV file and update its entry in state
@@ -318,6 +519,15 @@ function FileUploadMode({
       }
       const data = await res.json();
 
+      // Build filename → sampleRateHz map from client-side parsed entries
+      // BEFORE clearing fileEntries, so each event gets its own file's rate.
+      const fileRateMap = {};
+      for (const entry of goodEntries) {
+        if (entry.name && entry.parsed?.sampleRateHz) {
+          fileRateMap[entry.name] = entry.parsed.sampleRateHz;
+        }
+      }
+
       // Update detected sample rate from the upload response (computed from
       // actual timestamp deltas in the file, not a declared default).
       const uploadedSr = data.analysis?.sample_rate?.declared_hz;
@@ -345,6 +555,7 @@ function FileUploadMode({
           notes:         ev.notes ?? [],
           autoAssigned:  true,
           detectedLabel: null,
+          sampleRateHz:  fileRateMap[ev.filename] ?? null,
         };
       });
       setEvents((prev) => [...newEvents, ...prev]);
@@ -362,8 +573,21 @@ function FileUploadMode({
     }
   }
 
+  // Derive the selected event object for the detail panel
+  const selectedEvent = selectedEventId ? events.find((e) => e.id === selectedEventId) : null;
+
   return (
-    <div className="flex-1 flex flex-col min-h-0 gap-3">
+    <div className="flex-1 flex flex-col min-h-0 gap-3" style={{ position: "relative" }}>
+
+      {/* ── File detail overlay — shown when an event row is clicked ──────── */}
+      {selectedEvent && (
+        <FileDetailPanel
+          ev={selectedEvent}
+          allEvents={events}
+          onClose={() => setSelectedEventId(null)}
+          onAskCopilot={onAskCopilot}
+        />
+      )}
 
       {/* ── Drop zone ──────────────────────────────────────────────────────── */}
       <div
@@ -468,6 +692,7 @@ function FileUploadMode({
                   ) : entry.parsed ? (
                     <p className="text-[10px] text-gray-300 mt-0.5 tabular-nums">
                       {entry.parsed.rowCount} rows · {entry.parsed.durationMs} ms
+                      {entry.parsed.sampleRateHz ? ` · ${entry.parsed.sampleRateHz} Hz` : ""}
                     </p>
                   ) : null}
                 </div>
@@ -537,6 +762,22 @@ function FileUploadMode({
               >×</button>
             </div>
           )}
+
+          {/* Mixed-rate warning for staged (pre-upload) files */}
+          {(() => {
+            const stagedRates = [...new Set(
+              fileEntries.map((e) => e.parsed?.sampleRateHz).filter(Boolean).map((r) => Math.round(r))
+            )].sort((a, b) => a - b);
+            if (stagedRates.length < 2) return null;
+            return (
+              <div style={{ display: "flex", alignItems: "flex-start", gap: 6, padding: "6px 10px", background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 6 }}>
+                <span style={{ fontSize: 12, flexShrink: 0 }}>⚠</span>
+                <p style={{ fontFamily: "'DM Mono', monospace", fontSize: 10, color: "#92400e", lineHeight: 1.45 }}>
+                  Files have different sample rates: {stagedRates.join(", ")} Hz — mixing rates will hurt training accuracy
+                </p>
+              </div>
+            );
+          })()}
         </div>
       )}
 
@@ -550,6 +791,20 @@ function FileUploadMode({
         </div>
       )}
 
+      {/* ── Mixed-rate warning for uploaded events ──────────────────────────── */}
+      {(() => {
+        const evRates = [...new Set(events.map((e) => e.sampleRateHz).filter(Boolean))].sort((a, b) => a - b);
+        if (evRates.length < 2) return null;
+        return (
+          <div style={{ display: "flex", alignItems: "flex-start", gap: 6, padding: "6px 10px", background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 6, flexShrink: 0 }}>
+            <span style={{ fontSize: 12, flexShrink: 0 }}>⚠</span>
+            <p style={{ fontFamily: "'DM Mono', monospace", fontSize: 10, color: "#92400e", lineHeight: 1.45 }}>
+              Files have different sample rates: {evRates.join(", ")} Hz — mixing rates will hurt training accuracy
+            </p>
+          </div>
+        );
+      })()}
+
       {/* ── Event list ──────────────────────────────────────────────────────── */}
       <div className="flex-1 overflow-y-auto min-h-0 space-y-1.5 pr-0.5">
         {events.length === 0 ? (
@@ -558,49 +813,68 @@ function FileUploadMode({
             <span className="text-gray-200 text-xs">Upload CSV files to add events</span>
           </div>
         ) : (
-          events.map((ev) => (
-            <div
-              key={ev.id}
-              className="flex items-center gap-2 px-3 py-2 border rounded group transition-colors bg-white border-gray-100 hover:border-gray-200"
-            >
-              <WaveformThumb data={ev.waveform} color={ev.waveColor} />
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-1.5 flex-wrap">
-                  <select
-                    value={ev.classId ?? ""}
-                    onChange={(e) => setEventClass(ev.id, e.target.value)}
-                    className="text-xs border rounded px-1 py-0.5 focus:outline-none focus:border-accent bg-white flex-shrink-0"
-                    style={{
-                      color: ev.classColor,
-                      borderColor: `${ev.classColor}60`,
-                      maxWidth: "90px",
-                    }}
-                  >
-                    {classes.map((c) => (
-                      <option key={c.id} value={c.id}>{c.name}</option>
-                    ))}
-                  </select>
-                  <span className="text-xs text-gray-400 tabular-nums">{ev.duration} ms</span>
-                </div>
-                {ev.autoAssigned ? (
-                  <p className="text-[10px] text-yellow-600 mt-0.5 leading-tight">
-                    Class not detected — assigned to {ev.className}. Change if needed.
-                  </p>
-                ) : (
-                  ev.filename && (
-                    <p className="text-[10px] text-gray-300 mt-0.5 truncate">{ev.filename}</p>
-                  )
-                )}
-              </div>
-              <button
-                onClick={() => setEvents((prev) => prev.filter((e) => e.id !== ev.id))}
-                className="opacity-0 group-hover:opacity-100 text-gray-300 hover:text-red-400 transition-all text-base leading-none px-1 flex-shrink-0"
-                title="Delete"
+          events.map((ev) => {
+            const isSelected = ev.id === selectedEventId;
+            return (
+              <div
+                key={ev.id}
+                onClick={() => setSelectedEventId(ev.id)}
+                className="flex items-center gap-2 px-3 py-2 border rounded group transition-colors bg-white"
+                style={{
+                  borderColor:  isSelected ? "#0a0a0a" : "#f0efe9",
+                  cursor:       "pointer",
+                  background:   isSelected ? "#f8f7f3" : "#ffffff",
+                }}
               >
-                ×
-              </button>
-            </div>
-          ))
+                <WaveformThumb data={ev.waveform} color={ev.waveColor} />
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-1.5 flex-wrap">
+                    <select
+                      value={ev.classId ?? ""}
+                      onChange={(e) => { e.stopPropagation(); setEventClass(ev.id, e.target.value); }}
+                      onClick={(e) => e.stopPropagation()}
+                      className="text-xs border rounded px-1 py-0.5 focus:outline-none focus:border-accent bg-white flex-shrink-0"
+                      style={{
+                        color: ev.classColor,
+                        borderColor: `${ev.classColor}60`,
+                        maxWidth: "90px",
+                      }}
+                    >
+                      {classes.map((c) => (
+                        <option key={c.id} value={c.id}>{c.name}</option>
+                      ))}
+                    </select>
+                    <span className="text-xs text-gray-400 tabular-nums">{ev.duration} ms</span>
+                    {ev.sampleRateHz && (
+                      <span className="text-[10px] tabular-nums" style={{ fontFamily: "'DM Mono', monospace", color: "#b0afa8" }}>
+                        {ev.sampleRateHz} Hz
+                      </span>
+                    )}
+                  </div>
+                  {ev.autoAssigned ? (
+                    <p className="text-[10px] text-yellow-600 mt-0.5 leading-tight">
+                      Class not detected — assigned to {ev.className}. Change if needed.
+                    </p>
+                  ) : (
+                    ev.filename && (
+                      <p className="text-[10px] text-gray-300 mt-0.5 truncate">{ev.filename}</p>
+                    )
+                  )}
+                </div>
+                {/* Detail chevron */}
+                <svg viewBox="0 0 8 12" className="w-2 h-3 flex-shrink-0 text-gray-300" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round">
+                  <path d="M2 2l4 4-4 4" />
+                </svg>
+                <button
+                  onClick={(e) => { e.stopPropagation(); setEvents((prev) => prev.filter((e2) => e2.id !== ev.id)); }}
+                  className="opacity-0 group-hover:opacity-100 text-gray-300 hover:text-red-400 transition-all text-base leading-none px-1 flex-shrink-0"
+                  title="Delete"
+                >
+                  ×
+                </button>
+              </div>
+            );
+          })
         )}
       </div>
     </div>
@@ -637,6 +911,32 @@ export default function CollectScreen({ config, projectId, classes, setClasses, 
   // Updated after every successful /upload-events response. Starts at the
   // hardware default (100 Hz) but is overwritten the moment real files land.
   const [detectedSampleRate, setDetectedSampleRate] = useState(SAMPLE_RATE);
+
+  // ── Send a message directly to the copilot API (used from FileDetailPanel) ──
+  async function sendToCopilot(message) {
+    setChatHistory((prev) => [
+      ...prev,
+      { id: `${Date.now()}-u`, role: "user", content: message, timestamp: new Date().toLocaleTimeString() },
+    ]);
+    try {
+      const res = await fetch(`${API_BASE_URL}/copilot/chat`, {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({ message, project_id: projectId, screen: "collect", pipeline_config: null }),
+      });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.detail ?? `Server error ${res.status}`);
+      setChatHistory((prev) => [
+        ...prev,
+        { id: `${Date.now()}-a`, role: "assistant", content: body.message, timestamp: new Date().toLocaleTimeString() },
+      ]);
+    } catch (err) {
+      setChatHistory((prev) => [
+        ...prev,
+        { id: `${Date.now()}-e`, role: "assistant", content: `Copilot error: ${err.message}`, timestamp: new Date().toLocaleTimeString() },
+      ]);
+    }
+  }
   const separabilityNoteRef  = useRef(null); // updated each render so async effect reads latest
 
   // Per-class CSV upload state
@@ -684,6 +984,7 @@ export default function CollectScreen({ config, projectId, classes, setClasses, 
         notes:         ev.notes ?? [],
         autoAssigned:  false,
         detectedLabel: cls.name,
+        sampleRateHz:  classSr && classSr > 0 ? classSr : null,
       }));
       setEvents((prev) => [...newEvents, ...prev]);
     } catch (err) {
@@ -746,9 +1047,18 @@ export default function CollectScreen({ config, projectId, classes, setClasses, 
     const timer = setTimeout(async () => {
       setCopilot({ status: "loading", data: null, error: null });
       try {
+        // Derive majority sample rate from per-file rates stored on events.
+        // This prevents a single late-upload from clobbering the rate for all events.
+        const rateCounts = events.reduce((acc, ev) => {
+          if (ev.sampleRateHz) acc[ev.sampleRateHz] = (acc[ev.sampleRateHz] ?? 0) + 1;
+          return acc;
+        }, {});
+        const majorityEntry = Object.entries(rateCounts).sort(([, a], [, b]) => b - a)[0];
+        const sampleRateHz = majorityEntry ? parseFloat(majorityEntry[0]) : detectedSampleRate;
+
         const payload = {
           project_id: projectId ?? undefined,
-          sample_rate_hz: detectedSampleRate,
+          sample_rate_hz: sampleRateHz,
           events: events.map((ev) => ({
             ax:          ev.snapshot?.ax ?? [],
             ay:          ev.snapshot?.ay ?? [],
@@ -1034,6 +1344,7 @@ export default function CollectScreen({ config, projectId, classes, setClasses, 
           copilot={copilot}
           setCopilot={setCopilot}
           setDetectedSampleRate={setDetectedSampleRate}
+          onAskCopilot={sendToCopilot}
         />
       ) : (
       <div className="flex-1 flex flex-col min-h-0 gap-3">
