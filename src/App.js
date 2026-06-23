@@ -10,6 +10,7 @@ import TrainScreen from "./components/TrainScreen";
 import ValidateScreen from "./components/ValidateScreen";
 import ExportScreen from "./components/ExportScreen";
 import PlaceholderScreen from "./components/PlaceholderScreen";
+import RecordingsScreen from "./components/RecordingsScreen";
 import FlowFieldBackground from "./components/FlowFieldBackground";
 import NewOnboarding from "./components/NewOnboarding";
 import LandingPage from "./components/LandingPage";
@@ -116,6 +117,7 @@ function AppContent() {
   const [submitLoading,     setSubmitLoading]     = useState(false);
   const [submitError,       setSubmitError]       = useState(null);
   const [showResetConfirm,  setShowResetConfirm]  = useState(false);
+  const [showRecordings,    setShowRecordings]    = useState(false);
 
   // Derived — never stored separately, always consistent with config
   const projectId = slugify(config.projectName);
@@ -363,9 +365,11 @@ function AppContent() {
       {/* Content sits above canvas */}
       <div className="flex flex-1 min-w-0 h-full" style={{ position: "relative", zIndex: 1 }}>
         <Sidebar
-          activeStep={activeStep}
+          activeStep={showRecordings ? -1 : activeStep}
           onResetRequest={() => setShowResetConfirm(true)}
-          onOpenSettings={() => setActiveStep(0)}
+          onOpenSettings={() => { setShowRecordings(false); setActiveStep(0); }}
+          onOpenRecordings={() => setShowRecordings((v) => !v)}
+          showRecordings={showRecordings}
         />
 
         {/* Reset confirmation overlay */}
@@ -423,38 +427,44 @@ function AppContent() {
                   letterSpacing: "0.12em",
                 }}
               >
-                {STEPS[activeStep].label}
+                {showRecordings ? "Recordings" : STEPS[activeStep].label}
               </h1>
               <p className="text-xs mt-0.5" style={{ color: "#8a8982", fontFamily: "'DM Mono', monospace" }}>
-                {String(activeStep + 1).padStart(2, "0")} / {String(STEPS.length).padStart(2, "0")}
+                {showRecordings
+                  ? "cv accuracy · data quality"
+                  : `${String(activeStep + 1).padStart(2, "0")} / ${String(STEPS.length).padStart(2, "0")}`}
               </p>
             </div>
 
-            {/* Step progress dots */}
-            <div className="flex items-center gap-1.5">
-              {STEPS.map((s, i) => (
-                <span
-                  key={s.key}
-                  className="w-2 h-2 rounded-full transition-colors"
-                  style={{
-                    background: i === activeStep
-                      ? "#0a0a0a"
-                      : i < activeStep
-                        ? "#b0afa8"
-                        : "#ebeae5",
-                  }}
-                />
-              ))}
-            </div>
+            {/* Step progress dots — hidden on Recordings view */}
+            {!showRecordings && (
+              <div className="flex items-center gap-1.5">
+                {STEPS.map((s, i) => (
+                  <span
+                    key={s.key}
+                    className="w-2 h-2 rounded-full transition-colors"
+                    style={{
+                      background: i === activeStep
+                        ? "#0a0a0a"
+                        : i < activeStep
+                          ? "#b0afa8"
+                          : "#ebeae5",
+                    }}
+                  />
+                ))}
+              </div>
+            )}
           </header>
 
           {/* Screen body */}
           <main className="flex-1 min-h-0 px-8 py-8 overflow-y-auto">
-            {renderScreen()}
+            {showRecordings
+              ? <RecordingsScreen projectId={projectId} />
+              : renderScreen()}
           </main>
 
-          {/* Bottom nav bar — hidden on pipeline (PipelineScreen has its own internal nav) */}
-          {currentKey !== "pipeline" && (
+          {/* Bottom nav bar — hidden on pipeline and recordings */}
+          {!showRecordings && currentKey !== "pipeline" && (
             <footer
               className="px-8 py-4 flex items-center justify-between"
               style={{

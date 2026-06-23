@@ -34,7 +34,7 @@ function LogoMark({ size = 28 }) {
   );
 }
 
-export default function Sidebar({ activeStep, onResetRequest, onOpenSettings }) {
+export default function Sidebar({ activeStep, onResetRequest, onOpenSettings, onOpenRecordings, showRecordings }) {
   return (
     <aside
       className="w-64 h-screen flex-shrink-0 flex flex-col overflow-y-auto"
@@ -135,6 +135,59 @@ export default function Sidebar({ activeStep, onResetRequest, onOpenSettings }) 
           );
         })}
       </nav>
+
+      {/* Recordings tool — standalone, below main flow */}
+      <div className="px-3 pb-3">
+        <div className="mb-2 px-3" style={{ borderTop: "1px solid #ebeae5", paddingTop: "12px" }}>
+          <p className="text-xs uppercase tracking-widest" style={{ fontFamily: "'DM Mono', monospace", color: "#b0afa8", fontSize: "9px", letterSpacing: "0.08em" }}>
+            Tools
+          </p>
+        </div>
+        <button
+          onClick={onOpenRecordings}
+          className="w-full flex items-start gap-3 px-3 py-3 rounded-lg transition-all text-left"
+          style={{
+            background:  showRecordings ? "#f8f7f3" : "transparent",
+            borderLeft:  showRecordings ? "2px solid #0a0a0a" : "2px solid transparent",
+          }}
+        >
+          <div
+            className="mt-0.5 w-7 h-7 rounded-full flex-shrink-0 flex items-center justify-center"
+            style={{
+              background: showRecordings ? "#0a0a0a" : "transparent",
+              border: showRecordings ? "none" : "1px solid #d8d7d0",
+            }}
+          >
+            <svg
+              viewBox="0 0 16 16" className="w-3.5 h-3.5" fill="none"
+              stroke={showRecordings ? "#ffffff" : "#b0afa8"} strokeWidth="1.5"
+              strokeLinecap="round" strokeLinejoin="round"
+            >
+              <path d="M2 4h12M2 8h8M2 12h5" />
+              <circle cx="13" cy="11" r="2.5" />
+              <path d="M13 9v2l1 1" />
+            </svg>
+          </div>
+          <div>
+            <p
+              className="text-sm font-semibold"
+              style={{
+                fontFamily: "'Syne', sans-serif",
+                color: showRecordings ? "#0a0a0a" : "#6b6a63",
+                letterSpacing: "-0.01em",
+              }}
+            >
+              Recordings
+            </p>
+            <p
+              className="text-xs mt-0.5"
+              style={{ fontFamily: "'DM Mono', monospace", color: "#b0afa8", fontSize: "10px", letterSpacing: "0.02em" }}
+            >
+              CV accuracy check
+            </p>
+          </div>
+        </button>
+      </div>
 
       {/* Footer */}
       <div
