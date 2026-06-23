@@ -141,15 +141,11 @@ function parseCSVText(text) {
   const tArr = ts[0] > 1e9 ? ts.map((v, i) => (i === 0 ? ts[1] - ts[0] : ts[i] - ts[i - 1])) : ts;
   const durationMs = tArr.reduce((s, v) => s + Math.abs(v), 0) / 1000;
 
-  // Per-file sample rate: median of positive deltas (assumed µs) → Hz
-  const validDeltas = tArr.filter((d) => d > 0 && d < 2_000_000);
-  let sampleRateHz = null;
-  if (validDeltas.length >= 2) {
-    const sorted = [...validDeltas].sort((a, b) => a - b);
-    const mid = Math.floor(sorted.length / 2);
-    const medianDelta = sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
-    if (medianDelta > 0) sampleRateHz = Math.round((1_000_000 / medianDelta) * 10) / 10;
-  }
+  // Per-file sample rate: n_samples / duration_s.
+  // Both rowCount and durationMs are already correct per-file, so this is
+  // guaranteed to match what the detail view shows (no timestamp-unit guessing).
+  const durationS = Math.round(durationMs) / 1000;
+  const sampleRateHz = durationS > 0 ? Math.round((ax.length / durationS) * 10) / 10 : null;
 
   return { ax, ay, az, rowCount: ax.length, durationMs: Math.round(durationMs), detectedLabel, sampleRateHz };
 }
