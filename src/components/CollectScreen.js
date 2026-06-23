@@ -1728,54 +1728,77 @@ export default function CollectScreen({ config, projectId, classes, setClasses, 
             {/* ── ready ── */}
             {copilot.status === "ready" && (() => {
               const { cutoff_frequency: cf, normalization_window: nw, sample_rate: sr } = copilot.data;
+
+              // Derive unique rates from per-file event data (more accurate than
+              // the backend's single aggregated value).
+              const eventRates = [...new Set(events.map((e) => e.sampleRateHz).filter(Boolean))].sort((a, b) => a - b);
+              const mixedRates = eventRates.length > 1;
+
               return (
                 <>
-                  {/* Sample rate */}
-                  <div>
-                    <p className="text-xs text-gray-400 uppercase tracking-widest mb-1">Sample rate</p>
-                    <p className="text-sm font-bold text-gray-800 tabular-nums">
-                      {sr.measured_hz} Hz
-                    </p>
-                    <p className="text-xs text-gray-400 mt-0.5">computed from timestamps</p>
-                  </div>
-
-                  <div className="w-full h-px bg-gray-200" />
-
-                  {/* Cutoff frequency */}
-                  <div>
-                    <p className="text-xs text-gray-400 uppercase tracking-widest mb-1">Low-pass cutoff</p>
-                    <div className="flex items-baseline gap-1.5">
-                      <p className="text-sm font-bold text-gray-800 tabular-nums">
-                        {cf.recommended_hz} Hz
-                      </p>
-                      <span className="text-xs text-gray-400">rec.</span>
-                    </div>
-                    {/* Per-axis breakdown */}
-                    {Object.keys(cf.axis_cutoffs_hz).length > 0 && (
-                      <div className="mt-1.5 flex flex-wrap gap-x-2 gap-y-1">
-                        {Object.entries(cf.axis_cutoffs_hz).map(([axis, hz]) => (
-                          <span key={axis} className="text-xs tabular-nums" style={{ color: AXIS_COLORS[axis] ?? "#6b7280" }}>
-                            {AXIS_LABELS[axis] ?? axis} {hz}
-                          </span>
-                        ))}
+                  {/* Sample rate — single value when consistent, warning when mixed */}
+                  {mixedRates ? (
+                    <div style={{ display: "flex", alignItems: "flex-start", gap: 6, padding: "6px 8px", background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 6 }}>
+                      <span style={{ fontSize: 11, flexShrink: 0 }}>⚠</span>
+                      <div>
+                        <p style={{ fontFamily: "'DM Mono', monospace", fontSize: 10, color: "#92400e", fontWeight: 600 }}>
+                          Mixed sample rates: {eventRates[0]}–{eventRates[eventRates.length - 1]} Hz
+                        </p>
+                        <p style={{ fontFamily: "'DM Mono', monospace", fontSize: 9, color: "#b45309", marginTop: 2, lineHeight: 1.4 }}>
+                          Use one consistent rate for reliable training
+                        </p>
                       </div>
-                    )}
-                    {/* Energy bar */}
+                    </div>
+                  ) : (
+                    <div>
+                      <p className="text-xs text-gray-400 uppercase tracking-widest mb-1">Sample rate</p>
+                      <p className="text-sm font-bold text-gray-800 tabular-nums">
+                        {eventRates[0] ?? sr.measured_hz} Hz
+                      </p>
+                      <p className="text-xs text-gray-400 mt-0.5">computed from timestamps</p>
+                    </div>
+                  )}
+
+                  {/* Low-pass cutoff — hidden when rates are mixed (Nyquist differs per file) */}
+                  {!mixedRates && (
+                    <>
+                      <div className="w-full h-px bg-gray-200" />
+                      <div>
+                        <p className="text-xs text-gray-400 uppercase tracking-widest mb-1">Low-pass cutoff</p>
+                        <div className="flex items-baseline gap-1.5">
+                          <p className="text-sm font-bold text-gray-800 tabular-nums">
+                            {cf.recommended_hz} Hz
+                          </p>
+                          <span className="text-xs text-gray-400">rec.</span>
+                        </div>
+                        {/* Per-axis breakdown */}
+                        {Object.keys(cf.axis_cutoffs_hz).length > 0 && (
+                          <div className="mt-1.5 flex flex-wrap gap-x-2 gap-y-1">
+                            {Object.entries(cf.axis_cutoffs_hz).map(([axis, hz]) => (
+                              <span key={axis} className="text-xs tabular-nums" style={{ color: AXIS_COLORS[axis] ?? "#6b7280" }}>
+                                {AXIS_LABELS[axis] ?? axis} {hz}
+                              </span>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </>
+                  )}
+
+                  {/* Energy bar — only shown alongside cutoff when rates are consistent */}
+                  {!mixedRates && (
                     <div className="mt-1.5 flex items-center gap-1.5">
                       <div className="flex-1 h-1 bg-gray-200 rounded-full overflow-hidden">
                         <div
                           className="h-full rounded-full"
-                          style={{
-                            width: `${cf.energy_threshold_pct}%`,
-                            backgroundColor: "#1D9E75",
-                          }}
+                          style={{ width: `${cf.energy_threshold_pct}%`, backgroundColor: "#1D9E75" }}
                         />
                       </div>
                       <span className="text-xs text-gray-400 tabular-nums flex-shrink-0">
                         {cf.energy_threshold_pct}% energy
                       </span>
                     </div>
-                  </div>
+                  )}
 
                   <div className="w-full h-px bg-gray-200" />
 
