@@ -164,6 +164,65 @@ function parseCSVText(text) {
   return { ax, ay, az, rowCount: ax.length, durationMs: Math.round(durationMs), detectedLabel, sampleRateHz };
 }
 
+// ── Arduino Serial Monitor cleaner ───────────────────────────────────────────
+// Strips Arduino noise and returns a clean 4-column CSV string ready for
+// parseCSVText / the existing upload path.
+
+const _SERIAL_PREFIX_RE  = /^\d{2}:\d{2}:\d{2}\.\d+\s*->\s*/;  // "14:56:18.403 ->  "
+const _DATA_ROW_RE       = /^\d+,-?[\d.]+,-?[\d.]+,-?[\d.]+$/;  // timestamp_us,ax,ay,az
+const _NOISE_PREFIX_RE   = /^(ets |rst:|load:|clk_|mode:|phy_|Guru|E \(|Ready|===|#)/i;
+const _HEADER_RE         = /^timestamp/i;
+
+// unit: "us" | "ms" | "s"
+// hzOverride: number | null — if set, replace all delta timestamps with 1e6/hz µs
+function cleanSerialText(raw, unit = "us", hzOverride = null) {
+  const lines = raw.split(/\r?\n/);
+  const dataRows = [];
+
+  for (let line of lines) {
+    line = line.replace(_SERIAL_PREFIX_RE, "").trim();   // strip time prefix
+    if (!line) continue;
+    if (_NOISE_PREFIX_RE.test(line)) continue;           // boot / marker lines
+    if (_HEADER_RE.test(line)) continue;                 // optional CSV header
+    if (!_DATA_ROW_RE.test(line)) continue;              // keep only valid data rows
+    dataRows.push(line.split(",").map((v) => v.trim()));
+  }
+
+  if (dataRows.length < 2) {
+    throw new Error(
+      "No valid data rows found — expected format: timestamp,ax,ay,az"
+    );
+  }
+
+  // Multiplier to convert the user's timestamp unit → microseconds
+  const toUs = unit === "us" ? 1 : unit === "ms" ? 1_000 : 1_000_000;
+
+  // Parse timestamps in user's unit, convert to µs
+  const tsUs = dataRows.map(([ts]) => parseFloat(ts) * toUs);
+
+  // Re-zero: subtract first timestamp so series starts at 0
+  const t0 = tsUs[0];
+  const relUs = tsUs.map((t) => t - t0);
+
+  // Compute inter-sample delta timestamps in µs (what the backend expects)
+  const deltaUs = relUs.map((t, i) => i === 0 ? null : t - relUs[i - 1]);
+
+  // Compute median of the first 50 inter-sample deltas (robust to gaps)
+  const sample = deltaUs.slice(1, 51).filter((d) => d > 0);
+  const sorted = [...sample].sort((a, b) => a - b);
+  const medianDelta = sorted[Math.floor(sorted.length / 2)] ?? 10_000;
+
+  // First sample has no predecessor — use median as its interval
+  deltaUs[0] = medianDelta;
+
+  // If the user supplied a fixed sample rate, override every interval
+  const finalDeltas = (hzOverride && hzOverride > 0)
+    ? dataRows.map(() => Math.round(1_000_000 / hzOverride))
+    : deltaUs.map((d) => Math.max(100, Math.round(d)));
+
+  return dataRows.map(([, ax, ay, az], i) => `${finalDeltas[i]},${ax},${ay},${az}`).join("\n");
+}
+
 function detectClassFromFilename(filename, classes, fallbackClassId) {
   // Normalize: strip extension, lowercase, collapse all non-alphanumeric to spaces
   const norm = (s) => s.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
@@ -225,13 +284,53 @@ function SignalPlotRow({ data, color, label, height = 36 }) {
   );
 }
 
+// ── Label color palette (consistent per name) ─────────────────────────────────
+const _LABEL_PALETTE = [
+  "#1D9E75", "#3B82F6", "#F59E0B", "#EF4444",
+  "#8B5CF6", "#EC4899", "#14B8A6", "#F97316",
+];
+function _labelColor(name) {
+  let h = 0;
+  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) & 0xffffffff;
+  return _LABEL_PALETTE[Math.abs(h) % _LABEL_PALETTE.length];
+}
+
+// Greedy row-assignment for overlapping labels (sorted by start_ms).
+// Returns array of rows, each row is an array of label objects.
+function computeRows(items) {
+  const sorted = [...items].sort((a, b) => a.start_ms - b.start_ms);
+  const rows = [];
+  const rowEnds = [];
+  for (const item of sorted) {
+    const start = item.start_ms;
+    const end   = item.start_ms + item.duration_ms;
+    let placed  = false;
+    for (let r = 0; r < rows.length; r++) {
+      if (start >= rowEnds[r] + 1) {
+        rows[r].push(item);
+        rowEnds[r] = end;
+        placed = true;
+        break;
+      }
+    }
+    if (!placed) { rows.push([item]); rowEnds.push(end); }
+  }
+  return rows;
+}
+
 // ── File detail overlay ───────────────────────────────────────────────────────
 
-function FileDetailPanel({ ev, allEvents, onClose, onAskCopilot }) {
+function FileDetailPanel({ ev, allEvents, onClose, onAskCopilot, classes }) {
   const snap  = ev.snapshot ?? {};
   const axes  = ["ax", "ay", "az"].filter((k) => snap[k]?.length > 0);
   const stats = {};
   for (const axis of axes) stats[axis] = computeAxisStats(snap[axis]);
+
+  // Compute rate from this file's own sample count ÷ duration
+  const sampleCount = snap.ax?.length ?? 0;
+  const displayRate = sampleCount > 0 && ev.duration > 0
+    ? Math.round((sampleCount / (ev.duration / 1000)) * 10) / 10
+    : ev.sampleRateHz;
 
   // Quality flags
   const flags = [];
@@ -241,15 +340,15 @@ function FileDetailPanel({ ev, allEvents, onClose, onAskCopilot }) {
     if (s.std < 0.005)              flags.push(`${axis}: flatline (std = ${s.std.toFixed(5)})`);
     if (s.max > 15 || s.min < -15)  flags.push(`${axis}: possible clipping (range ${s.min.toFixed(2)} → ${s.max.toFixed(2)})`);
   }
-  const allRates    = [...new Set(allEvents.map((e) => e.sampleRateHz).filter(Boolean))];
-  const otherRates  = allRates.filter((r) => r !== ev.sampleRateHz);
+  const allRates   = [...new Set(allEvents.map((e) => e.sampleRateHz).filter(Boolean))];
+  const otherRates = allRates.filter((r) => r !== ev.sampleRateHz);
   if (ev.sampleRateHz && otherRates.length > 0) {
     flags.push(`Sample rate ${ev.sampleRateHz} Hz differs from other files (${otherRates.join(", ")} Hz)`);
   }
 
   const copilotMsg = [
     `Analyze signal "${ev.filename ?? "unknown"}"`,
-    ev.sampleRateHz ? `${ev.sampleRateHz} Hz` : null,
+    displayRate ? `${displayRate} Hz` : null,
     `${ev.duration} ms`,
     `${snap.ax?.length ?? 0} samples`,
     axes.map((a) => `${a}: mean=${stats[a]?.mean.toFixed(3)}, std=${stats[a]?.std.toFixed(3)}, min=${stats[a]?.min.toFixed(3)}, max=${stats[a]?.max.toFixed(3)}`).join("; "),
@@ -259,12 +358,310 @@ function FileDetailPanel({ ev, allEvents, onClose, onAskCopilot }) {
 
   const FMT = (v) => v?.toFixed(3) ?? "—";
 
+  // ── Span-label state ────────────────────────────────────────────────────────
+  const [labels,    setLabels]    = useState([]);
+  const [dragStart, setDragStart] = useState(null);  // ms
+  const [dragEnd,   setDragEnd]   = useState(null);  // ms
+  const [labelMenu, setLabelMenu] = useState(null);  // { id, clientX, clientY }
+  const [resizing,  setResizing]  = useState(null);  // { id, edge, origStart, origDur, anchorMs }
+  const sigContainerRef = useRef(null);
+
+  // ── Video / shared-timeline state ───────────────────────────────────────────
+  const [hasVideo,      setHasVideo]      = useState(ev.hasVideo ?? false);
+  const [videoUploading, setVideoUploading] = useState(false);
+  const [currentMs,     setCurrentMs]     = useState(0);
+  const [isPlaying,     setIsPlaying]     = useState(false);
+  const videoRef = useRef(null);
+
+  // ── Drag popup (replaces window.prompt for label creation) ───────────────────
+  const [dragPopup,     setDragPopup]     = useState(null);  // { s_ms, dur_ms, clientX, clientY }
+  const [dragPopupName, setDragPopupName] = useState("");
+  const dragPopupInputRef = useRef(null);
+
+  // ── VLM auto-label proposals ─────────────────────────────────────────────────
+  const [proposals,        setProposals]        = useState([]);   // [{label_name, start_ms, duration_ms, frame_count}]
+  const [proposalMenu,     setProposalMenu]     = useState(null); // { idx, clientX, clientY }
+  const [proposalsLoading, setProposalsLoading] = useState(false);
+  const [autoLabelError,   setAutoLabelError]   = useState(null);
+
+  // SVG viewBox width shared with SignalPlotRow
+  const VW = 400;
+  // Left inset = axis label span (14px) + gap (6px) = 20px
+  const AXIS_INSET = 20;
+
+  // Fetch existing labels when panel opens (if file has a dataset_id)
+  useEffect(() => {
+    if (!ev.datasetId) return;
+    fetch(`${API_BASE_URL}/datasets/${ev.datasetId}/labels`)
+      .then((r) => r.ok ? r.json() : [])
+      .then(setLabels)
+      .catch(() => {});
+  }, [ev.datasetId]);
+
+  // Convert client X → ms (using the signal container div's bounding rect)
+  function clientXToMs(clientX) {
+    const rect = sigContainerRef.current?.getBoundingClientRect();
+    if (!rect || ev.duration <= 0) return 0;
+    const plotLeft = rect.left + AXIS_INSET;
+    const plotW    = rect.width - AXIS_INSET;
+    return Math.max(0, Math.min(ev.duration, ((clientX - plotLeft) / plotW) * ev.duration));
+  }
+
+  // Convert ms → viewBox x (0-VW)
+  function msToVW(ms) {
+    return ev.duration > 0 ? (ms / ev.duration) * VW : 0;
+  }
+
+  // Seek video and update cursor to a given ms position
+  function seekTo(ms) {
+    setCurrentMs(ms);
+    if (videoRef.current) {
+      videoRef.current.currentTime = ms / 1000;
+    }
+  }
+
+  // ── Drag-to-create ──────────────────────────────────────────────────────────
+  function handleSigMouseDown(e) {
+    if (e.button !== 0) return;
+    setLabelMenu(null);
+    const ms = clientXToMs(e.clientX);
+    setDragStart(ms); setDragEnd(ms);
+    // Move cursor immediately on mousedown for responsive feel
+    setCurrentMs(ms);
+  }
+
+  function handlePanelMouseMove(e) {
+    if (dragStart !== null) setDragEnd(clientXToMs(e.clientX));
+    if (resizing) {
+      const curMs = clientXToMs(e.clientX);
+      const dms   = curMs - resizing.anchorMs;
+      setLabels((prev) => prev.map((l) => {
+        if (l.id !== resizing.id) return l;
+        if (resizing.edge === "left") {
+          const newStart = Math.max(0, resizing.origStart + dms);
+          const newDur   = resizing.origDur - (newStart - resizing.origStart);
+          return newDur >= 5 ? { ...l, start_ms: newStart, duration_ms: newDur } : l;
+        } else {
+          return { ...l, duration_ms: Math.max(5, resizing.origDur + dms) };
+        }
+      }));
+    }
+  }
+
+  async function handlePanelMouseUp(e) {
+    // Finish drag-to-create
+    if (dragStart !== null) {
+      const endMs  = clientXToMs(e.clientX);
+      const s_ms   = Math.min(dragStart, endMs);
+      const dur_ms = Math.abs(endMs - dragStart);
+      setDragStart(null); setDragEnd(null);
+      // Plain click (no drag) → seek video
+      if (dur_ms < 5) {
+        seekTo(endMs);
+        return;
+      }
+      if (dur_ms >= 5 && ev.datasetId) {
+        setDragPopup({ s_ms, dur_ms, clientX: e.clientX, clientY: e.clientY });
+        setDragPopupName("");
+        setTimeout(() => dragPopupInputRef.current?.focus(), 50);
+      }
+    }
+    // Finish resize
+    if (resizing) {
+      const lbl = labels.find((l) => l.id === resizing.id);
+      setResizing(null);
+      if (lbl) {
+        try {
+          const r = await fetch(`${API_BASE_URL}/labels/${lbl.id}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ start_ms: lbl.start_ms, duration_ms: lbl.duration_ms }),
+          });
+          if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
+          const updated = await r.json();
+          setLabels((prev) => prev.map((l) => l.id === lbl.id ? updated : l));
+        } catch (err) { alert("Resize failed: " + err.message); }
+      }
+    }
+  }
+
+  // ── Label context menu actions ──────────────────────────────────────────────
+  async function doRenameLabel(lbl) {
+    setLabelMenu(null);
+    const n = window.prompt("New label name:", lbl.label_name);
+    if (!n?.trim() || n.trim() === lbl.label_name) return;
+    try {
+      const r = await fetch(`${API_BASE_URL}/labels/${lbl.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ label_name: n.trim() }),
+      });
+      if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
+      const updated = await r.json();
+      setLabels((prev) => prev.map((l) => l.id === lbl.id ? updated : l));
+    } catch (err) { alert("Rename failed: " + err.message); }
+  }
+
+  async function doDeleteLabel(lbl) {
+    setLabelMenu(null);
+    if (!window.confirm(`Delete label "${lbl.label_name}"?`)) return;
+    try {
+      const r = await fetch(`${API_BASE_URL}/labels/${lbl.id}`, { method: "DELETE" });
+      if (!r.ok) throw new Error(r.statusText);
+      setLabels((prev) => prev.filter((l) => l.id !== lbl.id));
+    } catch (err) { alert("Delete failed: " + err.message); }
+  }
+
+  async function handleCreateLabel(name) {
+    if (!name?.trim() || !dragPopup || !ev.datasetId) return;
+    const { s_ms, dur_ms } = dragPopup;
+    setDragPopup(null);
+    try {
+      const r = await fetch(`${API_BASE_URL}/datasets/${ev.datasetId}/labels`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ label_name: name.trim(), start_ms: s_ms, duration_ms: dur_ms }),
+      });
+      if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
+      const created = await r.json();
+      setLabels((prev) => [...prev, created].sort((a, b) => a.start_ms - b.start_ms));
+    } catch (err) { alert("Failed to create label: " + err.message); }
+  }
+
+  function handleEdgeDown(e, lbl, edge) {
+    e.stopPropagation();
+    setLabelMenu(null);
+    setResizing({ id: lbl.id, edge, origStart: lbl.start_ms, origDur: lbl.duration_ms, anchorMs: clientXToMs(e.clientX) });
+  }
+
+  // ── Video upload ─────────────────────────────────────────────────────────────
+  async function handleVideoUpload(file) {
+    if (!ev.datasetId || !file) return;
+    setVideoUploading(true);
+    try {
+      const fd = new FormData();
+      fd.append("file", file);
+      const r = await fetch(`${API_BASE_URL}/datasets/${ev.datasetId}/video`, { method: "POST", body: fd });
+      if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
+      setHasVideo(true);
+      // Reload video element
+      if (videoRef.current) {
+        videoRef.current.load();
+        setCurrentMs(0);
+        setIsPlaying(false);
+      }
+    } catch (err) { alert("Video upload failed: " + err.message); }
+    finally { setVideoUploading(false); }
+  }
+
+  async function handleVideoRemove() {
+    if (!ev.datasetId || !window.confirm("Remove video from this file?")) return;
+    try {
+      await fetch(`${API_BASE_URL}/datasets/${ev.datasetId}/video`, { method: "DELETE" });
+      setHasVideo(false);
+      setCurrentMs(0);
+      setIsPlaying(false);
+    } catch (err) { alert("Failed to remove video: " + err.message); }
+  }
+
+  function togglePlayPause() {
+    const vid = videoRef.current;
+    if (!vid) return;
+    if (vid.paused) { vid.play(); setIsPlaying(true); }
+    else            { vid.pause(); setIsPlaying(false); }
+  }
+
+  // ── VLM auto-label ──────────────────────────────────────────────────────────
+  async function handleAutoLabel() {
+    if (!ev.datasetId || proposalsLoading) return;
+    setProposalsLoading(true);
+    setAutoLabelError(null);
+    setProposals([]);
+    try {
+      // Build class_descriptions map from classes that have a description set
+      const class_descriptions = {};
+      for (const cls of classes) {
+        if (cls.description?.trim()) {
+          class_descriptions[cls.name] = cls.description.trim();
+        }
+      }
+      const r = await fetch(`${API_BASE_URL}/datasets/${ev.datasetId}/auto-label`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          interval_s: 1.0,
+          min_span_ms: 0,
+          window_frames: 3,
+          class_descriptions,
+        }),
+      });
+      const data = await r.json();
+      if (!r.ok) throw new Error(data.detail || r.statusText);
+      setProposals(data.proposals ?? []);
+      if (data.proposals?.length === 0) setAutoLabelError("No spans proposed — VLM returned only 'unknown' for all frames.");
+    } catch (err) {
+      setAutoLabelError("Auto-label failed: " + err.message);
+    } finally {
+      setProposalsLoading(false);
+    }
+  }
+
+  async function acceptProposal(idx) {
+    const p = proposals[idx];
+    if (!p || !ev.datasetId) return;
+    try {
+      const r = await fetch(`${API_BASE_URL}/datasets/${ev.datasetId}/labels`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ label_name: p.label_name, start_ms: p.start_ms, duration_ms: p.duration_ms }),
+      });
+      if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
+      const created = await r.json();
+      setLabels((prev) => [...prev, created].sort((a, b) => a.start_ms - b.start_ms));
+      setProposals((prev) => prev.filter((_, i) => i !== idx));
+    } catch (err) { alert("Failed to accept proposal: " + err.message); }
+  }
+
+  async function acceptAllProposals() {
+    if (!ev.datasetId || proposals.length === 0) return;
+    const created = [];
+    for (const p of proposals) {
+      try {
+        const r = await fetch(`${API_BASE_URL}/datasets/${ev.datasetId}/labels`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ label_name: p.label_name, start_ms: p.start_ms, duration_ms: p.duration_ms }),
+        });
+        if (r.ok) created.push(await r.json());
+      } catch (_) {}
+    }
+    setLabels((prev) => [...prev, ...created].sort((a, b) => a.start_ms - b.start_ms));
+    setProposals([]);
+  }
+
+  function discardProposal(idx) {
+    setProposals((prev) => prev.filter((_, i) => i !== idx));
+  }
+
+  // Live selection rect bounds in VW coords
+  const selX   = dragStart !== null && dragEnd !== null ? msToVW(Math.min(dragStart, dragEnd)) : null;
+  const selW   = dragStart !== null && dragEnd !== null ? msToVW(Math.abs(dragEnd - dragStart)) : 0;
+  const isDrag = dragStart !== null;
+  // Shared cursor x in VW coords
+  const cursorX = msToVW(currentMs);
+
   return (
-    <div style={{
-      position: "absolute", inset: 0, background: "#ffffff", zIndex: 10,
-      display: "flex", flexDirection: "column", overflow: "hidden",
-      border: "1px solid #ebeae5", borderRadius: 8,
-    }}>
+    <div
+      style={{
+        position: "absolute", inset: 0, background: "#ffffff", zIndex: 10,
+        display: "flex", flexDirection: "column", overflow: "hidden",
+        border: "1px solid #ebeae5", borderRadius: 8,
+      }}
+      onMouseMove={handlePanelMouseMove}
+      onMouseUp={handlePanelMouseUp}
+      onMouseLeave={handlePanelMouseUp}
+      onClick={() => { setLabelMenu(null); setProposalMenu(null); setDragPopup(null); }}
+    >
       {/* Header */}
       <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 12px", borderBottom: "1px solid #ebeae5", flexShrink: 0 }}>
         <button
@@ -277,7 +674,7 @@ function FileDetailPanel({ ev, allEvents, onClose, onAskCopilot }) {
             {ev.filename ?? "Signal"}
           </p>
           <p style={{ fontFamily: "'DM Mono', monospace", fontSize: 9, color: "#b0afa8", marginTop: 1 }}>
-            {[ev.sampleRateHz ? `${ev.sampleRateHz} Hz` : null, `${ev.duration} ms`, snap.ax?.length ? `${snap.ax.length} samples` : null].filter(Boolean).join(" · ")}
+            {[displayRate ? `${displayRate} Hz` : null, `${ev.duration} ms`, snap.ax?.length ? `${snap.ax.length} samples` : null].filter(Boolean).join(" · ")}
           </p>
         </div>
         <span style={{
@@ -290,9 +687,117 @@ function FileDetailPanel({ ev, allEvents, onClose, onAskCopilot }) {
       </div>
 
       <div style={{ flex: 1, overflowY: "auto", padding: "12px 14px" }}>
-        {/* Signal plots */}
-        <p style={{ fontFamily: "'DM Mono', monospace", fontSize: 9, color: "#b0afa8", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 }}>Signal</p>
-        <div style={{ marginBottom: 14 }}>
+
+        {/* ── Video lane ────────────────────────────────────────────────────── */}
+        {ev.datasetId && (
+          <div style={{ marginBottom: 12 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
+              <p style={{ fontFamily: "'DM Mono', monospace", fontSize: 9, color: "#b0afa8", textTransform: "uppercase", letterSpacing: "0.08em" }}>Video</p>
+              {hasVideo && (
+                <>
+                  <button
+                    onClick={handleAutoLabel}
+                    disabled={proposalsLoading}
+                    style={{
+                      display: "flex", alignItems: "center", gap: 4,
+                      background: "none", border: "1px solid #8B5CF6", borderRadius: 4,
+                      cursor: proposalsLoading ? "wait" : "pointer", fontSize: 9,
+                      color: "#8B5CF6", padding: "2px 7px", fontFamily: "'DM Mono', monospace",
+                      opacity: proposalsLoading ? 0.6 : 1,
+                    }}
+                    title="Run VLM frame-classification to propose label spans"
+                  >
+                    {proposalsLoading ? "Analyzing…" : "Auto-label"}
+                    <span style={{ fontSize: 7, fontWeight: 700, background: "#8B5CF620", padding: "1px 4px", borderRadius: 3 }}>BETA</span>
+                  </button>
+                  <button
+                    onClick={handleVideoRemove}
+                    style={{ background: "none", border: "none", cursor: "pointer", fontSize: 9, color: "#b0afa8", padding: 0, fontFamily: "'DM Mono', monospace", marginLeft: "auto" }}
+                    title="Remove video"
+                  >remove</button>
+                </>
+              )}
+            </div>
+
+            {hasVideo ? (
+              <div style={{ position: "relative" }}>
+                <video
+                  ref={videoRef}
+                  src={`${API_BASE_URL}/datasets/${ev.datasetId}/video`}
+                  style={{ width: "100%", borderRadius: 6, background: "#0a0a0a", display: "block", maxHeight: 220, objectFit: "contain" }}
+                  onTimeUpdate={() => {
+                    if (videoRef.current) setCurrentMs(videoRef.current.currentTime * 1000);
+                  }}
+                  onPlay={() => setIsPlaying(true)}
+                  onPause={() => setIsPlaying(false)}
+                  onEnded={() => setIsPlaying(false)}
+                  preload="metadata"
+                />
+                {/* Play/pause overlay */}
+                <button
+                  onClick={togglePlayPause}
+                  style={{
+                    position: "absolute", bottom: 6, left: 6,
+                    background: "rgba(0,0,0,0.55)", border: "none", borderRadius: 4,
+                    color: "#fff", cursor: "pointer", padding: "3px 8px", fontSize: 10,
+                    fontFamily: "'DM Mono', monospace", backdropFilter: "blur(4px)",
+                  }}
+                >
+                  {isPlaying ? "⏸" : "▶"}
+                </button>
+                {/* Current time readout */}
+                <span style={{
+                  position: "absolute", bottom: 6, right: 6,
+                  background: "rgba(0,0,0,0.55)", color: "#fff", fontSize: 9,
+                  fontFamily: "'DM Mono', monospace", padding: "3px 6px", borderRadius: 4,
+                  backdropFilter: "blur(4px)",
+                }}>
+                  {(currentMs / 1000).toFixed(2)}s / {(ev.duration / 1000).toFixed(2)}s
+                </span>
+              </div>
+            ) : (
+              <label style={{
+                display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+                gap: 5, padding: "12px 0", border: "1px dashed #d8d7d0", borderRadius: 6,
+                cursor: videoUploading ? "wait" : "pointer", color: "#b0afa8", background: "#fafaf8",
+              }}>
+                <input
+                  type="file"
+                  accept="video/*"
+                  style={{ display: "none" }}
+                  disabled={videoUploading}
+                  onChange={(e) => { const f = e.target.files?.[0]; if (f) handleVideoUpload(f); e.target.value = ""; }}
+                />
+                <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.3" style={{ width: 20, height: 20, opacity: 0.5 }}>
+                  <rect x="2" y="5" width="16" height="12" rx="2" /><path d="M7 2l3 3 3-3" />
+                </svg>
+                <span style={{ fontSize: 10, fontFamily: "'DM Mono', monospace" }}>
+                  {videoUploading ? "Uploading…" : "Upload video"}
+                </span>
+                <span style={{ fontSize: 9, fontFamily: "'DM Mono', monospace", color: "#c0bfb8", textAlign: "center", lineHeight: 1.4 }}>
+                  Crop your video to the same start/end as this recording so video time = signal time
+                </span>
+              </label>
+            )}
+          </div>
+        )}
+
+        {/* Signal plots — drag here to create span labels */}
+        <p style={{ fontFamily: "'DM Mono', monospace", fontSize: 9, color: "#b0afa8", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 }}>
+          Signal
+          {ev.datasetId && (
+            <span style={{ marginLeft: 8, textTransform: "none", letterSpacing: 0, color: isDrag && dragStart !== null && dragEnd !== null && Math.abs(dragEnd - dragStart) > 5 ? "#3B82F6" : "#c0bfb8" }}>
+              {isDrag && dragStart !== null && dragEnd !== null && Math.abs(dragEnd - dragStart) > 5
+                ? `${(Math.min(dragStart, dragEnd) / 1000).toFixed(2)}s → ${(Math.max(dragStart, dragEnd) / 1000).toFixed(2)}s  (${(Math.abs(dragEnd - dragStart) / 1000).toFixed(2)}s)`
+                : "— drag to label a span · click to seek"}
+            </span>
+          )}
+        </p>
+        <div
+          ref={sigContainerRef}
+          style={{ marginBottom: 6, cursor: isDrag ? "col-resize" : ev.datasetId ? "crosshair" : "default", userSelect: "none" }}
+          onMouseDown={ev.datasetId ? handleSigMouseDown : undefined}
+        >
           {axes.map((axis) => (
             <SignalPlotRow
               key={axis}
@@ -302,7 +807,212 @@ function FileDetailPanel({ ev, allEvents, onClose, onAskCopilot }) {
               height={36}
             />
           ))}
+
+          {/* Overlays: selection highlight + cursor line */}
+          {((selX !== null && selW > 2) || ev.datasetId) && (() => {
+            const overlayH = 36 * axes.length + 3 * Math.max(0, axes.length - 1);
+            return (
+              <div style={{ display: "flex", alignItems: "center", gap: 6, position: "relative", height: 0, top: -overlayH - 2 }}>
+                <span style={{ width: 14, flexShrink: 0 }} />
+                <svg
+                  viewBox={`0 0 ${VW} ${overlayH}`}
+                  style={{ flex: 1, height: overlayH, display: "block", pointerEvents: "none" }}
+                  preserveAspectRatio="none"
+                >
+                  {selX !== null && selW > 2 && (
+                    <rect x={selX} y={0} width={selW} height="100%" fill="rgba(59,130,246,0.12)" stroke="#3B82F6" strokeWidth={1} vectorEffect="non-scaling-stroke" />
+                  )}
+                  {ev.datasetId && (
+                    <line x1={cursorX} y1={0} x2={cursorX} y2={overlayH} stroke="#ef4444" strokeWidth={1} vectorEffect="non-scaling-stroke" />
+                  )}
+                </svg>
+              </div>
+            );
+          })()}
         </div>
+
+        {/* ── Label track — HTML chips with row-stacking ──────────────────────── */}
+        {ev.datasetId && ev.duration > 0 && (() => {
+          const labelRows = computeRows(labels);
+          const ROW_H = 26;
+          const GAP   = 3;
+          return (
+            <div style={{ marginBottom: 14 }}>
+              {/* Header row */}
+              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                <p style={{ fontFamily: "'DM Mono', monospace", fontSize: 9, color: "#b0afa8", textTransform: "uppercase", letterSpacing: "0.08em" }}>Labels</p>
+                {proposals.length > 0 && (
+                  <>
+                    <span style={{ fontSize: 9, color: "#8B5CF6", fontFamily: "'DM Mono', monospace" }}>
+                      {proposals.length} proposed
+                    </span>
+                    <button
+                      onClick={acceptAllProposals}
+                      style={{ background: "none", cursor: "pointer", fontSize: 9, color: "#1D9E75", padding: "1px 6px", fontFamily: "'DM Mono', monospace", borderRadius: 3, border: "1px solid #1D9E7540" }}
+                    >✓ accept all</button>
+                    <button
+                      onClick={() => setProposals([])}
+                      style={{ background: "none", border: "1px solid #ebeae5", cursor: "pointer", fontSize: 9, color: "#b0afa8", padding: "1px 6px", fontFamily: "'DM Mono', monospace", borderRadius: 3 }}
+                    >✕ discard all</button>
+                  </>
+                )}
+              </div>
+
+              {/* Auto-label error */}
+              {autoLabelError && (
+                <div style={{ fontSize: 9, color: "#dc2626", fontFamily: "'DM Mono', monospace", marginBottom: 6, padding: "4px 8px", background: "#fef2f2", borderRadius: 4, border: "1px solid #fecaca" }}>
+                  {autoLabelError}
+                </div>
+              )}
+
+              {/* Track container — same 14px+6px inset as signal rows */}
+              <div style={{ display: "flex", alignItems: "flex-start", gap: 6 }}>
+                <span style={{ width: 14, flexShrink: 0 }} />
+                <div style={{ flex: 1, position: "relative", minHeight: ROW_H, background: "#f8f7f3", border: "1px solid #ebeae5", borderRadius: 4, overflow: "hidden" }}>
+
+                  {/* ── Accepted label rows ─────────────────────────────────── */}
+                  {labelRows.map((row, rowIdx) => (
+                    <div key={rowIdx} style={{ position: "relative", height: ROW_H, marginBottom: rowIdx < labelRows.length - 1 ? GAP : 0 }}>
+                      {row.map((lbl) => {
+                        const color  = _labelColor(lbl.label_name);
+                        const leftPct = (lbl.start_ms / ev.duration) * 100;
+                        const widPct  = Math.max(0.2, (lbl.duration_ms / ev.duration) * 100);
+                        const isResizingThis = resizing?.id === lbl.id;
+                        return (
+                          <div
+                            key={lbl.id}
+                            title={`${lbl.label_name}  ·  ${(lbl.start_ms / 1000).toFixed(2)}s – ${((lbl.start_ms + lbl.duration_ms) / 1000).toFixed(2)}s  (${(lbl.duration_ms / 1000).toFixed(2)}s)`}
+                            style={{
+                              position: "absolute",
+                              left: `${leftPct}%`, width: `${widPct}%`,
+                              top: 2, height: ROW_H - 4,
+                              background: color + "22",
+                              borderLeft: `3px solid ${color}`,
+                              borderRadius: 3,
+                              display: "flex", alignItems: "center",
+                              cursor: "pointer",
+                              boxShadow: isResizingThis ? `0 0 0 1.5px ${color}` : "none",
+                              zIndex: isResizingThis ? 2 : 1,
+                            }}
+                            onClick={(e) => { e.stopPropagation(); setLabelMenu({ id: lbl.id, clientX: e.clientX, clientY: e.clientY }); }}
+                          >
+                            {/* Left resize grip */}
+                            <div
+                              style={{ position: "absolute", left: 0, top: 0, width: 8, height: "100%", cursor: "ew-resize", zIndex: 3, display: "flex", alignItems: "center", justifyContent: "center" }}
+                              onMouseDown={(e) => handleEdgeDown(e, lbl, "left")}
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <div style={{ width: 2, height: 10, background: color + "80", borderRadius: 1 }} />
+                            </div>
+                            {/* Label text */}
+                            <span style={{
+                              fontSize: 10, fontFamily: "'DM Mono', monospace",
+                              color, fontWeight: 600,
+                              paddingLeft: 10, paddingRight: 10,
+                              overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                              flex: 1, minWidth: 0, userSelect: "none",
+                            }}>
+                              {lbl.label_name}
+                            </span>
+                            {/* Right resize grip */}
+                            <div
+                              style={{ position: "absolute", right: 0, top: 0, width: 8, height: "100%", cursor: "ew-resize", zIndex: 3, display: "flex", alignItems: "center", justifyContent: "center" }}
+                              onMouseDown={(e) => handleEdgeDown(e, lbl, "right")}
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              <div style={{ width: 2, height: 10, background: color + "80", borderRadius: 1 }} />
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  ))}
+
+                  {/* ── Proposal row ────────────────────────────────────────── */}
+                  {proposals.length > 0 && (
+                    <div style={{ position: "relative", height: ROW_H, marginTop: labelRows.length > 0 ? GAP + 1 : 0, borderTop: labelRows.length > 0 ? "1px dashed #ebeae5" : "none" }}>
+                      {proposals.map((p, idx) => {
+                        const leftPct = (p.start_ms / ev.duration) * 100;
+                        const widPct  = Math.max(0.2, (p.duration_ms / ev.duration) * 100);
+                        const wideEnough = widPct * (sigContainerRef.current?.clientWidth ?? 200) / 100 > 48;
+                        return (
+                          <div
+                            key={idx}
+                            title={`VLM proposal: ${p.label_name}  ·  ${(p.start_ms / 1000).toFixed(2)}s – ${((p.start_ms + p.duration_ms) / 1000).toFixed(2)}s  (${p.frame_count} frames)`}
+                            style={{
+                              position: "absolute",
+                              left: `${leftPct}%`, width: `${widPct}%`,
+                              top: 2, height: ROW_H - 4,
+                              background: "#faf8ff",
+                              border: "1.5px dashed #8B5CF6",
+                              borderRadius: 3,
+                              display: "flex", alignItems: "center",
+                              cursor: "pointer",
+                              overflow: "hidden",
+                            }}
+                            onClick={(e) => { e.stopPropagation(); setProposalMenu({ idx, clientX: e.clientX, clientY: e.clientY }); }}
+                          >
+                            <span style={{
+                              fontSize: 9, fontFamily: "'DM Mono', monospace",
+                              color: "#8B5CF6", fontWeight: 600,
+                              paddingLeft: 5, paddingRight: wideEnough ? 36 : 5,
+                              overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                              flex: 1, minWidth: 0, userSelect: "none",
+                            }}>
+                              {p.label_name}
+                            </span>
+                            {wideEnough && (
+                              <div style={{ position: "absolute", right: 2, top: 0, bottom: 0, display: "flex", alignItems: "center", gap: 1 }}>
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); acceptProposal(idx); }}
+                                  style={{ background: "#1D9E7515", border: "none", borderRadius: 2, cursor: "pointer", color: "#1D9E75", fontSize: 9, fontWeight: 700, padding: "1px 4px", lineHeight: 1 }}
+                                  title="Accept"
+                                >✓</button>
+                                <button
+                                  onClick={(e) => { e.stopPropagation(); discardProposal(idx); }}
+                                  style={{ background: "#ef444415", border: "none", borderRadius: 2, cursor: "pointer", color: "#ef4444", fontSize: 9, fontWeight: 700, padding: "1px 4px", lineHeight: 1 }}
+                                  title="Discard"
+                                >✕</button>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+
+                  {/* Empty state */}
+                  {labels.length === 0 && proposals.length === 0 && (
+                    <div style={{ height: ROW_H, display: "flex", alignItems: "center", paddingLeft: 10 }}>
+                      <span style={{ fontSize: 9, color: "#c0bfb8", fontFamily: "'DM Mono', monospace" }}>Drag on signal above to label a span</span>
+                    </div>
+                  )}
+
+                  {/* Drag selection overlay */}
+                  {selX !== null && selW > 2 && (
+                    <div style={{
+                      position: "absolute", pointerEvents: "none", zIndex: 4,
+                      left: `${(selX / VW) * 100}%`,
+                      width: `${(selW / VW) * 100}%`,
+                      top: 0, bottom: 0,
+                      background: "rgba(59,130,246,0.08)",
+                      borderLeft: "1.5px solid #3B82F6",
+                      borderRight: "1.5px solid #3B82F6",
+                    }} />
+                  )}
+
+                  {/* Shared playback cursor */}
+                  <div style={{
+                    position: "absolute", pointerEvents: "none", zIndex: 5,
+                    left: `${(currentMs / ev.duration) * 100}%`,
+                    top: 0, bottom: 0, width: 1,
+                    background: "#ef4444",
+                  }} />
+                </div>
+              </div>
+            </div>
+          );
+        })()}
 
         {/* Per-axis stats */}
         <p style={{ fontFamily: "'DM Mono', monospace", fontSize: 9, color: "#b0afa8", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 }}>Per-axis stats</p>
@@ -360,9 +1070,137 @@ function FileDetailPanel({ ev, allEvents, onClose, onAskCopilot }) {
               <circle cx="8" cy="8" r="6.5" /><path d="M8 5.5v3M8 10.5h.01" />
             </svg>
             Ask Copilot about this signal
+            <span className="text-[9px] font-semibold uppercase tracking-widest text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded">Beta</span>
           </button>
         )}
       </div>
+
+      {/* ── Drag label creation popup ─────────────────────────────────────── */}
+      {dragPopup && (
+        <div
+          style={{
+            position: "fixed", zIndex: 200,
+            left: Math.max(8, Math.min(dragPopup.clientX - 104, (typeof window !== "undefined" ? window.innerWidth : 800) - 224)),
+            top:  Math.max(8, dragPopup.clientY - 110),
+            background: "#ffffff", border: "1px solid #ebeae5", borderRadius: 10,
+            boxShadow: "0 8px 28px rgba(0,0,0,0.13)", padding: "12px 14px", width: 208,
+          }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <p style={{ fontFamily: "'DM Mono', monospace", fontSize: 9, color: "#b0afa8", marginBottom: 8, lineHeight: 1.4 }}>
+            {(dragPopup.s_ms / 1000).toFixed(2)}s → {((dragPopup.s_ms + dragPopup.dur_ms) / 1000).toFixed(2)}s
+            <span style={{ marginLeft: 6, color: "#c0bfb8" }}>({(dragPopup.dur_ms / 1000).toFixed(2)}s)</span>
+          </p>
+          <input
+            ref={dragPopupInputRef}
+            list="dp-label-list"
+            value={dragPopupName}
+            onChange={(e) => setDragPopupName(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter")  handleCreateLabel(dragPopupName);
+              if (e.key === "Escape") setDragPopup(null);
+            }}
+            placeholder="Label name…"
+            style={{
+              width: "100%", fontFamily: "'DM Mono', monospace", fontSize: 11,
+              border: "1.5px solid #ebeae5", borderRadius: 6, padding: "6px 8px",
+              outline: "none", boxSizing: "border-box", marginBottom: 10, display: "block",
+              background: "#fafaf8",
+            }}
+            onFocus={(e) => { e.target.style.borderColor = "#0a0a0a"; }}
+            onBlur={(e)  => { e.target.style.borderColor = "#ebeae5"; }}
+            autoFocus
+          />
+          <datalist id="dp-label-list">
+            {[...new Set(labels.map((l) => l.label_name))].map((n) => (
+              <option key={n} value={n} />
+            ))}
+          </datalist>
+          <div style={{ display: "flex", gap: 6 }}>
+            <button
+              onClick={() => handleCreateLabel(dragPopupName)}
+              disabled={!dragPopupName.trim()}
+              style={{
+                flex: 1, background: "#0a0a0a", color: "#ffffff", border: "none",
+                borderRadius: 6, padding: "6px 0", fontSize: 11,
+                fontFamily: "'Syne', sans-serif", fontWeight: 600,
+                cursor: dragPopupName.trim() ? "pointer" : "not-allowed",
+                opacity: dragPopupName.trim() ? 1 : 0.35,
+              }}
+            >Create</button>
+            <button
+              onClick={() => setDragPopup(null)}
+              style={{
+                flex: 1, background: "none", color: "#b0afa8",
+                border: "1px solid #ebeae5", borderRadius: 6, padding: "6px 0", fontSize: 11,
+                fontFamily: "'Syne', sans-serif", cursor: "pointer",
+              }}
+            >Cancel</button>
+          </div>
+        </div>
+      )}
+
+      {/* Label context menu */}
+      {labelMenu && (() => {
+        const lbl = labels.find((l) => l.id === labelMenu.id);
+        if (!lbl) return null;
+        return (
+          <div
+            style={{
+              position: "fixed", zIndex: 100, left: labelMenu.clientX, top: labelMenu.clientY,
+              background: "#ffffff", border: "1px solid #ebeae5", borderRadius: 8,
+              boxShadow: "0 4px 16px rgba(0,0,0,0.10)", padding: "4px 0", minWidth: 148,
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ padding: "4px 12px 6px", fontSize: 10, color: "#b0afa8", fontFamily: "'DM Mono', monospace", borderBottom: "1px solid #f0efe9" }}>
+              {lbl.label_name} · {lbl.duration_ms.toFixed(0)} ms
+            </div>
+            <button onClick={() => doRenameLabel(lbl)}
+              style={{ display: "block", width: "100%", textAlign: "left", padding: "7px 12px", background: "none", border: "none", cursor: "pointer", fontSize: 12, color: "#0a0a0a", fontFamily: "'DM Sans', sans-serif" }}>
+              Rename
+            </button>
+            <button onClick={() => doDeleteLabel(lbl)}
+              style={{ display: "block", width: "100%", textAlign: "left", padding: "7px 12px", background: "none", border: "none", cursor: "pointer", fontSize: 12, color: "#dc2626", fontFamily: "'DM Sans', sans-serif" }}>
+              Delete
+            </button>
+          </div>
+        );
+      })()}
+
+      {/* Proposal context menu */}
+      {proposalMenu && (() => {
+        const p = proposals[proposalMenu.idx];
+        if (!p) return null;
+        return (
+          <div
+            style={{
+              position: "fixed", zIndex: 100, left: proposalMenu.clientX, top: proposalMenu.clientY,
+              background: "#ffffff", border: "1px solid #8B5CF640", borderRadius: 8,
+              boxShadow: "0 4px 16px rgba(139,92,246,0.12)", padding: "4px 0", minWidth: 170,
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ padding: "4px 12px 6px", fontSize: 10, color: "#8B5CF6", fontFamily: "'DM Mono', monospace", borderBottom: "1px solid #f0efe9", display: "flex", alignItems: "center", gap: 5 }}>
+              <span>VLM proposal</span>
+              <span style={{ fontSize: 7, background: "#8B5CF615", padding: "1px 4px", borderRadius: 3, fontWeight: 700 }}>BETA</span>
+            </div>
+            <div style={{ padding: "4px 12px 4px", fontSize: 9, color: "#b0afa8", fontFamily: "'DM Mono', monospace" }}>
+              "{p.label_name}" · {p.duration_ms.toFixed(0)} ms · {p.frame_count} frame{p.frame_count !== 1 ? "s" : ""}
+            </div>
+            <button
+              onClick={() => { setProposalMenu(null); acceptProposal(proposalMenu.idx); }}
+              style={{ display: "block", width: "100%", textAlign: "left", padding: "7px 12px", background: "none", border: "none", cursor: "pointer", fontSize: 12, color: "#1D9E75", fontFamily: "'DM Sans', sans-serif" }}>
+              ✓ Accept
+            </button>
+            <button
+              onClick={() => { setProposalMenu(null); discardProposal(proposalMenu.idx); }}
+              style={{ display: "block", width: "100%", textAlign: "left", padding: "7px 12px", background: "none", border: "none", cursor: "pointer", fontSize: 12, color: "#dc2626", fontFamily: "'DM Sans', sans-serif" }}>
+              ✕ Discard
+            </button>
+          </div>
+        );
+      })()}
     </div>
   );
 }
@@ -420,6 +1258,14 @@ function FileUploadMode({
   const [dragOver,       setDragOver]       = useState(false);
   const [selectedEventId, setSelectedEventId] = useState(null);
   const inputRef = useRef(null);
+
+  // ── Paste mode ───────────────────────────────────────────────────────────────
+  const [inputMode,      setInputMode]      = useState("file");  // "file" | "paste"
+  const [pasteText,      setPasteText]      = useState("");
+  const [pasteClassId,   setPasteClassId]   = useState(activeClassId ?? classes[0]?.id ?? null);
+  const [pasteUnit,      setPasteUnit]      = useState("us");   // "us" | "ms" | "s"
+  const [pasteHz,        setPasteHz]        = useState("");     // optional Hz override (string)
+  const [pasteError,     setPasteError]     = useState(null);
 
   // Read a CSV file and update its entry in state
   function readCsvEntry(file, targetFile = null) {
@@ -553,6 +1399,7 @@ function FileUploadMode({
         return {
           id:            ev.id,
           datasetId:     ev.dataset_id ?? null,
+          hasVideo:      ev.has_video  ?? false,
           classId:       matchedCls?.id    ?? null,
           className:     matchedCls?.name  ?? "Unassigned",
           classColor:    matchedCls?.color ?? "#b0afa8",
@@ -583,6 +1430,57 @@ function FileUploadMode({
     }
   }
 
+  // ── Paste submit — clean serial text → File → existing upload pipeline ──────
+  function handlePasteSubmit() {
+    setPasteError(null);
+    const raw = pasteText.trim();
+    if (!raw) { setPasteError("Paste some data first."); return; }
+    const hzOverride = pasteHz.trim() ? parseFloat(pasteHz) : null;
+    if (hzOverride !== null && (isNaN(hzOverride) || hzOverride <= 0)) {
+      setPasteError("Sample rate override must be a positive number (e.g. 100).");
+      return;
+    }
+    let cleanedCsv;
+    try {
+      cleanedCsv = cleanSerialText(raw, pasteUnit, hzOverride);
+    } catch (err) {
+      setPasteError(err.message);
+      return;
+    }
+    // Wrap as a File so it flows through the identical file-upload pipeline
+    const blob = new Blob([cleanedCsv], { type: "text/plain" });
+    const file = new File([blob], "pasted-data.csv", { type: "text/plain" });
+    const entry = {
+      file, name: "pasted-data.csv",
+      parsed: null,
+      classId:  pasteClassId ?? classes[0]?.id ?? null,
+      detected: true,
+      error: null, note: null, reading: true,
+    };
+    setFileEntries((prev) => [...prev, entry]);
+    // Trigger CSV read (same as file upload)
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const result = parseCSVText(e.target.result);
+      setFileEntries((prev) => {
+        const idx = prev.findIndex((p) => p.file === file);
+        if (idx < 0) return prev;
+        const updated = [...prev];
+        updated[idx] = {
+          ...updated[idx],
+          parsed:  result && !result.error ? result : null,
+          error:   result?.error ? "Could not parse — expected timestamp_us,ax,ay,az" : (!result ? "Parse failed" : null),
+          reading: false,
+        };
+        return updated;
+      });
+    };
+    reader.readAsText(file);
+    // Switch back to file view so the card appears and user can submit
+    setPasteText("");
+    setInputMode("file");
+  }
+
   // Derive the selected event object for the detail panel
   const selectedEvent = selectedEventId ? events.find((e) => e.id === selectedEventId) : null;
 
@@ -596,65 +1494,159 @@ function FileUploadMode({
           allEvents={events}
           onClose={() => setSelectedEventId(null)}
           onAskCopilot={onAskCopilot}
+          classes={classes}
         />
       )}
 
-      {/* ── Drop zone ──────────────────────────────────────────────────────── */}
-      <div
-        onDrop={handleDrop}
-        onDragOver={handleDragOver}
-        onDragLeave={handleDragLeave}
-        onClick={() => !fileEntries.length && inputRef.current?.click()}
-        className={`
-          flex-shrink-0 flex flex-col items-center justify-center gap-3
-          rounded-lg border-2 border-dashed cursor-pointer transition-all
-          ${dragOver
-            ? "border-accent bg-accent/5"
-            : "border-gray-600 bg-gray-900 hover:border-gray-500"
-          }
-        `}
-        style={{ minHeight: "140px" }}
-      >
-        <input
-          ref={inputRef}
-          type="file"
-          accept=".csv,.txt"
-          multiple
-          className="hidden"
-          onChange={(e) => { if (e.target.files?.length) addFiles(e.target.files); e.target.value = ""; }}
-        />
-        <svg className={`w-8 h-8 ${dragOver ? "text-accent" : "text-gray-600"}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
-          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.3}
-            d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
-        </svg>
-        <div className="text-center">
-          <p className={`text-sm font-semibold ${dragOver ? "text-accent" : "text-gray-400"}`}>
-            {dragOver ? "Drop to upload" : "Drop CSV files here"}
-          </p>
-          <p className="text-xs text-gray-600 mt-0.5">
-            Upload CSV files for each class using the buttons in the Classes panel →
-          </p>
-          <p className="text-xs text-gray-700 mt-0.5">
-            Format: <code className="text-accent">timestamp_us,ax,ay,az</code> (no header)
-          </p>
-        </div>
-        <div className="flex items-center gap-3">
+      {/* ── Input mode tabs ────────────────────────────────────────────────── */}
+      <div className="flex-shrink-0 flex gap-0 border-b border-gray-700">
+        {[["file", "Upload file"], ["paste", "Paste data"]].map(([mode, label]) => (
           <button
-            onClick={(e) => { e.stopPropagation(); inputRef.current?.click(); }}
-            className="text-xs text-gray-500 hover:text-gray-300 border border-gray-700 hover:border-gray-500 rounded px-3 py-1 transition-colors"
-          >
-            Browse files
-          </button>
-          <a
-            href="/sample-data.zip"
-            download
-            onClick={(e) => e.stopPropagation()}
-            className="text-xs text-accent hover:text-accent-dark transition-colors"
-          >
-            Download sample data →
-          </a>
-        </div>
+            key={mode}
+            onClick={() => { setInputMode(mode); setPasteError(null); }}
+            className={`text-xs px-3 py-1.5 font-medium transition-colors border-b-2 -mb-px ${
+              inputMode === mode
+                ? "border-accent text-accent"
+                : "border-transparent text-gray-500 hover:text-gray-300"
+            }`}
+          >{label}</button>
+        ))}
       </div>
+
+      {inputMode === "paste" ? (
+        /* ── Paste data panel ──────────────────────────────────────────────── */
+        <div className="flex-shrink-0 flex flex-col gap-3">
+          <textarea
+            value={pasteText}
+            onChange={(e) => { setPasteText(e.target.value); setPasteError(null); }}
+            placeholder={`Paste raw Serial Monitor output here, e.g.\n14:56:18.403 ->  0,0.12,-0.04,9.81\n14:56:18.413 ->  10000,0.13,-0.04,9.80\n…\nArduino prefixes and boot messages are stripped automatically.`}
+            className="w-full text-xs font-mono text-gray-300 bg-gray-900 border border-gray-700 rounded-lg p-3 resize-y focus:outline-none focus:border-accent placeholder-gray-600"
+            style={{ minHeight: 130, maxHeight: 300 }}
+            spellCheck={false}
+          />
+
+          {/* Unit + Hz row */}
+          <div className="flex items-center gap-3 flex-wrap">
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-gray-500 flex-shrink-0">Timestamp unit:</span>
+              <select
+                value={pasteUnit}
+                onChange={(e) => setPasteUnit(e.target.value)}
+                className="text-xs border border-gray-700 rounded px-2 py-1 text-gray-300 bg-gray-900 focus:outline-none focus:border-accent"
+              >
+                <option value="us">Microseconds (µs) — Arduino/ESP32</option>
+                <option value="ms">Milliseconds (ms)</option>
+                <option value="s">Seconds (s)</option>
+              </select>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-gray-500 flex-shrink-0">Rate Hz:</span>
+              <input
+                type="number"
+                min="1"
+                placeholder="auto"
+                value={pasteHz}
+                onChange={(e) => { setPasteHz(e.target.value); setPasteError(null); }}
+                className="text-xs border border-gray-700 rounded px-2 py-1 text-gray-300 bg-gray-900 focus:outline-none focus:border-accent w-20 placeholder-gray-600"
+                title="Optional: override computed sample rate (Hz)"
+              />
+            </div>
+          </div>
+
+          {/* Class + submit row */}
+          <div className="flex items-center gap-3">
+            <div className="flex items-center gap-2 flex-1 min-w-0">
+              <span className="text-xs text-gray-500 flex-shrink-0">Class:</span>
+              <select
+                value={pasteClassId ?? ""}
+                onChange={(e) => setPasteClassId(e.target.value)}
+                className="text-xs border border-gray-700 rounded px-2 py-1 text-gray-300 bg-gray-900 focus:outline-none focus:border-accent flex-1 min-w-0"
+              >
+                {classes.map((c) => (
+                  <option key={c.id} value={c.id}>{c.name}</option>
+                ))}
+                {classes.length === 0 && <option value="">No classes yet</option>}
+              </select>
+            </div>
+            <button
+              onClick={handlePasteSubmit}
+              disabled={!pasteText.trim() || classes.length === 0}
+              className="text-xs font-semibold px-4 py-1.5 rounded bg-accent text-white hover:bg-accent/90 transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex-shrink-0"
+            >
+              Parse &amp; add
+            </button>
+          </div>
+
+          {pasteError && (
+            <p className="text-[11px] text-red-400 bg-red-950/40 border border-red-800/50 rounded px-3 py-2 leading-snug">
+              {pasteError}
+            </p>
+          )}
+
+          <p className="text-[10px] text-gray-600 leading-relaxed">
+            Strips Arduino Serial Monitor timestamps (<code className="text-gray-500">HH:MM:SS.mmm →</code>),
+            boot messages, and marker lines. Expects rows: <code className="text-gray-500">timestamp,ax,ay,az</code>.
+            Timestamps are converted to µs deltas using the selected unit.
+          </p>
+        </div>
+      ) : (
+        /* ── Drop zone (existing) ──────────────────────────────────────────── */
+        <div
+          onDrop={handleDrop}
+          onDragOver={handleDragOver}
+          onDragLeave={handleDragLeave}
+          onClick={() => !fileEntries.length && inputRef.current?.click()}
+          className={`
+            flex-shrink-0 flex flex-col items-center justify-center gap-3
+            rounded-lg border-2 border-dashed cursor-pointer transition-all
+            ${dragOver
+              ? "border-accent bg-accent/5"
+              : "border-gray-600 bg-gray-900 hover:border-gray-500"
+            }
+          `}
+          style={{ minHeight: "140px" }}
+        >
+          <input
+            ref={inputRef}
+            type="file"
+            accept=".csv,.txt"
+            multiple
+            className="hidden"
+            onChange={(e) => { if (e.target.files?.length) addFiles(e.target.files); e.target.value = ""; }}
+          />
+          <svg className={`w-8 h-8 ${dragOver ? "text-accent" : "text-gray-600"}`} fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.3}
+              d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
+          </svg>
+          <div className="text-center">
+            <p className={`text-sm font-semibold ${dragOver ? "text-accent" : "text-gray-400"}`}>
+              {dragOver ? "Drop to upload" : "Drop CSV files here"}
+            </p>
+            <p className="text-xs text-gray-600 mt-0.5">
+              Upload CSV files for each class using the buttons in the Classes panel →
+            </p>
+            <p className="text-xs text-gray-700 mt-0.5">
+              Format: <code className="text-accent">timestamp_us,ax,ay,az</code> (no header)
+            </p>
+          </div>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={(e) => { e.stopPropagation(); inputRef.current?.click(); }}
+              className="text-xs text-gray-500 hover:text-gray-300 border border-gray-700 hover:border-gray-500 rounded px-3 py-1 transition-colors"
+            >
+              Browse files
+            </button>
+            <a
+              href="/sample-data.zip"
+              download
+              onClick={(e) => e.stopPropagation()}
+              className="text-xs text-accent hover:text-accent-dark transition-colors"
+            >
+              Download sample data →
+            </a>
+          </div>
+        </div>
+      )}
 
       {/* ── Format guide ───────────────────────────────────────────────────── */}
       <FormatGuide />
@@ -798,6 +1790,7 @@ function FileUploadMode({
           <span className="w-1.5 h-1.5 rounded-full bg-sf-black animate-pulse flex-shrink-0" />
           <span className="text-sf-black font-semibold">Signal analyzed</span>
           <span className="text-gray-500">— AI pipeline design ready on the next screen →</span>
+          <span className="text-[9px] font-semibold uppercase tracking-widest text-gray-400 bg-gray-200/60 px-1.5 py-0.5 rounded">Beta</span>
         </div>
       )}
 
@@ -855,11 +1848,17 @@ function FileUploadMode({
                       ))}
                     </select>
                     <span className="text-xs text-gray-400 tabular-nums">{ev.duration} ms</span>
-                    {ev.sampleRateHz && (
-                      <span className="text-[10px] tabular-nums" style={{ fontFamily: "'DM Mono', monospace", color: "#b0afa8" }}>
-                        {ev.sampleRateHz} Hz
-                      </span>
-                    )}
+                    {(() => {
+                      const sc = ev.snapshot?.ax?.length ?? 0;
+                      const rowRate = sc > 0 && ev.duration > 0
+                        ? Math.round((sc / (ev.duration / 1000)) * 10) / 10
+                        : ev.sampleRateHz;
+                      return rowRate ? (
+                        <span className="text-[10px] tabular-nums" style={{ fontFamily: "'DM Mono', monospace", color: "#b0afa8" }}>
+                          {rowRate} Hz
+                        </span>
+                      ) : null;
+                    })()}
                   </div>
                   {ev.autoAssigned ? (
                     <p className="text-[10px] text-yellow-600 mt-0.5 leading-tight">
@@ -932,7 +1931,7 @@ export default function CollectScreen({ config, projectId, classes, setClasses, 
       const res = await fetch(`${API_BASE_URL}/copilot/chat`, {
         method:  "POST",
         headers: { "Content-Type": "application/json" },
-        body:    JSON.stringify({ message, project_id: projectId, screen: "collect", pipeline_config: null }),
+        body:    JSON.stringify({ message, project_id: projectId, screen: "collect", pipeline_config: null, use_data_tools: true }),
       });
       const body = await res.json();
       if (!res.ok) throw new Error(body.detail ?? `Server error ${res.status}`);
@@ -982,6 +1981,7 @@ export default function CollectScreen({ config, projectId, classes, setClasses, 
       const newEvents = data.events.map((ev) => ({
         id:            ev.id,
         datasetId:     ev.dataset_id ?? null,
+        hasVideo:      ev.has_video  ?? false,
         classId:       cls.id,
         className:     cls.name,
         classColor:    cls.color,
@@ -1291,7 +2291,7 @@ export default function CollectScreen({ config, projectId, classes, setClasses, 
     if (!name) return;
     const id    = `cls-${Date.now()}`;
     const color = CLASS_PALETTE[classes.length % CLASS_PALETTE.length];
-    const next  = [...classes, { id, name, color }];
+    const next  = [...classes, { id, name, color, description: "" }];
     setClasses(next);
     setActiveClassId(id);
     setNewClassName("");
@@ -1467,6 +2467,7 @@ export default function CollectScreen({ config, projectId, classes, setClasses, 
             <span className="w-1.5 h-1.5 rounded-full bg-sf-black animate-pulse flex-shrink-0" />
             <span className="text-sf-black font-semibold">Signal analyzed</span>
             <span className="text-gray-500">— AI pipeline design ready on the next screen →</span>
+            <span className="text-[9px] font-semibold uppercase tracking-widest text-gray-400 bg-gray-200/60 px-1.5 py-0.5 rounded">Beta</span>
           </div>
         )}
 
@@ -1639,6 +2640,22 @@ export default function CollectScreen({ config, projectId, classes, setClasses, 
                             {classUploadErr[cls.id]}
                           </p>
                         )}
+                        {/* Gesture description — shown when class is active */}
+                        {active && (
+                          <input
+                            placeholder="describe this gesture… (helps VLM auto-label)"
+                            value={cls.description ?? ""}
+                            onClick={(e) => e.stopPropagation()}
+                            onChange={(e) => {
+                              setClasses(classes.map((c) =>
+                                c.id === cls.id ? { ...c, description: e.target.value } : c
+                              ));
+                            }}
+                            className="mt-2 w-full text-[10px] text-gray-600 bg-white border border-gray-200
+                                       rounded px-2 py-1 focus:outline-none focus:border-accent
+                                       placeholder:text-gray-300"
+                          />
+                        )}
                       </div>
                       {/* Delete button — visible on hover */}
                       <button
@@ -1658,204 +2675,21 @@ export default function CollectScreen({ config, projectId, classes, setClasses, 
           </div>
         </div>
 
-        {/* ── Copilot panel — fills remaining space, scrolls internally ─────── */}
-        <div className="flex-1 min-h-0 border border-gray-200 rounded-lg overflow-hidden flex flex-col">
-          {/* Header */}
-          <div className="flex-shrink-0 flex items-center gap-2 px-3 py-2.5 border-b border-gray-100 bg-white">
-            <div className="w-3.5 h-3.5 rounded-full bg-accent/20 flex items-center justify-center flex-shrink-0">
-              <div
-                className={`w-1.5 h-1.5 rounded-full bg-accent ${
-                  copilot.status === "loading" ? "animate-ping" : "animate-pulse"
-                }`}
-              />
-            </div>
-            <h3 className="text-xs uppercase tracking-widest text-gray-500 flex-1">Copilot</h3>
-            {copilot.status === "ready" && (
-              <span className="text-xs text-accent tabular-nums">
-                {copilot.data.event_count} events
-              </span>
-            )}
-            {copilot.status === "loading" && (
-              <span className="text-xs text-gray-400">…</span>
-            )}
-          </div>
-
-          {/* Body — this is the scrollable region */}
-          <div className="flex-1 min-h-0 overflow-y-auto bg-gray-50 p-3 space-y-3">
-
-            {/* ── idle ── */}
-            {copilot.status === "idle" && (
-              <div>
-                <p className="text-xs text-gray-400 leading-relaxed">
-                  Capture{" "}
-                  <span className="text-gray-600 font-semibold">
-                    {COPILOT_THRESHOLD - events.length} more event
-                    {COPILOT_THRESHOLD - events.length !== 1 ? "s" : ""}
-                  </span>{" "}
-                  to unlock signal analysis.
-                </p>
-                {/* Mini progress bar toward threshold */}
-                <div className="mt-2 w-full h-1 bg-gray-200 rounded-full overflow-hidden">
-                  <div
-                    className="h-full bg-accent/60 rounded-full transition-all duration-500"
-                    style={{ width: `${(events.length / COPILOT_THRESHOLD) * 100}%` }}
-                  />
-                </div>
-              </div>
-            )}
-
-            {/* ── loading ── */}
-            {copilot.status === "loading" && (
-              <div className="flex items-center gap-2">
-                <div className="flex gap-1">
-                  {[0, 1, 2].map((i) => (
-                    <span
-                      key={i}
-                      className="w-1.5 h-1.5 rounded-full bg-accent/60 animate-bounce"
-                      style={{ animationDelay: `${i * 120}ms` }}
-                    />
-                  ))}
-                </div>
-                <span className="text-xs text-gray-400">Analyzing {events.length} events…</span>
-              </div>
-            )}
-
-            {/* ── error ── */}
-            {copilot.status === "error" && (
-              <div>
-                <p className="text-xs text-gray-400 leading-relaxed">
-                  Upload more events to unlock signal analysis.
-                </p>
-                <button
-                  onClick={() => setCopilot({ status: "idle", data: null, error: null })}
-                  className="mt-2 text-xs text-accent hover:underline"
-                >
-                  Dismiss
-                </button>
-              </div>
-            )}
-
-            {/* ── ready ── */}
-            {copilot.status === "ready" && (() => {
-              const { cutoff_frequency: cf, normalization_window: nw, sample_rate: sr } = copilot.data;
-
-              // Derive unique rates from per-file event data (more accurate than
-              // the backend's single aggregated value).
-              const eventRates = [...new Set(events.map((e) => e.sampleRateHz).filter(Boolean))].sort((a, b) => a - b);
-              const mixedRates = eventRates.length > 1;
-
-              return (
-                <>
-                  {/* Sample rate — single value when consistent, warning when mixed */}
-                  {mixedRates ? (
-                    <div style={{ display: "flex", alignItems: "flex-start", gap: 6, padding: "6px 8px", background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 6 }}>
-                      <span style={{ fontSize: 11, flexShrink: 0 }}>⚠</span>
-                      <div>
-                        <p style={{ fontFamily: "'DM Mono', monospace", fontSize: 10, color: "#92400e", fontWeight: 600 }}>
-                          Mixed sample rates: {eventRates[0]}–{eventRates[eventRates.length - 1]} Hz
-                        </p>
-                        <p style={{ fontFamily: "'DM Mono', monospace", fontSize: 9, color: "#b45309", marginTop: 2, lineHeight: 1.4 }}>
-                          Use one consistent rate for reliable training
-                        </p>
-                      </div>
-                    </div>
-                  ) : (
-                    <div>
-                      <p className="text-xs text-gray-400 uppercase tracking-widest mb-1">Sample rate</p>
-                      <p className="text-sm font-bold text-gray-800 tabular-nums">
-                        {eventRates[0] ?? sr.measured_hz} Hz
-                      </p>
-                      <p className="text-xs text-gray-400 mt-0.5">computed from timestamps</p>
-                    </div>
-                  )}
-
-                  {/* Low-pass cutoff — hidden when rates are mixed (Nyquist differs per file) */}
-                  {!mixedRates && (
-                    <>
-                      <div className="w-full h-px bg-gray-200" />
-                      <div>
-                        <p className="text-xs text-gray-400 uppercase tracking-widest mb-1">Low-pass cutoff</p>
-                        <div className="flex items-baseline gap-1.5">
-                          <p className="text-sm font-bold text-gray-800 tabular-nums">
-                            {cf.recommended_hz} Hz
-                          </p>
-                          <span className="text-xs text-gray-400">rec.</span>
-                        </div>
-                        {/* Per-axis breakdown */}
-                        {Object.keys(cf.axis_cutoffs_hz).length > 0 && (
-                          <div className="mt-1.5 flex flex-wrap gap-x-2 gap-y-1">
-                            {Object.entries(cf.axis_cutoffs_hz).map(([axis, hz]) => (
-                              <span key={axis} className="text-xs tabular-nums" style={{ color: AXIS_COLORS[axis] ?? "#6b7280" }}>
-                                {AXIS_LABELS[axis] ?? axis} {hz}
-                              </span>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    </>
-                  )}
-
-                  {/* Energy bar — only shown alongside cutoff when rates are consistent */}
-                  {!mixedRates && (
-                    <div className="mt-1.5 flex items-center gap-1.5">
-                      <div className="flex-1 h-1 bg-gray-200 rounded-full overflow-hidden">
-                        <div
-                          className="h-full rounded-full"
-                          style={{ width: `${cf.energy_threshold_pct}%`, backgroundColor: "#1D9E75" }}
-                        />
-                      </div>
-                      <span className="text-xs text-gray-400 tabular-nums flex-shrink-0">
-                        {cf.energy_threshold_pct}% energy
-                      </span>
-                    </div>
-                  )}
-
-                  <div className="w-full h-px bg-gray-200" />
-
-                  {/* Normalization window */}
-                  <div>
-                    <p className="text-xs text-gray-400 uppercase tracking-widest mb-1">Window</p>
-                    <div className="flex items-baseline gap-1.5">
-                      <p className="text-sm font-bold text-gray-800 tabular-nums">
-                        {nw.recommended_ms} ms
-                      </p>
-                      <span className="text-xs text-gray-400">rec.</span>
-                    </div>
-                    <p className="text-xs text-gray-400 mt-0.5 tabular-nums">
-                      mean {nw.mean_ms} · p90 {nw.p90_ms} ms
-                    </p>
-                  </div>
-
-                  {/* Separability */}
-                  {separabilityNote && (
-                    <>
-                      <div className="w-full h-px bg-gray-200" />
-                      <div>
-                        <p className="text-xs text-gray-400 uppercase tracking-widest mb-1">Separability</p>
-                        <p className={`text-xs leading-relaxed ${separabilityNote.ok ? "text-accent" : "text-amber-600"}`}>
-                          {separabilityNote.ok ? "✓ " : "⚠ "}{separabilityNote.text}
-                        </p>
-                      </div>
-                    </>
-                  )}
-                </>
-              );
-            })()}
-
-            {/* ── Copilot chat ── */}
-            <div className="border-t border-gray-200 pt-3">
-              <CopilotChat
-                chatHistory={chatHistory}
-                setChatHistory={setChatHistory}
-                projectId={projectId}
-                onApplyAction={onApplyAction}
-                screen="collect"
-                events={events}
-                classes={classes}
-                setEvents={setEvents}
-                setClasses={setClasses}
-              />
-            </div>
+        {/* ── Copilot panel — full height ─────────────────────────────────── */}
+        <div className="flex-1 min-h-0 border border-gray-200 rounded-lg overflow-hidden flex flex-col bg-gray-50">
+          <div className="flex-1 min-h-0 flex flex-col p-3">
+            <CopilotChat
+              chatHistory={chatHistory}
+              setChatHistory={setChatHistory}
+              projectId={projectId}
+              onApplyAction={onApplyAction}
+              screen="collect"
+              events={events}
+              classes={classes}
+              setEvents={setEvents}
+              setClasses={setClasses}
+              grow
+            />
           </div>
         </div>
       </div>

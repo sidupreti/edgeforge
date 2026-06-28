@@ -10,7 +10,6 @@ import TrainScreen from "./components/TrainScreen";
 import ValidateScreen from "./components/ValidateScreen";
 import ExportScreen from "./components/ExportScreen";
 import PlaceholderScreen from "./components/PlaceholderScreen";
-import RecordingsScreen from "./components/RecordingsScreen";
 import FlowFieldBackground from "./components/FlowFieldBackground";
 import NewOnboarding from "./components/NewOnboarding";
 import LandingPage from "./components/LandingPage";
@@ -32,8 +31,8 @@ const CLASS_PALETTE = [
 ];
 
 const INITIAL_CLASSES = [
-  { id: "cls-idle",  name: "idle",  color: CLASS_PALETTE[1] },
-  { id: "cls-event", name: "event", color: CLASS_PALETTE[0] },
+  { id: "cls-idle",  name: "idle",  color: CLASS_PALETTE[1], description: "" },
+  { id: "cls-event", name: "event", color: CLASS_PALETTE[0], description: "" },
 ];
 
 // ── Defaults with sensible pre-selections (Issue 4) ───────────────────────────
@@ -117,7 +116,6 @@ function AppContent() {
   const [submitLoading,     setSubmitLoading]     = useState(false);
   const [submitError,       setSubmitError]       = useState(null);
   const [showResetConfirm,  setShowResetConfirm]  = useState(false);
-  const [showRecordings,    setShowRecordings]    = useState(false);
 
   // Derived — never stored separately, always consistent with config
   const projectId = slugify(config.projectName);
@@ -365,11 +363,9 @@ function AppContent() {
       {/* Content sits above canvas */}
       <div className="flex flex-1 min-w-0 h-full" style={{ position: "relative", zIndex: 1 }}>
         <Sidebar
-          activeStep={showRecordings ? -1 : activeStep}
+          activeStep={activeStep}
           onResetRequest={() => setShowResetConfirm(true)}
-          onOpenSettings={() => { setShowRecordings(false); setActiveStep(0); }}
-          onOpenRecordings={() => setShowRecordings((v) => !v)}
-          showRecordings={showRecordings}
+          onOpenSettings={() => setActiveStep(0)}
         />
 
         {/* Reset confirmation overlay */}
@@ -427,44 +423,38 @@ function AppContent() {
                   letterSpacing: "0.12em",
                 }}
               >
-                {showRecordings ? "Recordings" : STEPS[activeStep].label}
+                {STEPS[activeStep].label}
               </h1>
               <p className="text-xs mt-0.5" style={{ color: "#8a8982", fontFamily: "'DM Mono', monospace" }}>
-                {showRecordings
-                  ? "cv accuracy · data quality"
-                  : `${String(activeStep + 1).padStart(2, "0")} / ${String(STEPS.length).padStart(2, "0")}`}
+                {`${String(activeStep + 1).padStart(2, "0")} / ${String(STEPS.length).padStart(2, "0")}`}
               </p>
             </div>
 
-            {/* Step progress dots — hidden on Recordings view */}
-            {!showRecordings && (
-              <div className="flex items-center gap-1.5">
-                {STEPS.map((s, i) => (
-                  <span
-                    key={s.key}
-                    className="w-2 h-2 rounded-full transition-colors"
-                    style={{
-                      background: i === activeStep
-                        ? "#0a0a0a"
-                        : i < activeStep
-                          ? "#b0afa8"
-                          : "#ebeae5",
-                    }}
-                  />
-                ))}
-              </div>
-            )}
+            {/* Step progress dots */}
+            <div className="flex items-center gap-1.5">
+              {STEPS.map((s, i) => (
+                <span
+                  key={s.key}
+                  className="w-2 h-2 rounded-full transition-colors"
+                  style={{
+                    background: i === activeStep
+                      ? "#0a0a0a"
+                      : i < activeStep
+                        ? "#b0afa8"
+                        : "#ebeae5",
+                  }}
+                />
+              ))}
+            </div>
           </header>
 
           {/* Screen body */}
           <main className="flex-1 min-h-0 px-8 py-8 overflow-y-auto">
-            {showRecordings
-              ? <RecordingsScreen projectId={projectId} />
-              : renderScreen()}
+            {renderScreen()}
           </main>
 
-          {/* Bottom nav bar — hidden on pipeline and recordings */}
-          {!showRecordings && currentKey !== "pipeline" && (
+          {/* Bottom nav bar — hidden on pipeline */}
+          {currentKey !== "pipeline" && (
             <footer
               className="px-8 py-4 flex items-center justify-between"
               style={{
