@@ -688,6 +688,25 @@ function FileDetailPanel({ ev, allEvents, onClose, onAskCopilot, classes }) {
 
       <div style={{ flex: 1, overflowY: "auto", padding: "12px 14px" }}>
 
+        {/* ── Indexing warning — shown when file wasn't indexed by the backend ── */}
+        {!ev.datasetId && (
+          <div style={{ marginBottom: 12, padding: "8px 10px", background: "#fffbeb", border: "1px solid #fde68a", borderRadius: 6, display: "flex", alignItems: "flex-start", gap: 6 }}>
+            <span style={{ fontSize: 13, flexShrink: 0 }}>⚠</span>
+            <div>
+              <p style={{ fontFamily: "'DM Mono', monospace", fontSize: 10, color: "#92400e", lineHeight: 1.5, fontWeight: 600 }}>
+                File not indexed by backend
+              </p>
+              <p style={{ fontFamily: "'DM Mono', monospace", fontSize: 9, color: "#92400e", lineHeight: 1.5, marginTop: 2 }}>
+                Video upload, timeline labeling, and the label track are unavailable.
+                {ev.notes?.some((n) => n.startsWith("⚠ Indexing failed:")) && (
+                  <span> Reason: {ev.notes.find((n) => n.startsWith("⚠ Indexing failed:"))?.slice(18)}</span>
+                )}
+                {" "}Re-upload this file to enable these features.
+              </p>
+            </div>
+          </div>
+        )}
+
         {/* ── Video lane ────────────────────────────────────────────────────── */}
         {ev.datasetId && (
           <div style={{ marginBottom: 12 }}>
