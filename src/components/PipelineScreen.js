@@ -43,8 +43,8 @@ const FILTER_TYPES = [
   { id: "none",           label: "None",             desc: "Skip filtering (hardware already filtered)" },
 ];
 
-const PIPELINE_STEPS = ["filter", "normalize", "features", "model"];
-const NEXT_LABELS    = ["Next: Normalize →", "Next: Features →", "Next: Model →", "Train Model →"];
+const PIPELINE_STEPS = ["filter", "features", "model"];
+const NEXT_LABELS    = ["Next: Features →", "Next: Model →", "Train Model →"];
 
 const STANDARD_BLOCK_TYPES = [
   { id: "bandpass",      label: "Bandpass Filter",  desc: "Keep only a frequency band (1–30 Hz)" },
@@ -333,6 +333,7 @@ function FilterPanel({ cfg, setCfg, analyzeResult }) {
   );
 }
 
+// eslint-disable-next-line no-unused-vars
 function NormalizePanel({ cfg, setCfg, analyzeResult }) {
   const isNone        = cfg.interpolation === "none";
   const recommendedMs = analyzeResult?.normalization_window?.recommended_ms ?? null;
@@ -771,6 +772,7 @@ function AiDesignerPanel({ design, config, onApplyStage, onApplyAll, onDismiss, 
         </div>
         <div className="flex-1 min-w-0">
           <span className="text-xs font-bold text-gray-800 uppercase tracking-widest">AI-Designed Pipeline</span>
+          <span className="text-[9px] font-semibold uppercase tracking-widest text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded ml-1.5">Beta</span>
           {shortDesc && (
             <span className="text-xs text-gray-400 font-normal normal-case tracking-normal ml-2">· {shortDesc}</span>
           )}
@@ -1043,6 +1045,7 @@ function CopilotSidebar({ analyzeResult, separabilityNote, onApplyCutoff, onAppl
             <div className="w-1.5 h-1.5 rounded-full bg-gray-400" />
           </div>
           <h3 className="text-xs uppercase tracking-widest text-gray-400">Copilot</h3>
+          <span className="text-[9px] font-semibold uppercase tracking-widest text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded ml-1.5">Beta</span>
         </div>
         <div className="flex flex-col items-center text-center px-2 py-4">
           <div className="w-10 h-10 rounded-full border-2 border-dashed border-gray-200 flex items-center justify-center mb-3">
@@ -1078,7 +1081,9 @@ function CopilotSidebar({ analyzeResult, separabilityNote, onApplyCutoff, onAppl
         <div className="w-3.5 h-3.5 rounded-full bg-accent/20 flex items-center justify-center">
           <div className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" />
         </div>
-        <h3 className="text-xs uppercase tracking-widest text-gray-500 flex-1">Copilot</h3>
+        <h3 className="text-xs uppercase tracking-widest text-gray-500">Copilot</h3>
+        <span className="text-[9px] font-semibold uppercase tracking-widest text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded">Beta</span>
+        <span className="flex-1" />
         <span className="text-xs text-gray-400 tabular-nums">{analyzeResult.event_count} events</span>
       </div>
 
@@ -1565,7 +1570,7 @@ export default function PipelineScreen({
     switch (activeBlock) {
       case "raw":       return <RawPanel config={config} />;
       case "filter":    return <FilterPanel cfg={filterCfg} setCfg={setFilterCfgManual} analyzeResult={analyzeResult} />;
-      case "normalize": return <NormalizePanel cfg={normCfg} setCfg={setNormCfgManual} analyzeResult={analyzeResult} />;
+
       case "features":  return <FeaturesPanel features={features} setFeatures={setFeaturesManual} />;
       case "model":     return <ModelPanel model={model} setModel={setModelManual} />;
       default:          return null;
@@ -1642,6 +1647,7 @@ export default function PipelineScreen({
                   >
                     <span className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" />
                     {aiPipelineDesign && !dismissed ? "Redesign with AI" : "Design Pipeline with AI"}
+                    <span className="text-[9px] font-semibold uppercase tracking-widest text-accent/60 bg-accent/10 px-1.5 py-0.5 rounded">Beta</span>
                   </button>
                 ) : (
                   <button

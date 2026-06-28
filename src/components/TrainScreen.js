@@ -268,6 +268,7 @@ function CopilotExplanation({ results, analyzeResult, chatHistory, setChatHistor
           <div className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" />
         </div>
         <h3 className="text-xs uppercase tracking-widest text-gray-500">Copilot Analysis</h3>
+        <span className="text-[9px] font-semibold uppercase tracking-widest text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded">Beta</span>
       </div>
       <div className="space-y-3">
         {lines.map((line, i) => (
