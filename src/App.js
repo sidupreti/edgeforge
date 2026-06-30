@@ -48,13 +48,19 @@ const INITIAL_CONFIG = {
 };
 
 const INITIAL_PIPELINE_CONFIG = {
-  filter:    { cutoff: 30, order: 4, filterType: "butterworth" },
-  normalize: { window: 1000, interpolation: "cubic" },
+  filter:    { cutoff: 2.0, order: 6, filterType: "high" },
+  normalize: { window: 2000, interpolation: "cubic" },
   features:  {
     mean: true, std_dev: true, rms: true, peak: true, absolute_max: true,
     fft_energy: false, dominant_freq: false, kurtosis: false,
   },
   model: "auto",
+  // EI-style spectral block params
+  window_ms:   2000,
+  stride_ms:   1000,
+  zero_pad:    true,
+  fft_length:  512,
+  take_log:    true,
 };
 
 const INITIAL_BLOCKS = [
@@ -274,24 +280,9 @@ function AppContent() {
     if (currentKey === "pipeline") {
       return (
         <PipelineScreen
-          config={config}
-          analyzeResult={analyzeResult}
-          separabilityNote={separabilityNote}
           pipelineConfig={pipelineConfig}
           setPipelineConfig={setPipelineConfig}
           projectId={projectId}
-          chatHistory={chatHistory}
-          setChatHistory={setChatHistory}
-          onApplyAction={handleApplyAction}
-          pendingFlash={pendingFlash}
-          onFlashConsumed={() => setPendingFlash(null)}
-          aiPipelineDesign={aiPipelineDesign}
-          setAiPipelineDesign={setAiPipelineDesign}
-          aiConfiguredBlocks={aiConfiguredBlocks}
-          setAiConfiguredBlocks={setAiConfiguredBlocks}
-          onGoToSetup={() => setActiveStep(0)}
-          pipelineBlocks={pipelineBlocks}
-          setPipelineBlocks={setPipelineBlocks}
           onNext={() => setActiveStep((s) => Math.min(s + 1, STEPS.length - 1))}
           onBack={() => setActiveStep((s) => Math.max(s - 1, 0))}
         />
@@ -301,15 +292,8 @@ function AppContent() {
       return (
         <TrainScreen
           projectId={projectId}
-          events={events}
-          analyzeResult={analyzeResult}
           pipelineConfig={pipelineConfig}
-          pipelineBlocks={pipelineBlocks}
           onRetrain={() => setActiveStep(2)}
-          chatHistory={chatHistory}
-          setChatHistory={setChatHistory}
-          onApplyAction={handleApplyAction}
-          onTrainDone={(results) => setTrainResults(results)}
         />
       );
     }
@@ -317,12 +301,7 @@ function AppContent() {
       return (
         <ValidateScreen
           projectId={projectId}
-          trainResults={trainResults}
-          pipelineConfig={pipelineConfig}
           onGoToTrain={() => setActiveStep(3)}
-          chatHistory={chatHistory}
-          setChatHistory={setChatHistory}
-          onApplyAction={handleApplyAction}
         />
       );
     }

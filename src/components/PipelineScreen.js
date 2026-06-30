@@ -1,682 +1,261 @@
-import React, { useState, useEffect, useRef } from "react";
-import { DragDropContext, Droppable, Draggable } from "@hello-pangea/dnd";
-import Editor from "react-simple-code-editor";
-import { highlight, languages } from "prismjs/components/prism-core";
-import "prismjs/components/prism-clike";
-import "prismjs/components/prism-python";
-import "prismjs/themes/prism.css";
-import "./CodeEditorTheme.css";
-import CopilotChat from "./CopilotChat";
+import React, { useState, useRef, useEffect } from "react";
 import API_BASE_URL from "../config";
 
-// ── Constants ─────────────────────────────────────────────────────────────────
+// ── Constants ────────────────────────────────────────────────────────────────
 
-const TIME_FEATURES = [
-  { id: "mean",         label: "Mean" },
-  { id: "std_dev",      label: "Std Dev" },
-  { id: "rms",          label: "RMS" },
-  { id: "peak",         label: "Peak" },
-  { id: "absolute_max", label: "Absolute Max" },
-];
-
-const FREQ_FEATURES = [
-  { id: "fft_energy",    label: "FFT Energy" },
-  { id: "dominant_freq", label: "Dominant Freq" },
-  { id: "kurtosis",      label: "Kurtosis" },
-];
-
-const MODELS = [
-  { id: "auto",   label: "Auto-select",    desc: "Recommended — benchmarks all classifiers and picks the best.", recommended: true },
-  { id: "rf",     label: "Random Forest",  desc: "Good for tabular features, interpretable, fast inference." },
-  { id: "svm",    label: "SVM",            desc: "Strong on small datasets, works well with handcrafted features." },
-  { id: "nn",     label: "Neural Net",     desc: "Most flexible, requires more data and tuning." },
+const FILTER_TYPES = [
+  { id: "high", label: "High-pass", desc: "Removes DC offset and slow drift" },
+  { id: "low",  label: "Low-pass",  desc: "Removes high-frequency noise" },
+  { id: "none", label: "None",      desc: "No filtering applied" },
 ];
 
 const ORDER_OPTIONS = [2, 4, 6, 8];
-const INTERP_OPTIONS = ["cubic", "linear", "none"];
+const FFT_OPTIONS   = [128, 256, 512, 1024];
 
-const FILTER_TYPES = [
-  { id: "butterworth",    label: "Butterworth",     desc: "Flat passband, best general purpose" },
-  { id: "chebyshev",      label: "Chebyshev I",     desc: "Sharper rolloff, small ripple" },
-  { id: "bessel",         label: "Bessel",           desc: "Linear phase, preserves pulse shape" },
-  { id: "moving_average", label: "Moving Average",   desc: "Simplest, lowest MCU compute" },
-  { id: "none",           label: "None",             desc: "Skip filtering (hardware already filtered)" },
-];
+const PALETTE = ["#1D9E75", "#F59E0B", "#EF4444", "#8B5CF6", "#EC4899", "#3B82F6", "#06B6D4", "#84CC16"];
 
-const PIPELINE_STEPS = ["filter", "features", "model"];
-const NEXT_LABELS    = ["Next: Features →", "Next: Model →", "Train Model →"];
-
-const STANDARD_BLOCK_TYPES = [
-  { id: "bandpass",      label: "Bandpass Filter",  desc: "Keep only a frequency band (1–30 Hz)" },
-  { id: "envelope",      label: "Envelope",         desc: "Signal amplitude envelope via Hilbert transform" },
-  { id: "derivative",    label: "Derivative",       desc: "First difference — highlights rate-of-change" },
-  { id: "zscore",        label: "Z-Score Norm",     desc: "Standardize each axis to zero mean, unit variance" },
-  { id: "peak_detector", label: "Peak Detector",    desc: "Replace signal with peak presence indicator" },
-  { id: "fft_transform", label: "FFT Magnitudes",   desc: "Transform signal to frequency domain magnitudes" },
-  { id: "abs_smooth",    label: "Abs + Smooth",     desc: "Absolute value then 5-sample moving average" },
-];
-
-// ── Primitive UI pieces ───────────────────────────────────────────────────────
+// ── Primitive UI ─────────────────────────────────────────────────────────────
 
 function SectionLabel({ children }) {
-  return (
-    <p className="text-xs text-gray-400 uppercase tracking-widest mb-3">{children}</p>
-  );
+  return <p className="text-xs text-gray-400 uppercase tracking-widest mb-3">{children}</p>;
 }
 
-function SegmentedControl({ options, value, onChange, fmt = (v) => v }) {
+function NumberInput({ label, value, onChange, min, max, step = 1, unit = "" }) {
   return (
-    <div className="inline-flex border border-gray-200 rounded overflow-hidden">
-      {options.map((opt) => (
-        <button
-          key={opt}
-          onClick={() => onChange(opt)}
-          className={`px-3 py-1.5 text-xs transition-colors ${
-            value === opt
-              ? "bg-accent text-white"
-              : "text-gray-500 hover:bg-gray-50"
-          }`}
-        >
-          {fmt(opt)}
-        </button>
-      ))}
-    </div>
-  );
-}
-
-function Slider({ min, max, value, onChange, unit = "" }) {
-  const pct = ((value - min) / (max - min)) * 100;
-  return (
-    <div className="space-y-2">
-      <div className="relative">
+    <div>
+      <label className="text-xs text-gray-400 uppercase tracking-widest block mb-1.5">{label}</label>
+      <div className="flex items-center gap-2">
         <input
-          type="range"
+          type="number"
           min={min}
           max={max}
+          step={step}
           value={value}
           onChange={(e) => onChange(Number(e.target.value))}
-          className="w-full h-1.5 appearance-none rounded-full outline-none cursor-pointer"
-          style={{
-            accentColor: "#1D9E75",
-            background: `linear-gradient(to right, #1D9E75 ${pct}%, #e5e7eb ${pct}%)`,
-            transition: "background 300ms ease",
-          }}
+          className="w-28 border border-gray-200 rounded px-2.5 py-1.5 text-xs font-mono outline-none focus:border-accent transition-colors tabular-nums"
         />
-      </div>
-      <div className="flex justify-between text-xs text-gray-400 tabular-nums">
-        <span>{min}{unit}</span>
-        <span className="text-accent font-bold">{value}{unit}</span>
-        <span>{max}{unit}</span>
+        {unit && <span className="text-xs text-gray-400">{unit}</span>}
       </div>
     </div>
   );
 }
 
-function Checkbox({ id, label, checked, onChange }) {
-  return (
-    <label
-      htmlFor={id}
-      className="flex items-center gap-2.5 py-1.5 cursor-pointer group"
-    >
-      <span
-        className={`w-3.5 h-3.5 rounded border flex-shrink-0 flex items-center justify-center transition-colors ${
-          checked
-            ? "bg-accent border-accent"
-            : "border-gray-300 group-hover:border-gray-400"
-        }`}
-      >
-        {checked && (
-          <svg viewBox="0 0 10 8" className="w-2.5 h-2 fill-none stroke-white" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M1 4l3 3 5-6" />
-          </svg>
-        )}
-      </span>
-      <input type="checkbox" id={id} checked={checked} onChange={onChange} className="sr-only" />
-      <span className={`text-xs ${checked ? "text-gray-800" : "text-gray-500"}`}>{label}</span>
-    </label>
-  );
-}
+// ── Filter Response Canvas ───────────────────────────────────────────────────
 
-// ── Duration callout ─────────────────────────────────────────────────────────
-
-function DurationCallout({ analyzeResult }) {
-  const nw     = analyzeResult?.normalization_window;
-  const minMs  = nw?.min_ms  ?? null;
-  const maxMs  = nw?.max_ms  ?? null;
-  const hasData = minMs != null && maxMs != null;
-
-  return (
-    <div className="relative rounded-lg overflow-hidden border border-accent/25 mb-5">
-      {/* Left accent bar */}
-      <div className="absolute inset-y-0 left-0 w-1 bg-accent" />
-
-      <div className="pl-5 pr-4 py-4" style={{ background: "linear-gradient(to right, rgba(10,10,10,0.03), transparent)" }}>
-        {/* Header */}
-        <div className="flex items-center gap-2 mb-3">
-          <svg className="w-3.5 h-3.5 text-accent flex-shrink-0" viewBox="0 0 16 16" fill="none">
-            <rect x="1" y="5" width="14" height="6" rx="1" stroke="currentColor" strokeWidth="1.3"/>
-            <path d="M4 5V3.5M8 5V2M12 5V3.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
-            <path d="M4 11v1.5M8 11V14M12 11v1.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/>
-          </svg>
-          <span className="text-xs font-bold text-accent uppercase tracking-widest">
-            Variable-duration normalization
-          </span>
-        </div>
-
-        {/* Duration range badges + bar chart */}
-        {hasData ? (
-          <>
-            <div className="flex items-center gap-2.5 mb-3">
-              <div className="flex items-center gap-1.5 bg-white border border-accent/20 rounded px-2.5 py-1 shadow-sm">
-                <span className="text-xs text-gray-400">min</span>
-                <span className="text-sm font-bold text-accent tabular-nums">{minMs} ms</span>
-              </div>
-              <svg className="w-5 h-3 text-gray-300 flex-shrink-0" viewBox="0 0 20 12" fill="none">
-                <path d="M1 6h18M14 2l4 4-4 4" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/>
-              </svg>
-              <div className="flex items-center gap-1.5 bg-white border border-accent/20 rounded px-2.5 py-1 shadow-sm">
-                <span className="text-xs text-gray-400">max</span>
-                <span className="text-sm font-bold text-accent tabular-nums">{maxMs} ms</span>
-              </div>
-            </div>
-
-            {/* Relative-length bars */}
-            <div className="space-y-1.5 mb-3">
-              {[["min", minMs, "bg-accent/35"], ["max", maxMs, "bg-accent"]].map(([lbl, val, cls]) => (
-                <div key={lbl} className="flex items-center gap-2">
-                  <span className="text-xs text-gray-400 w-6 flex-shrink-0">{lbl}</span>
-                  <div className="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden">
-                    <div
-                      className={`h-full rounded-full transition-all duration-500 ${cls}`}
-                      style={{ width: `${(val / maxMs) * 100}%` }}
-                    />
-                  </div>
-                  <span className="text-xs text-gray-400 tabular-nums w-14 text-right">{val} ms</span>
-                </div>
-              ))}
-            </div>
-          </>
-        ) : (
-          <p className="text-xs text-gray-400 mb-3 italic">
-            Complete data collection to see event duration ranges.
-          </p>
-        )}
-
-        <p className="text-xs text-gray-600 leading-relaxed">
-          A fixed window would{" "}
-          <span className="font-semibold text-gray-800">discard the decay tail</span>{" "}
-          on longer events. SensorFlow normalizes each event{" "}
-          <span className="font-semibold text-gray-800">individually</span>{" "}
-          to preserve signal shape.
-        </p>
-      </div>
-    </div>
-  );
-}
-
-// ── Config panels ─────────────────────────────────────────────────────────────
-
-function RawPanel({ config }) {
-  return (
-    <div className="space-y-3">
-      <SectionLabel>Source signal</SectionLabel>
-      {[
-        ["Sensor",      config?.sensorType     || "—"],
-        ["Connection",  config?.connectionType || "—"],
-        ["Trigger",     config?.triggerType    || "—"],
-        ["Target MCU",  config?.targetMcu      || "—"],
-      ].map(([k, v]) => (
-        <div key={k} className="flex items-center justify-between text-xs">
-          <span className="text-gray-400">{k}</span>
-          <span className="text-gray-700 font-semibold">{v}</span>
-        </div>
-      ))}
-      <p className="text-xs text-gray-300 pt-2 border-t border-gray-100">
-        No processing applied at this stage.
-      </p>
-    </div>
-  );
-}
-
-function FilterPanel({ cfg, setCfg, analyzeResult }) {
-  const filterType    = cfg.filterType ?? "butterworth";
-  const isNone        = filterType === "none";
-  const hasOrder      = filterType !== "moving_average" && filterType !== "none";
-  const recommendedHz = analyzeResult?.cutoff_frequency?.recommended_hz ?? null;
-
-  return (
-    <div className="space-y-6">
-      {/* Copilot recommendation banner */}
-      {recommendedHz != null && (
-        <div className="flex items-center justify-between gap-3 rounded-lg border border-accent/30 bg-accent/5 px-3 py-2.5">
-          <p className="text-xs text-accent leading-snug">
-            <span className="font-bold">◆ Copilot recommends:</span>{" "}
-            Butterworth at {recommendedHz} Hz based on your signal data
-          </p>
-          <button
-            onClick={() => setCfg((c) => ({ ...c, cutoff: Math.round(recommendedHz), filterType: "butterworth" }))}
-            className="flex-shrink-0 text-xs font-bold text-accent border border-accent/40 rounded px-2 py-1 hover:bg-accent/10 transition-colors whitespace-nowrap"
-          >
-            Apply ↗
-          </button>
-        </div>
-      )}
-
-      {/* Filter type */}
-      <div>
-        <SectionLabel>Filter type</SectionLabel>
-        <div className="space-y-1.5">
-          {FILTER_TYPES.map(({ id, label, desc }) => (
-            <label
-              key={id}
-              className={`flex items-start gap-3 p-2.5 rounded-lg border cursor-pointer transition-colors ${
-                filterType === id
-                  ? "border-accent/40 bg-accent/5"
-                  : "border-gray-200 hover:border-gray-300 hover:bg-gray-50"
-              }`}
-            >
-              <span
-                className={`mt-0.5 w-3.5 h-3.5 rounded-full border-2 flex-shrink-0 flex items-center justify-center transition-colors ${
-                  filterType === id ? "border-accent" : "border-gray-300"
-                }`}
-              >
-                {filterType === id && <span className="w-1.5 h-1.5 rounded-full bg-accent block" />}
-              </span>
-              <input
-                type="radio"
-                className="sr-only"
-                value={id}
-                checked={filterType === id}
-                onChange={() => setCfg((c) => ({ ...c, filterType: id }))}
-              />
-              <div className="min-w-0">
-                <span className={`text-xs font-semibold ${filterType === id ? "text-gray-800" : "text-gray-600"}`}>
-                  {label}
-                </span>
-                <p className="text-xs text-gray-400 mt-0.5 leading-relaxed">{desc}</p>
-              </div>
-            </label>
-          ))}
-        </div>
-      </div>
-
-      {/* Skip message */}
-      {isNone ? (
-        <div className="rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
-          <p className="text-xs text-gray-500 leading-relaxed">
-            Filter stage skipped — your signal will be passed directly to normalization.
-          </p>
-        </div>
-      ) : (
-        <>
-          <div>
-            <SectionLabel>Cutoff frequency</SectionLabel>
-            <Slider min={5} max={200} value={cfg.cutoff} onChange={(v) => setCfg((c) => ({ ...c, cutoff: v }))} unit=" Hz" />
-          </div>
-          {hasOrder && (
-            <div>
-              <SectionLabel>Filter order</SectionLabel>
-              <SegmentedControl
-                options={ORDER_OPTIONS}
-                value={cfg.order}
-                onChange={(v) => setCfg((c) => ({ ...c, order: v }))}
-                fmt={(v) => `${v}`}
-              />
-              <p className="text-xs text-gray-400 mt-2">
-                Higher order → sharper rolloff, more phase distortion.
-              </p>
-            </div>
-          )}
-        </>
-      )}
-    </div>
-  );
-}
-
-// eslint-disable-next-line no-unused-vars
-function NormalizePanel({ cfg, setCfg, analyzeResult }) {
-  const isNone        = cfg.interpolation === "none";
-  const recommendedMs = analyzeResult?.normalization_window?.recommended_ms ?? null;
-
-  return (
-    <div className="space-y-6">
-      {/* Copilot recommendation banner */}
-      {recommendedMs != null && (
-        <div className="flex items-center justify-between gap-3 rounded-lg border border-accent/30 bg-accent/5 px-3 py-2.5">
-          <p className="text-xs text-accent leading-snug">
-            <span className="font-bold">◆ Copilot recommends:</span>{" "}
-            {recommendedMs} ms window (covers p90 of your event durations)
-          </p>
-          <button
-            onClick={() => setCfg((c) => ({ ...c, window: recommendedMs }))}
-            className="flex-shrink-0 text-xs font-bold text-accent border border-accent/40 rounded px-2 py-1 hover:bg-accent/10 transition-colors whitespace-nowrap"
-          >
-            Apply ↗
-          </button>
-        </div>
-      )}
-
-      <DurationCallout analyzeResult={analyzeResult} />
-
-      <div>
-        <SectionLabel>Interpolation</SectionLabel>
-        <div className="inline-flex border border-gray-200 rounded overflow-hidden">
-          {INTERP_OPTIONS.map((opt) => (
-            <button
-              key={opt}
-              onClick={() => setCfg((c) => ({ ...c, interpolation: opt }))}
-              className={`px-3 py-1.5 text-xs transition-colors ${
-                cfg.interpolation === opt
-                  ? "bg-accent text-white"
-                  : "text-gray-500 hover:bg-gray-50"
-              }`}
-            >
-              {opt === "none" ? "None" : opt.charAt(0).toUpperCase() + opt.slice(1)}
-            </button>
-          ))}
-        </div>
-
-        {isNone ? (
-          <div className="mt-3 rounded-lg border border-gray-200 bg-gray-50 px-4 py-3">
-            <p className="text-xs text-gray-500 leading-relaxed">
-              Normalization skipped — events passed directly to feature extraction.
-              Only use if all your events are exactly the same duration.
-            </p>
-          </div>
-        ) : (
-          <p className="text-xs text-gray-400 mt-2">
-            {cfg.interpolation === "cubic"
-              ? "Cubic preserves curvature through inflection points."
-              : "Linear is faster and uses less MCU memory."}
-          </p>
-        )}
-      </div>
-
-      {!isNone && (
-        <div>
-          <SectionLabel>Window length</SectionLabel>
-          <Slider min={100} max={3000} value={cfg.window} onChange={(v) => setCfg((c) => ({ ...c, window: v }))} unit=" ms" />
-        </div>
-      )}
-    </div>
-  );
-}
-
-function FeaturesPanel({ features, setFeatures }) {
-  const toggle = (id) => setFeatures((f) => ({ ...f, [id]: !f[id] }));
-  const totalSelected = Object.values(features).filter(Boolean).length;
-
-  return (
-    <div>
-      <div className="flex items-center justify-between mb-4">
-        <SectionLabel>Feature extraction</SectionLabel>
-        <span className="text-xs text-gray-400 tabular-nums">{totalSelected} selected</span>
-      </div>
-      <div className="grid grid-cols-2 gap-x-8 gap-y-1">
-        <div>
-          <p className="text-xs font-semibold text-gray-500 uppercase tracking-widest mb-2 pb-1.5 border-b border-gray-100">
-            Time domain
-          </p>
-          {TIME_FEATURES.map(({ id, label }) => (
-            <Checkbox key={id} id={id} label={label} checked={features[id]} onChange={() => toggle(id)} />
-          ))}
-        </div>
-        <div>
-          <p className="text-xs font-semibold text-gray-500 uppercase tracking-widest mb-2 pb-1.5 border-b border-gray-100">
-            Frequency domain
-          </p>
-          {FREQ_FEATURES.map(({ id, label }) => (
-            <Checkbox key={id} id={id} label={label} checked={features[id]} onChange={() => toggle(id)} />
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function ModelPanel({ model, setModel }) {
-  return (
-    <div>
-      <SectionLabel>Classifier</SectionLabel>
-      <div className="space-y-2">
-        {MODELS.map(({ id, label, desc, recommended }) => (
-          <label
-            key={id}
-            className={`flex gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${
-              model === id
-                ? "border-accent/40 bg-accent/5"
-                : "border-gray-200 hover:border-gray-300 hover:bg-gray-50"
-            }`}
-          >
-            <span
-              className={`mt-0.5 w-3.5 h-3.5 rounded-full border-2 flex-shrink-0 flex items-center justify-center transition-colors ${
-                model === id ? "border-accent" : "border-gray-300"
-              }`}
-            >
-              {model === id && <span className="w-1.5 h-1.5 rounded-full bg-accent block" />}
-            </span>
-            <input type="radio" className="sr-only" value={id} checked={model === id} onChange={() => setModel(id)} />
-            <div className="min-w-0">
-              <div className="flex items-center gap-2">
-                <span className={`text-xs font-semibold ${model === id ? "text-gray-800" : "text-gray-600"}`}>
-                  {label}
-                </span>
-                {recommended && (
-                  <span className="text-xs bg-accent/10 text-accent px-1.5 py-0.5 rounded font-semibold">
-                    recommended
-                  </span>
-                )}
-              </div>
-              <p className="text-xs text-gray-400 mt-0.5 leading-relaxed">{desc}</p>
-            </div>
-          </label>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-// ── Signal visualizations ─────────────────────────────────────────────────────
-
-function FilterViz({ analyzeResult, cutoffHz }) {
-  const canvasRef  = useRef(null);
-  const sampleRate = analyzeResult?.sample_rate?.declared_hz ?? 100;
-  const nyquist    = sampleRate / 2;
-  const energyPct  = analyzeResult?.cutoff_frequency?.energy_threshold_pct ?? 90;
+function FilterResponsePlot({ freqs, gains }) {
+  const canvasRef = useRef(null);
 
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    if (!canvas || !freqs?.length) return;
     const dpr = window.devicePixelRatio || 1;
     const W = canvas.offsetWidth;
-    const H = 80;
-    canvas.width  = W * dpr;
+    const H = 100;
+    canvas.width = W * dpr;
     canvas.height = H * dpr;
     canvas.style.height = `${H}px`;
     const ctx = canvas.getContext("2d");
     ctx.scale(dpr, dpr);
 
-    const w = W;
-    const h = H;
-    const cutoffX = Math.min(w, (cutoffHz / nyquist) * w);
+    ctx.fillStyle = "#fbfaf6";
+    ctx.fillRect(0, 0, W, H);
 
-    // Synthetic 1/f³ power spectrum
-    const specY = (f) => 1 / (1 + Math.pow(f / Math.max(cutoffHz * 0.7, 1), 3));
-
-    // Green fill (signal region)
-    ctx.beginPath();
-    ctx.moveTo(0, h - 4);
-    for (let x = 0; x <= cutoffX; x++) {
-      const y = h - 4 - specY((x / w) * nyquist) * (h - 14);
-      x === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    // Grid
+    ctx.strokeStyle = "rgba(10,10,10,0.06)";
+    ctx.lineWidth = 1;
+    for (let g = 0; g <= 4; g++) {
+      const y = Math.round((g / 4) * H) + 0.5;
+      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
     }
-    ctx.lineTo(cutoffX, h - 4);
-    ctx.closePath();
-    ctx.fillStyle = "rgba(10,10,10,0.10)";
-    ctx.fill();
 
-    // Red fill (noise region)
-    ctx.beginPath();
-    ctx.moveTo(cutoffX, h - 4);
-    for (let x = Math.ceil(cutoffX); x <= w; x++) {
-      const y = h - 4 - specY((x / w) * nyquist) * (h - 14);
-      ctx.lineTo(x, y);
-    }
-    ctx.lineTo(w, h - 4);
-    ctx.closePath();
-    ctx.fillStyle = "rgba(239,68,68,0.10)";
-    ctx.fill();
+    const minG = Math.min(...gains);
+    const maxG = Math.max(...gains);
+    const range = Math.max(maxG - minG, 1);
 
-    // Spectrum line
+    // -3 dB line
+    const y3db = H - 8 - ((-3 - minG) / range) * (H - 16);
     ctx.beginPath();
-    for (let x = 0; x <= w; x++) {
-      const y = h - 4 - specY((x / w) * nyquist) * (h - 14);
-      x === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
-    }
-    ctx.strokeStyle = "#b0afa8";
-    ctx.lineWidth   = 1.5;
-    ctx.stroke();
-
-    // Cutoff dashed line
-    ctx.beginPath();
-    ctx.moveTo(cutoffX, 4);
-    ctx.lineTo(cutoffX, h - 4);
-    ctx.strokeStyle = "rgba(10,10,10,0.6)";
-    ctx.lineWidth   = 1.5;
-    ctx.setLineDash([3, 3]);
+    ctx.moveTo(0, y3db);
+    ctx.lineTo(W, y3db);
+    ctx.strokeStyle = "rgba(239,68,68,0.3)";
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 4]);
     ctx.stroke();
     ctx.setLineDash([]);
 
-    // X axis
+    // Gain curve
     ctx.beginPath();
-    ctx.moveTo(0, h - 4);
-    ctx.lineTo(w, h - 4);
-    ctx.strokeStyle = "#d8d7d0";
-    ctx.lineWidth   = 1;
+    freqs.forEach((f, i) => {
+      const x = (i / (freqs.length - 1)) * W;
+      const y = H - 8 - ((gains[i] - minG) / range) * (H - 16);
+      i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    });
+    ctx.strokeStyle = "#1D9E75";
+    ctx.lineWidth = 2;
     ctx.stroke();
-  }, [cutoffHz, nyquist]);
+  }, [freqs, gains]);
 
+  if (!freqs?.length) return null;
   return (
-    <div className="space-y-2">
-      <p className="text-[10px] text-gray-400 uppercase tracking-widest">Frequency Spectrum</p>
-      <canvas ref={canvasRef} className="w-full block rounded" style={{ height: "80px", border: "1px solid #ebeae5" }} />
-      <div className="flex items-center justify-between text-[10px] text-gray-400">
+    <div>
+      <p className="text-[10px] text-gray-400 uppercase tracking-widest mb-1.5">Filter Response</p>
+      <canvas ref={canvasRef} className="w-full block rounded" style={{ height: "100px", border: "1px solid #ebeae5" }} />
+      <div className="flex justify-between text-[10px] text-gray-400 mt-1">
         <span>0 Hz</span>
-        <span className="text-sf-black font-bold tabular-nums">{cutoffHz} Hz cutoff</span>
-        <span>{nyquist} Hz</span>
-      </div>
-      <div className="flex gap-3 text-[10px]">
-        <span className="flex items-center gap-1">
-          <span className="w-2 h-2 rounded-sm" style={{ background: "rgba(10,10,10,0.25)" }} />
-          <span className="text-sf-black font-semibold">{energyPct}% signal</span>
-        </span>
-        <span className="flex items-center gap-1">
-          <span className="w-2 h-2 rounded-sm" style={{ background: "rgba(239,68,68,0.3)" }} />
-          <span className="text-red-400">{100 - energyPct}% filtered</span>
-        </span>
+        <span className="text-red-400">-3 dB</span>
+        <span>{Math.round(freqs[freqs.length - 1])} Hz</span>
       </div>
     </div>
   );
 }
 
-function NormalizeViz({ analyzeResult, windowMs }) {
+// ── After-filter Signal Canvas ───────────────────────────────────────────────
+
+function SignalPlot({ data, label }) {
   const canvasRef = useRef(null);
-  const nw    = analyzeResult?.normalization_window;
-  const minMs = nw?.min_ms  ?? 100;
-  const maxMs = nw?.max_ms  ?? 2000;
-  const meanMs = nw?.mean_ms ?? 800;
-  const recMs  = nw?.recommended_ms ?? 1000;
 
   useEffect(() => {
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    if (!canvas || !data?.length) return;
     const dpr = window.devicePixelRatio || 1;
     const W = canvas.offsetWidth;
-    const H = 80;
-    canvas.width  = W * dpr;
+    const H = 70;
+    canvas.width = W * dpr;
     canvas.height = H * dpr;
     canvas.style.height = `${H}px`;
     const ctx = canvas.getContext("2d");
     ctx.scale(dpr, dpr);
 
-    const w = W;
-    const h = H;
-    const span = maxMs * 1.15 - minMs * 0.85;
-    const toX  = (ms) => ((ms - minMs * 0.85) / span) * w;
+    ctx.fillStyle = "#fbfaf6";
+    ctx.fillRect(0, 0, W, H);
 
-    // Synthetic log-normal histogram
-    const NUM = 18;
-    const mu    = Math.log(meanMs);
-    const sigma = 0.3;
-    const heights = [];
-    let maxH = 0;
-    for (let i = 0; i < NUM; i++) {
-      const ms = minMs * 0.85 + (i + 0.5) * span / NUM;
-      const v  = Math.exp(-Math.pow(Math.log(Math.max(ms, 1)) - mu, 2) / (2 * sigma * sigma)) / Math.max(ms, 1);
-      heights.push(v);
-      if (v > maxH) maxH = v;
-    }
-    const barW = w / NUM - 1;
-    for (let i = 0; i < NUM; i++) {
-      const x  = i * (barW + 1);
-      const bh = (heights[i] / maxH) * (h - 14);
-      const ms = minMs * 0.85 + (i + 0.5) * span / NUM;
-      ctx.fillStyle = ms <= windowMs ? "rgba(10,10,10,0.45)" : "rgba(10,10,10,0.12)";
-      ctx.fillRect(x, h - 10 - bh, barW, bh);
-    }
+    const minV = Math.min(...data);
+    const maxV = Math.max(...data);
+    const range = Math.max(maxV - minV, 1e-6);
 
-    // Window line
-    const wx = toX(windowMs);
-    if (wx >= 0 && wx <= w) {
-      ctx.beginPath();
-      ctx.moveTo(wx, 4);
-      ctx.lineTo(wx, h - 10);
-      ctx.strokeStyle = "#0a0a0a";
-      ctx.lineWidth   = 2;
-      ctx.stroke();
-    }
-
-    // Recommended line (if different)
-    const rx = toX(recMs);
-    if (Math.abs(rx - wx) > 6 && rx >= 0 && rx <= w) {
-      ctx.beginPath();
-      ctx.moveTo(rx, 4);
-      ctx.lineTo(rx, h - 10);
-      ctx.strokeStyle = "#9CA3AF";
-      ctx.lineWidth   = 1;
-      ctx.setLineDash([3, 3]);
-      ctx.stroke();
-      ctx.setLineDash([]);
-    }
-
-    // X axis
     ctx.beginPath();
-    ctx.moveTo(0, h - 10);
-    ctx.lineTo(w, h - 10);
-    ctx.strokeStyle = "#E5E7EB";
-    ctx.lineWidth   = 1;
+    data.forEach((v, i) => {
+      const x = (i / (data.length - 1)) * W;
+      const y = H - 4 - ((v - minV) / range) * (H - 8);
+      i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    });
+    ctx.strokeStyle = "#3B82F6";
+    ctx.lineWidth = 1.5;
     ctx.stroke();
-  }, [windowMs, minMs, maxMs, meanMs, recMs]);
+  }, [data]);
 
-  const p90 = nw?.p90_ms;
+  if (!data?.length) return null;
   return (
-    <div className="space-y-2">
-      <p className="text-[10px] text-gray-400 uppercase tracking-widest">Event Durations</p>
-      <canvas ref={canvasRef} className="w-full block rounded" style={{ height: "80px" }} />
-      <div className="flex justify-between text-[10px] text-gray-400">
-        <span>{minMs} ms</span>
-        <span>{maxMs} ms</span>
+    <div>
+      <p className="text-[10px] text-gray-400 uppercase tracking-widest mb-1.5">{label}</p>
+      <canvas ref={canvasRef} className="w-full block rounded" style={{ height: "70px", border: "1px solid #ebeae5" }} />
+    </div>
+  );
+}
+
+// ── Feature Explorer (PCA scatter) ───────────────────────────────────────────
+
+function FeatureExplorer({ coords, labels }) {
+  const canvasRef = useRef(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || !coords?.length) return;
+    const dpr = window.devicePixelRatio || 1;
+    const W = canvas.offsetWidth;
+    const H = 280;
+    canvas.width = W * dpr;
+    canvas.height = H * dpr;
+    canvas.style.height = `${H}px`;
+    const ctx = canvas.getContext("2d");
+    ctx.scale(dpr, dpr);
+
+    ctx.fillStyle = "#fbfaf6";
+    ctx.fillRect(0, 0, W, H);
+
+    // Grid
+    ctx.strokeStyle = "rgba(10,10,10,0.06)";
+    ctx.lineWidth = 1;
+    for (let i = 0; i <= 8; i++) {
+      const x = Math.round((i / 8) * W) + 0.5;
+      const y = Math.round((i / 8) * H) + 0.5;
+      ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, H); ctx.stroke();
+      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+    }
+
+    // Axes
+    const xs = coords.map(c => c[0]);
+    const ys = coords.map(c => c.length > 1 ? c[1] : 0);
+    const xMin = Math.min(...xs), xMax = Math.max(...xs);
+    const yMin = Math.min(...ys), yMax = Math.max(...ys);
+    const xRange = Math.max(xMax - xMin, 1e-6);
+    const yRange = Math.max(yMax - yMin, 1e-6);
+    const pad = 20;
+
+    // Unique classes for color assignment
+    const uniqueLabels = [...new Set(labels)];
+    const colorMap = {};
+    uniqueLabels.forEach((l, i) => { colorMap[l] = PALETTE[i % PALETTE.length]; });
+
+    // Draw points
+    coords.forEach((c, i) => {
+      const px = pad + ((c[0] - xMin) / xRange) * (W - 2 * pad);
+      const py = H - pad - ((c.length > 1 ? c[1] : 0) - yMin) / yRange * (H - 2 * pad);
+      ctx.beginPath();
+      ctx.arc(px, py, 3.5, 0, Math.PI * 2);
+      ctx.fillStyle = colorMap[labels[i]] || "#999";
+      ctx.globalAlpha = 0.7;
+      ctx.fill();
+      ctx.globalAlpha = 1;
+    });
+  }, [coords, labels]);
+
+  if (!coords?.length) return null;
+
+  const uniqueLabels = [...new Set(labels)];
+  const colorMap = {};
+  uniqueLabels.forEach((l, i) => { colorMap[l] = PALETTE[i % PALETTE.length]; });
+
+  return (
+    <div>
+      <p className="text-xs text-gray-400 uppercase tracking-widest mb-3">Feature Explorer</p>
+      <canvas ref={canvasRef} className="w-full block rounded-lg" style={{ height: "280px", border: "1px solid #ebeae5" }} />
+      <div className="flex gap-4 mt-2">
+        {uniqueLabels.map((l) => (
+          <span key={l} className="flex items-center gap-1.5 text-xs text-gray-600">
+            <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: colorMap[l] }} />
+            {l}
+          </span>
+        ))}
       </div>
-      <div className="space-y-1 text-[10px]">
-        {[
-          ["Shortest", `${minMs} ms`],
-          ["Longest",  `${maxMs} ms`],
-          p90 ? ["90th pct", `${p90} ms`] : null,
-          ["Your window", `${windowMs} ms`, true],
-        ].filter(Boolean).map(([label, val, accent]) => (
-          <div key={label} className="flex justify-between">
-            <span className={accent ? "text-accent" : "text-gray-400"}>{label}</span>
-            <span className={`font-semibold tabular-nums ${accent ? "text-accent" : "text-gray-600"}`}>{val}</span>
+    </div>
+  );
+}
+
+// ── Feature Importance bars ──────────────────────────────────────────────────
+
+function FeatureImportance({ features }) {
+  if (!features?.length) return null;
+  const maxImp = Math.max(...features.map(f => f.importance));
+
+  return (
+    <div>
+      <p className="text-xs text-gray-400 uppercase tracking-widest mb-3">Feature Importance</p>
+      <div className="space-y-1.5">
+        {features.map(({ name, importance }, i) => (
+          <div key={i} className="flex items-center gap-2">
+            <span className="text-[10px] text-gray-500 font-mono w-32 truncate flex-shrink-0" title={name}>
+              {name}
+            </span>
+            <div className="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden">
+              <div
+                className="h-full rounded-full bg-accent transition-all duration-500"
+                style={{ width: `${(importance / maxImp) * 100}%` }}
+              />
+            </div>
+            <span className="text-[10px] text-gray-400 tabular-nums w-10 text-right">
+              {(importance * 100).toFixed(1)}
+            </span>
           </div>
         ))}
       </div>
@@ -684,1195 +263,336 @@ function NormalizeViz({ analyzeResult, windowMs }) {
   );
 }
 
-function FeaturesViz() {
-  const SCORES = [
-    { id: "kurtosis",      label: "Kurtosis",    score: 0.88 },
-    { id: "fft_energy",    label: "FFT Energy",  score: 0.82 },
-    { id: "rms",           label: "RMS",         score: 0.74 },
-    { id: "peak",          label: "Peak",        score: 0.71 },
-    { id: "dominant_freq", label: "Dom. Freq",   score: 0.68 },
-    { id: "std_dev",       label: "Std Dev",     score: 0.65 },
-    { id: "absolute_max",  label: "Abs Max",     score: 0.60 },
-    { id: "mean",          label: "Mean",        score: 0.42 },
-  ];
-  const col = (s) => s >= 0.75 ? "#1D9E75" : s >= 0.55 ? "#F59E0B" : "#EF4444";
+// ── Main Component ───────────────────────────────────────────────────────────
 
-  return (
-    <div className="space-y-2">
-      <p className="text-[10px] text-gray-400 uppercase tracking-widest">Separability (heuristic)</p>
-      {SCORES.map(({ id, label, score }) => (
-        <div key={id} className="space-y-0.5">
-          <div className="flex justify-between text-[10px]">
-            <span className="text-gray-600">{label}</span>
-            <span className="font-bold tabular-nums" style={{ color: col(score) }}>
-              {Math.round(score * 100)}%
-            </span>
-          </div>
-          <div className="h-1 bg-gray-100 rounded-full overflow-hidden">
-            <div
-              className="h-full rounded-full transition-all duration-500"
-              style={{ width: `${score * 100}%`, backgroundColor: col(score) }}
-            />
-          </div>
-        </div>
-      ))}
-      <p className="text-[9px] text-gray-300 pt-0.5">Based on vibration signal domain knowledge.</p>
-    </div>
-  );
-}
+export default function PipelineScreen({
+  pipelineConfig,
+  setPipelineConfig,
+  projectId,
+  onNext,
+  onBack,
+}) {
+  const [generating, setGenerating] = useState(false);
+  const [genError, setGenError]     = useState(null);
+  const [result, setResult]         = useState(null);
 
-// ── AI Pipeline Designer panel ────────────────────────────────────────────────
+  const cfg = pipelineConfig;
+  const filterCfg = cfg.filter;
 
-function AiDesignerPanel({ design, config, onApplyStage, onApplyAll, onDismiss, animatingBlock }) {
-  const appDesc  = config?.applicationDescription ?? "";
-  const shortDesc = appDesc.length > 72 ? appDesc.slice(0, 72) + "…" : appDesc;
+  // Helpers to update nested config
+  const setFilter = (update) =>
+    setPipelineConfig((c) => ({ ...c, filter: { ...c.filter, ...update } }));
+  const setParam = (key, val) =>
+    setPipelineConfig((c) => ({ ...c, [key]: val }));
 
-  // ALL_FEAT_IDS declared at applyStage call-site instead
-  const stages = [
-    {
-      id:       "filter",
-      name:     "Filter",
-      setting:  design.filter?.skip
-        ? "Skip — hardware filtered"
-        : `${design.filter?.cutoff_hz} Hz · order ${design.filter?.order ?? 4}`,
-      reasoning: design.filter?.skip ? design.filter?.skip_reason : design.filter?.reasoning,
-    },
-    {
-      id:       "normalize",
-      name:     "Normalize",
-      setting:  `${design.normalize?.window_ms} ms · ${design.normalize?.interpolation ?? "cubic"}`,
-      reasoning: design.normalize?.reasoning,
-    },
-    {
-      id:       "features",
-      name:     "Features",
-      setting:  [
-        ...(design.features?.time_domain      ?? []),
-        ...(design.features?.frequency_domain ?? []),
-      ].join(", "),
-      reasoning: design.features?.reasoning,
-    },
-    {
-      id:       "model",
-      name:     "Model",
-      setting:  (design.model?.type ?? "").replace(/_/g, " ").replace(/\b\w/g, c => c.toUpperCase()),
-      reasoning: design.model?.reasoning,
-    },
-  ];
-
-  return (
-    <div
-      className="rounded-xl border border-sf-gray-100 overflow-hidden mb-5"
-      style={{ background: "#fbfaf6" }}
-    >
-      {/* Header */}
-      <div className="flex items-center gap-3 px-5 py-3 border-b border-sf-gray-100">
-        <div className="w-3.5 h-3.5 rounded-full bg-sf-gray-100 flex items-center justify-center flex-shrink-0">
-          <div className="w-1.5 h-1.5 rounded-full bg-sf-black animate-pulse" />
-        </div>
-        <div className="flex-1 min-w-0">
-          <span className="text-xs font-bold text-gray-800 uppercase tracking-widest">AI-Designed Pipeline</span>
-          <span className="text-[9px] font-semibold uppercase tracking-widest text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded ml-1.5">Beta</span>
-          {shortDesc && (
-            <span className="text-xs text-gray-400 font-normal normal-case tracking-normal ml-2">· {shortDesc}</span>
-          )}
-        </div>
-        <button onClick={onDismiss} className="text-xs text-gray-400 hover:text-gray-600 transition-colors flex-shrink-0">
-          Configure manually →
-        </button>
-      </div>
-
-      <div className="px-5 py-4 space-y-4">
-        {/* Overall reasoning */}
-        {design.reasoning && (
-          <p className="text-xs text-gray-600 leading-relaxed border-l-2 border-accent/40 pl-3 italic">
-            {design.reasoning}
-          </p>
-        )}
-
-        {/* Stage cards */}
-        <div className="grid grid-cols-4 gap-3">
-          {stages.map((stage) => (
-            <div
-              key={stage.id}
-              className={`rounded-lg border p-3 transition-all duration-200 ${
-                animatingBlock === stage.id
-                  ? "border-accent bg-accent/10 shadow-md shadow-accent/20"
-                  : "border-gray-200 bg-white"
-              }`}
-            >
-              <p className="text-[10px] text-gray-400 uppercase tracking-widest mb-1">{stage.name}</p>
-              <p className="text-sm font-bold text-gray-800 leading-snug mb-1.5">{stage.setting}</p>
-              <p className="text-[11px] text-gray-500 leading-relaxed mb-3 min-h-[2.5rem]">{stage.reasoning}</p>
-              <button
-                onClick={() => onApplyStage(stage.id)}
-                className="w-full text-[10px] border border-accent/40 text-accent rounded px-2 py-1 hover:bg-accent/5 transition-colors font-bold tracking-wide"
-              >
-                Apply ↗
-              </button>
-            </div>
-          ))}
-        </div>
-
-        {/* Apply All */}
-        <button
-          onClick={onApplyAll}
-          className="w-full py-2.5 bg-accent text-white text-xs font-bold rounded-lg hover:bg-accent-dark transition-colors tracking-wider uppercase shadow-sm shadow-accent/25"
-        >
-          Apply All Settings →
-        </button>
-      </div>
-    </div>
-  );
-}
-
-// ── Add Block Modal ───────────────────────────────────────────────────────────
-
-function AddBlockModal({ projectId, onAdd, onClose }) {
-  const [tab,            setTab]            = useState("standard");
-  const [description,    setDescription]    = useState("");
-  const [generatedCode,  setGeneratedCode]  = useState("");
-  const [isGenerating,   setIsGenerating]   = useState(false);
-  const [genError,       setGenError]       = useState(null);
-
-  async function generateCustom() {
-    setIsGenerating(true);
+  // ── Generate Features ──────────────────────────────────────────────────────
+  async function handleGenerate() {
+    setGenerating(true);
     setGenError(null);
     try {
-      const res  = await fetch(`${API_BASE_URL}/pipeline/custom-block`, {
-        method:  "POST",
+      const res = await fetch(`${API_BASE_URL}/features/generate`, {
+        method: "POST",
         headers: { "Content-Type": "application/json" },
-        body:    JSON.stringify({ description, project_id: projectId ?? "demo-project" }),
+        body: JSON.stringify({
+          project_id:  projectId,
+          window_ms:   cfg.window_ms,
+          stride_ms:   cfg.stride_ms,
+          zero_pad:    cfg.zero_pad,
+          filter_type: filterCfg.filterType,
+          cutoff_hz:   filterCfg.cutoff,
+          order:       filterCfg.order,
+          fft_length:  cfg.fft_length,
+          take_log:    cfg.take_log,
+        }),
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.detail ?? `API ${res.status}`);
-      setGeneratedCode(data.code);
+      if (!res.ok) throw new Error(data.detail || `Server ${res.status}`);
+      setResult(data);
     } catch (err) {
       setGenError(err.message);
     } finally {
-      setIsGenerating(false);
+      setGenerating(false);
     }
   }
 
-  async function addStandard(bt) {
-    try {
-      const res  = await fetch(`${API_BASE_URL}/pipeline/standard-block`, {
-        method:  "POST",
-        headers: { "Content-Type": "application/json" },
-        body:    JSON.stringify({ block_type: bt.id }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.detail ?? `API ${res.status}`);
-      onAdd({ id: `${bt.id}-${Date.now()}`, type: "standard", name: bt.label, skipped: false, code: data.code });
-      onClose();
-    } catch (err) {
-      // silently ignore, user can retry
-    }
-  }
-
-  function addCustom() {
-    if (!generatedCode) return;
-    const name = description.length > 28 ? description.slice(0, 28) + "…" : description;
-    onAdd({ id: `custom-${Date.now()}`, type: "custom", name, skipped: false, code: generatedCode });
-    onClose();
-  }
-
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center" style={{ background: "rgba(0,0,0,0.35)" }}
-         onClick={onClose}>
-      <div className="bg-white rounded-2xl border border-gray-200 w-[560px] shadow-2xl overflow-hidden"
-           style={{ maxHeight: "80vh" }}
-           onClick={(e) => e.stopPropagation()}>
-
-        {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-100">
-          <h2 className="text-sm font-bold text-gray-800 uppercase tracking-widest">Add Pipeline Block</h2>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 transition-colors text-xl leading-none">×</button>
-        </div>
-
-        {/* Tabs */}
-        <div className="flex border-b border-gray-100">
-          {[["standard", "Standard"], ["custom", "Custom (AI)"]].map(([id, label]) => (
-            <button key={id} onClick={() => setTab(id)}
-              className={`flex-1 py-2.5 text-xs font-bold uppercase tracking-widest transition-colors ${
-                tab === id ? "text-accent border-b-2 border-accent -mb-px" : "text-gray-400 hover:text-gray-600"
-              }`}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-
-        <div className="overflow-y-auto" style={{ maxHeight: "calc(80vh - 116px)" }}>
-          {tab === "standard" ? (
-            <div className="p-5 grid grid-cols-2 gap-3">
-              {STANDARD_BLOCK_TYPES.map((bt) => (
-                <button key={bt.id} onClick={() => addStandard(bt)}
-                  className="flex flex-col gap-1.5 p-4 rounded-xl border border-gray-200 hover:border-purple-300 hover:bg-purple-50/40 transition-all text-left group">
-                  <div className="flex items-center gap-2">
-                    <span className="text-[8px] font-bold bg-purple-100 text-purple-600 px-1 py-0.5 rounded tracking-wide">STD</span>
-                    <span className="text-xs font-bold text-gray-800 group-hover:text-purple-700 transition-colors">{bt.label}</span>
-                  </div>
-                  <span className="text-[11px] text-gray-400 leading-relaxed">{bt.desc}</span>
-                </button>
-              ))}
-            </div>
-          ) : (
-            <div className="p-5 space-y-4">
-              <div>
-                <label className="text-xs text-gray-400 uppercase tracking-widest block mb-2">Describe your transformation</label>
-                <textarea
-                  value={description}
-                  onChange={(e) => setDescription(e.target.value)}
-                  placeholder="e.g. Compute the vibration RMS in a 50ms sliding window and smooth it…"
-                  className="w-full border border-gray-200 rounded-lg px-3 py-2.5 text-xs font-mono resize-none outline-none focus:border-accent/40 transition-colors"
-                  rows={3}
-                />
-              </div>
-
-              <button
-                onClick={generateCustom}
-                disabled={!description.trim() || isGenerating}
-                className="w-full py-2 bg-accent text-white text-xs font-bold rounded-lg hover:bg-accent-dark disabled:opacity-40 disabled:cursor-not-allowed transition-colors tracking-widest uppercase"
-              >
-                {isGenerating ? "Generating…" : "Generate with AI ✦"}
-              </button>
-
-              {genError && <p className="text-xs text-red-500">{genError}</p>}
-
-              {generatedCode && (
-                <>
-                  <div>
-                    <label className="text-xs text-gray-400 uppercase tracking-widest block mb-2">Generated code (editable)</label>
-                    <div className="rounded-lg overflow-hidden border border-sf-gray-200" style={{ background: "#fbfaf6" }}>
-                      <Editor
-                        value={generatedCode}
-                        onValueChange={setGeneratedCode}
-                        highlight={(code) => highlight(code, languages.python, "python")}
-                        padding={14}
-                        style={{
-                          fontFamily: "'Fira Code', 'Fira Mono', 'Cascadia Code', monospace",
-                          fontSize: 13,
-                          lineHeight: 1.6,
-                          color: "#0a0a0a",
-                          minHeight: 200,
-                        }}
-                      />
-                    </div>
-                  </div>
-                  <button
-                    onClick={addCustom}
-                    className="w-full py-2 bg-purple-600 text-white text-xs font-bold rounded-lg hover:bg-purple-700 transition-colors tracking-widest uppercase"
-                  >
-                    Add Block →
-                  </button>
-                </>
-              )}
-            </div>
-          )}
-        </div>
-      </div>
-    </div>
-  );
-}
-
-// ── Custom block config panel ─────────────────────────────────────────────────
-
-function CustomBlockPanel({ block, onUpdateCode }) {
-  return (
-    <div className="space-y-4">
-      <div>
-        <SectionLabel>Processing code</SectionLabel>
-        <div className="rounded-lg overflow-hidden border border-sf-gray-200" style={{ background: "#fbfaf6" }}>
-          <Editor
-            value={block.code || "# No code — click 'Edit' to regenerate"}
-            onValueChange={onUpdateCode}
-            highlight={(code) => highlight(code, languages.python, "python")}
-            padding={14}
-            style={{
-              fontFamily: "'Fira Code', 'Fira Mono', 'Cascadia Code', monospace",
-              fontSize: 13,
-              lineHeight: 1.6,
-              color: "#0a0a0a",
-              minHeight: 200,
-            }}
-          />
-        </div>
-      </div>
-      <div className="rounded-lg border border-gray-100 bg-gray-50 p-3 space-y-1">
-        <p className="text-[10px] text-gray-400 uppercase tracking-widest font-semibold mb-1.5">Available in scope</p>
-        {[
-          ["df",               "pandas DataFrame with a_x, a_y, a_z columns"],
-          ["np",               "numpy"],
-          ["SAMPLE_RATE_HZ",   "float (100.0)"],
-          ["filtfilt / hilbert / find_peaks", "scipy.signal"],
-          ["uniform_filter1d", "scipy.ndimage"],
-        ].map(([name, desc]) => (
-          <div key={name} className="flex gap-2 text-[10px]">
-            <code className="text-accent font-mono flex-shrink-0">{name}</code>
-            <span className="text-gray-400">{desc}</span>
-          </div>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-// ── Copilot sidebar ───────────────────────────────────────────────────────────
-
-function RecommendationCard({ title, value, subtext, onApply, applyLabel = "Apply" }) {
-  return (
-    <div className="border border-gray-200 rounded-lg p-3 space-y-2">
-      <p className="text-xs text-gray-400 uppercase tracking-widest">{title}</p>
-      <p className="text-xl font-bold text-gray-800 tabular-nums leading-none">{value}</p>
-      {subtext && <p className="text-xs text-gray-400">{subtext}</p>}
-      <button
-        onClick={onApply}
-        className="w-full text-xs border border-accent/40 text-accent rounded px-3 py-1.5 hover:bg-accent/5 transition-colors font-semibold tracking-wide"
-      >
-        {applyLabel} ↗
-      </button>
-    </div>
-  );
-}
-
-function CopilotSidebar({ analyzeResult, separabilityNote, onApplyCutoff, onApplyWindow, chatHistory, setChatHistory, projectId, onApplyAction, pipelineConfig }) {
-  if (!analyzeResult) {
-    return (
-      <div className="h-full flex flex-col gap-4">
-        <div className="flex items-center gap-2">
-          <div className="w-3.5 h-3.5 rounded-full bg-gray-200 flex items-center justify-center">
-            <div className="w-1.5 h-1.5 rounded-full bg-gray-400" />
-          </div>
-          <h3 className="text-xs uppercase tracking-widest text-gray-400">Copilot</h3>
-          <span className="text-[9px] font-semibold uppercase tracking-widest text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded ml-1.5">Beta</span>
-        </div>
-        <div className="flex flex-col items-center text-center px-2 py-4">
-          <div className="w-10 h-10 rounded-full border-2 border-dashed border-gray-200 flex items-center justify-center mb-3">
-            <svg className="w-4 h-4 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-            </svg>
-          </div>
-          <p className="text-xs text-gray-400 leading-relaxed">
-            Complete data collection to unlock signal-based recommendations.
+    <div className="flex flex-col min-h-0 max-w-5xl mx-auto w-full">
+      {/* Header */}
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h2 className="text-lg font-bold text-gray-800">Spectral Features</h2>
+          <p className="text-xs text-gray-400 mt-1">
+            Configure windowing, filtering, and FFT parameters — then generate features.
           </p>
         </div>
-        <div className="border-t border-gray-200 pt-4">
-          <CopilotChat
-            chatHistory={chatHistory}
-            setChatHistory={setChatHistory}
-            projectId={projectId}
-            onApplyAction={onApplyAction}
-            screen="pipeline"
-            pipelineConfig={pipelineConfig}
-          />
-        </div>
-      </div>
-    );
-  }
-
-  const cf = analyzeResult.cutoff_frequency;
-  const nw = analyzeResult.normalization_window;
-
-  return (
-    <div className="flex flex-col gap-0">
-      {/* Header */}
-      <div className="flex items-center gap-2 mb-4">
-        <div className="w-3.5 h-3.5 rounded-full bg-accent/20 flex items-center justify-center">
-          <div className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" />
-        </div>
-        <h3 className="text-xs uppercase tracking-widest text-gray-500">Copilot</h3>
-        <span className="text-[9px] font-semibold uppercase tracking-widest text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded">Beta</span>
-        <span className="flex-1" />
-        <span className="text-xs text-gray-400 tabular-nums">{analyzeResult.event_count} events</span>
-      </div>
-
-      <div className="space-y-3">
-        {/* Cutoff */}
-        <RecommendationCard
-          title="Cutoff frequency"
-          value={`${cf.recommended_hz} Hz`}
-          subtext={`90% energy · Nyquist ${analyzeResult.sample_rate.declared_hz / 2} Hz`}
-          onApply={onApplyCutoff}
-          applyLabel="Apply to Filter"
-        />
-
-        {/* Window */}
-        <RecommendationCard
-          title="Window length"
-          value={`${nw.recommended_ms} ms`}
-          subtext={`p90: ${nw.p90_ms} ms · mean: ${nw.mean_ms} ms`}
-          onApply={onApplyWindow}
-          applyLabel="Apply to Normalize"
-        />
-
-        {/* Separability */}
-        {separabilityNote && (
-          <div
-            className={`rounded-lg border p-3 ${
-              separabilityNote.ok
-                ? "border-accent/25 bg-accent/5"
-                : "border-amber-200 bg-amber-50"
+        <div className="flex gap-2">
+          <button
+            onClick={onBack}
+            className="px-4 py-2 text-xs text-gray-500 border border-gray-200 rounded hover:bg-gray-50 transition-colors"
+          >
+            ← Back
+          </button>
+          <button
+            onClick={onNext}
+            disabled={!result}
+            className={`px-5 py-2 text-xs font-bold rounded transition-colors ${
+              result
+                ? "bg-accent text-white hover:bg-accent-dark"
+                : "bg-gray-100 text-gray-300 cursor-not-allowed"
             }`}
           >
-            <p className={`text-xs font-semibold uppercase tracking-widest mb-1.5 ${separabilityNote.ok ? "text-accent" : "text-amber-700"}`}>
-              Separability
-            </p>
-            <p className={`text-xs leading-relaxed ${separabilityNote.ok ? "text-gray-600" : "text-amber-700"}`}>
-              {separabilityNote.ok ? "✓ " : "⚠ "}{separabilityNote.text}
-            </p>
-          </div>
-        )}
-
-        {/* Per-axis breakdown */}
-        {Object.keys(cf.axis_cutoffs_hz ?? {}).length > 0 && (
-          <div className="border border-gray-100 rounded-lg p-3">
-            <p className="text-xs text-gray-400 uppercase tracking-widest mb-2">Axis cutoffs</p>
-            <div className="space-y-1.5">
-              {Object.entries(cf.axis_cutoffs_hz).map(([axis, hz]) => {
-                const colors = { ax: "#1D9E75", ay: "#3B82F6", az: "#F59E0B" };
-                const labels = { ax: "a_x", ay: "a_y", az: "a_z" };
-                const pct = Math.min(100, (hz / (analyzeResult.sample_rate.declared_hz / 2)) * 100);
-                return (
-                  <div key={axis} className="flex items-center gap-2">
-                    <span className="text-xs w-7 flex-shrink-0" style={{ color: colors[axis] }}>
-                      {labels[axis] ?? axis}
-                    </span>
-                    <div className="flex-1 h-1 bg-gray-100 rounded-full overflow-hidden">
-                      <div
-                        className="h-full rounded-full"
-                        style={{ width: `${pct}%`, backgroundColor: colors[axis] }}
-                      />
-                    </div>
-                    <span className="text-xs text-gray-500 tabular-nums w-12 text-right">{hz} Hz</span>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-        )}
-
-        {/* Chat */}
-        <div className="border-t border-gray-200 pt-4 mt-2">
-          <CopilotChat
-            chatHistory={chatHistory}
-            setChatHistory={setChatHistory}
-            projectId={projectId}
-            onApplyAction={onApplyAction}
-            screen="pipeline"
-            pipelineConfig={pipelineConfig}
-          />
+            Train Model →
+          </button>
         </div>
       </div>
-    </div>
-  );
-}
 
-// ── Pipeline chain ────────────────────────────────────────────────────────────
-
-function ChevronArrow({ lit, dashed }) {
-  return (
-    <svg
-      className={`w-5 h-5 flex-shrink-0 transition-colors ${lit ? "text-accent/50" : "text-gray-200"}`}
-      viewBox="0 0 20 20"
-      fill="none"
-    >
-      <path
-        d="M7 4l6 6-6 6"
-        stroke="currentColor"
-        strokeWidth="1.5"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeDasharray={dashed ? "3 2" : undefined}
-      />
-    </svg>
-  );
-}
-
-const BLOCK_ICONS = {
-  raw:       <path d="M2 10c2-4 4-6 6-6s4 2 6 6-4 6-6 6-4-2-6-6z" stroke="currentColor" strokeWidth="1.3" fill="none"/>,
-  filter:    <><path d="M3 5h14M6 10h8M9 15h2" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/></>,
-  normalize: <><rect x="3" y="7" width="14" height="6" rx="1" stroke="currentColor" strokeWidth="1.3" fill="none"/><path d="M7 7V5M10 7V3M13 7V5M7 13v2M10 13v4M13 13v2" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/></>,
-  features:  <><path d="M4 6h12M4 10h8M4 14h5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/><circle cx="15" cy="14" r="2" stroke="currentColor" strokeWidth="1.3" fill="none"/></>,
-  model:     <><circle cx="10" cy="7" r="2.5" stroke="currentColor" strokeWidth="1.3" fill="none"/><circle cx="5"  cy="14" r="2"   stroke="currentColor" strokeWidth="1.3" fill="none"/><circle cx="15" cy="14" r="2"   stroke="currentColor" strokeWidth="1.3" fill="none"/><path d="M8 9l-2 3M12 9l2 3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/></>,
-  custom:    <><path d="M6 7l-3 3 3 3M14 7l3 3-3 3" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round"/><path d="M11 5l-2 10" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round"/></>,
-};
-
-function PipelineBlock({
-  block, isActive, isPast, onClick,
-  isFlashing, isAnimating, isAiBadged,
-  canSkip, canRemove, onSkipToggle, onRemove,
-  dragHandleProps,
-}) {
-  const isCustom   = block.type === "custom" || block.type === "standard";
-  const isSkipped  = block.skipped;
-  const highlighted = isFlashing || isAnimating;
-  const icon = BLOCK_ICONS[block.id] ?? BLOCK_ICONS.custom;
-
-  return (
-    <div className="relative group flex-shrink-0">
-      {/* × skip/remove button — shows on hover */}
-      {(canSkip || canRemove) && (
-        <button
-          onClick={(e) => { e.stopPropagation(); canRemove ? onRemove() : onSkipToggle(); }}
-          className="absolute -top-1.5 -right-1.5 z-10 w-4 h-4 rounded-full bg-white border border-gray-200 flex items-center justify-center text-gray-400 hover:text-red-400 hover:border-red-300 transition-colors opacity-0 group-hover:opacity-100 shadow-sm"
-          title={canRemove ? "Remove block" : (isSkipped ? "Unskip block" : "Skip block")}
-        >
-          <span className="text-[10px] leading-none">×</span>
-        </button>
-      )}
-
-      <button
-        {...(dragHandleProps || {})}
-        onClick={onClick}
-        className={`
-          relative flex flex-col items-center gap-2 px-4 py-3 rounded-xl border-2 transition-all duration-200
-          min-w-[90px] select-none
-          ${isSkipped
-            ? "border-gray-100 bg-gray-50 opacity-60"
-            : highlighted
-            ? "border-accent bg-accent/15 shadow-lg shadow-accent/30"
-            : isActive && isCustom
-            ? "border-purple-400 shadow-sm shadow-purple-100"
-            : isActive
-            ? "border-accent bg-accent/8 shadow-sm shadow-accent/20"
-            : isPast
-            ? "border-accent/30 bg-accent/3 text-gray-600 hover:border-accent/50"
-            : isCustom
-            ? "border-purple-200 hover:border-purple-300"
-            : "border-gray-200 text-gray-400 hover:border-gray-300 hover:text-gray-600"
-          }
-        `}
-        style={
-          isSkipped      ? {}
-          : highlighted  ? { backgroundColor: "rgba(10,10,10,0.08)" }
-          : isActive && isCustom ? { backgroundColor: "rgba(10,10,10,0.05)" }
-          : isActive     ? { backgroundColor: "rgba(10,10,10,0.04)" }
-          : isPast       ? { backgroundColor: "rgba(10,10,10,0.02)" }
-          : isCustom     ? { backgroundColor: "rgba(10,10,10,0.02)" }
-          : {}
-        }
-      >
-        {/* AI badge */}
-        {isAiBadged && !highlighted && !isSkipped && (
-          <span className="absolute top-1 right-1 text-[8px] font-bold bg-accent text-white px-1 py-0.5 rounded-sm leading-none tracking-wide">
-            AI
-          </span>
-        )}
-
-        {/* Custom / Standard type badge */}
-        {isCustom && !isSkipped && (
-          <span className="absolute top-1 left-1 text-[8px] font-bold bg-purple-100 text-purple-600 px-1 py-0.5 rounded-sm leading-none tracking-wide">
-            {block.type === "standard" ? "STD" : "</>"}
-          </span>
-        )}
-
-        <svg
-          viewBox="0 0 20 20"
-          className={`w-5 h-5 ${
-            isSkipped           ? "text-gray-300"
-            : highlighted || (isActive && !isCustom) ? "text-accent"
-            : isActive && isCustom ? "text-purple-500"
-            : isPast            ? "text-accent/60"
-            : isCustom          ? "text-purple-400"
-            : "text-gray-300"
-          }`}
-        >
-          {icon}
-        </svg>
-
-        <div className="text-center">
-          <p className={`text-xs font-bold tracking-wide ${
-            isSkipped                           ? "line-through text-gray-300"
-            : highlighted || (isActive && !isCustom) ? "text-accent"
-            : isActive && isCustom              ? "text-purple-600"
-            : isPast                            ? "text-gray-600"
-            : isCustom                          ? "text-purple-500"
-            : "text-gray-400"
-          }`}>
-            {block.label || block.name}
-          </p>
-          {!isSkipped && (
-            <p className={`text-[10px] mt-0.5 ${
-              highlighted || (isActive && !isCustom) ? "text-accent/70"
-              : isActive && isCustom ? "text-purple-400"
-              : isCustom ? "text-purple-300"
-              : "text-gray-300"
-            }`}>
-              {block.sublabel || (isCustom ? (block.type === "standard" ? "Standard" : "Custom") : "")}
-            </p>
-          )}
-          {/* "AI applied" text */}
-          <p
-            className="text-[9px] font-bold text-accent uppercase tracking-widest overflow-hidden leading-none transition-all duration-300"
-            style={{ maxHeight: isFlashing ? "12px" : "0px", opacity: isFlashing ? 1 : 0, marginTop: isFlashing ? "4px" : "0px" }}
-          >
-            AI applied
-          </p>
-        </div>
-
-        {/* SKIPPED overlay */}
-        {isSkipped && (
-          <div className="absolute inset-0 flex items-center justify-center rounded-xl pointer-events-none">
-            <span className="text-[9px] font-bold text-gray-300 uppercase tracking-widest" style={{ transform: "rotate(-12deg)" }}>
-              SKIPPED
-            </span>
-          </div>
-        )}
-      </button>
-    </div>
-  );
-}
-
-// ── Main component ────────────────────────────────────────────────────────────
-
-export default function PipelineScreen({
-  config, analyzeResult, separabilityNote,
-  pipelineConfig, setPipelineConfig,
-  projectId, chatHistory, setChatHistory, onApplyAction,
-  pendingFlash, onFlashConsumed,
-  aiPipelineDesign, setAiPipelineDesign,
-  aiConfiguredBlocks, setAiConfiguredBlocks,
-  onGoToSetup,
-  pipelineBlocks, setPipelineBlocks,
-  onNext, onBack,
-}) {
-  const [activeBlock,    setActiveBlock]    = useState("filter");
-  const [flashingBlock,  setFlashingBlock]  = useState(null);
-  const [animatingBlock, setAnimatingBlock] = useState(null);
-  const [isDesigning,    setIsDesigning]    = useState(false);
-  const [designError,    setDesignError]    = useState(null);
-  const [dismissed,      setDismissed]      = useState(false);
-  const [showAddModal,   setShowAddModal]   = useState(false);
-  // Track which blocks the user has clicked — starts with "filter" since it's auto-selected on mount
-  const [visitedBlocks,  setVisitedBlocks]  = useState(() => new Set(["filter"]));
-  // Internal pipeline step (0=filter, 1=normalize, 2=features, 3=model)
-  const [pipelineStep,   setPipelineStep]   = useState(0);
-
-  function goToStep(step) {
-    setPipelineStep(step);
-    setActiveBlock(PIPELINE_STEPS[step]);
-    setVisitedBlocks((prev) => {
-      const next = new Set(prev);
-      next.add(PIPELINE_STEPS[step]);
-      return next;
-    });
-  }
-
-  function handlePipelineNext() {
-    if (pipelineStep < PIPELINE_STEPS.length - 1) {
-      goToStep(pipelineStep + 1);
-    } else {
-      onNext?.();
-    }
-  }
-
-  function handlePipelineBack() {
-    if (pipelineStep > 0) {
-      goToStep(pipelineStep - 1);
-    } else {
-      onBack?.();
-    }
-  }
-
-  function handleBlockClick(blockId) {
-    setActiveBlock(blockId);
-    setVisitedBlocks((prev) => new Set([...prev, blockId]));
-    // Sync pipelineStep when clicking a main pipeline block
-    const idx = PIPELINE_STEPS.indexOf(blockId);
-    if (idx !== -1) setPipelineStep(idx);
-  }
-
-  // Consume pendingFlash from App: navigate to the block, flash it for 600ms
-  useEffect(() => {
-    if (!pendingFlash) return;
-    setActiveBlock(pendingFlash);
-    setFlashingBlock(pendingFlash);
-    const idx = PIPELINE_STEPS.indexOf(pendingFlash);
-    if (idx !== -1) setPipelineStep(idx);
-    onFlashConsumed?.();
-    const t = setTimeout(() => setFlashingBlock(null), 600);
-    return () => clearTimeout(t);
-  }, [pendingFlash]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Derive slices from lifted state
-  const filterCfg = pipelineConfig.filter;
-  const normCfg   = pipelineConfig.normalize;
-  const features  = pipelineConfig.features;
-  const model     = pipelineConfig.model;
-
-  // Base setters (used by AI apply — do NOT clear badge)
-  const setFilterCfg = (updater) =>
-    setPipelineConfig((cfg) => ({ ...cfg, filter: typeof updater === "function" ? updater(cfg.filter) : updater }));
-  const setNormCfg = (updater) =>
-    setPipelineConfig((cfg) => ({ ...cfg, normalize: typeof updater === "function" ? updater(cfg.normalize) : updater }));
-  const setFeatures = (updater) =>
-    setPipelineConfig((cfg) => ({ ...cfg, features: typeof updater === "function" ? updater(cfg.features) : updater }));
-  const setModel = (val) =>
-    setPipelineConfig((cfg) => ({ ...cfg, model: val }));
-
-  // Manual setters — also clear the AI badge on that block
-  const setFilterCfgManual = (updater) => {
-    setFilterCfg(updater);
-    setAiConfiguredBlocks?.((b) => ({ ...b, filter: false }));
-  };
-  const setNormCfgManual = (updater) => {
-    setNormCfg(updater);
-    setAiConfiguredBlocks?.((b) => ({ ...b, normalize: false }));
-  };
-  const setFeaturesManual = (updater) => {
-    setFeatures(updater);
-    setAiConfiguredBlocks?.((b) => ({ ...b, features: false }));
-  };
-  const setModelManual = (val) => {
-    setModel(val);
-    setAiConfiguredBlocks?.((b) => ({ ...b, model: false }));
-  };
-
-  // For isPast: find active block position in pipelineBlocks (raw = -1)
-  const activeIdx = activeBlock === "raw" ? -1 : (pipelineBlocks || []).findIndex((b) => b.id === activeBlock);
-
-  function applyRecommendedCutoff() {
-    if (!analyzeResult) return;
-    setFilterCfgManual((c) => ({ ...c, cutoff: Math.round(analyzeResult.cutoff_frequency.recommended_hz) }));
-    setActiveBlock("filter");
-  }
-
-  function applyRecommendedWindow() {
-    if (!analyzeResult) return;
-    setNormCfgManual((c) => ({ ...c, window: analyzeResult.normalization_window.recommended_ms }));
-    setActiveBlock("normalize");
-  }
-
-  // ── Pipeline block management ────────────────────────────────────────────────
-
-  function handleDragEnd(result) {
-    if (!result.destination || result.destination.index === result.source.index) return;
-    const items    = Array.from(pipelineBlocks || []);
-    const [moved]  = items.splice(result.source.index, 1);
-    items.splice(result.destination.index, 0, moved);
-    setPipelineBlocks?.(items);
-  }
-
-  function toggleSkip(blockId) {
-    setPipelineBlocks?.((blocks) =>
-      blocks.map((b) => b.id === blockId ? { ...b, skipped: !b.skipped } : b)
-    );
-  }
-
-  function removeBlock(blockId) {
-    setPipelineBlocks?.((blocks) => blocks.filter((b) => b.id !== blockId));
-    if (activeBlock === blockId) setActiveBlock("filter");
-  }
-
-  function addBlock(newBlock) {
-    setPipelineBlocks?.((blocks) => [...blocks, newBlock]);
-    setActiveBlock(newBlock.id);
-    setShowAddModal(false);
-  }
-
-  function updateBlockCode(blockId, code) {
-    setPipelineBlocks?.((blocks) =>
-      blocks.map((b) => b.id === blockId ? { ...b, code } : b)
-    );
-  }
-
-  // ── AI Pipeline Designer ─────────────────────────────────────────────────────
-
-  async function handleDesign() {
-    setIsDesigning(true);
-    setDesignError(null);
-    try {
-      const res = await fetch(`${API_BASE_URL}/pipeline/design`, {
-        method:  "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          project_id:              projectId ?? "demo-project",
-          application_description: config?.applicationDescription ?? "",
-          hardware_preprocessing:  config?.hardwarePreprocessing  ?? { type: "none" },
-          signal_analysis: analyzeResult ? {
-            sample_rate_hz:        analyzeResult.sample_rate?.declared_hz,
-            recommended_cutoff_hz: analyzeResult.cutoff_frequency?.recommended_hz,
-            recommended_window_ms: analyzeResult.normalization_window?.recommended_ms,
-            event_count:           analyzeResult.event_count,
-          } : null,
-        }),
-      });
-      if (!res.ok) {
-        const body = await res.json().catch(() => ({}));
-        throw new Error(body.detail ?? `API ${res.status}`);
-      }
-      const data = await res.json();
-      setAiPipelineDesign?.(data);
-      setDismissed(false);
-    } catch (err) {
-      setDesignError(err.message);
-    } finally {
-      setIsDesigning(false);
-    }
-  }
-
-  function applyStage(stageId) {
-    const d = aiPipelineDesign;
-    if (!d) return;
-    const ALL_IDS = ["mean", "std_dev", "rms", "peak", "absolute_max", "fft_energy", "dominant_freq", "kurtosis"];
-    if (stageId === "filter") {
-      if (!d.filter?.skip) {
-        setFilterCfg((c) => ({ ...c, cutoff: Math.round(d.filter.cutoff_hz), order: d.filter.order ?? c.order }));
-      }
-      setAiConfiguredBlocks?.((b) => ({ ...b, filter: true }));
-    } else if (stageId === "normalize") {
-      setNormCfg((c) => ({ ...c, window: d.normalize.window_ms, interpolation: d.normalize.interpolation ?? c.interpolation }));
-      setAiConfiguredBlocks?.((b) => ({ ...b, normalize: true }));
-    } else if (stageId === "features") {
-      const aiFeats = [...(d.features?.time_domain ?? []), ...(d.features?.frequency_domain ?? [])];
-      const newF = {};
-      ALL_IDS.forEach((id) => { newF[id] = aiFeats.includes(id); });
-      newF.mean = true; // mean is always required — it is used by other features in C export
-      setFeatures(newF);
-      setAiConfiguredBlocks?.((b) => ({ ...b, features: true }));
-    } else if (stageId === "model") {
-      setModel(d.model.type);
-      setAiConfiguredBlocks?.((b) => ({ ...b, model: true }));
-    }
-  }
-
-  async function handleApplyAll() {
-    const stages = ["filter", "normalize", "features", "model"];
-    for (const stage of stages) {
-      setAnimatingBlock(stage);
-      setActiveBlock(stage);
-      applyStage(stage);
-      await new Promise((r) => setTimeout(r, 200));
-    }
-    setAnimatingBlock(null);
-    setActiveBlock("filter");
-  }
-
-  // ── Rendering ────────────────────────────────────────────────────────────────
-
-  const hasAppDesc = !!(config?.applicationDescription?.trim());
-
-  // Show the designer panel when: design exists and not dismissed, OR currently loading/error
-  const showDesignerPanel = !dismissed && (aiPipelineDesign || isDesigning || designError);
-
-  function renderConfigPanel() {
-    // Check if activeBlock is a custom/standard block
-    const activeBlockObj = (pipelineBlocks || []).find((b) => b.id === activeBlock);
-    if (activeBlockObj && (activeBlockObj.type === "custom" || activeBlockObj.type === "standard")) {
-      return (
-        <CustomBlockPanel
-          block={activeBlockObj}
-          onUpdateCode={(code) => updateBlockCode(activeBlock, code)}
-        />
-      );
-    }
-    switch (activeBlock) {
-      case "raw":       return <RawPanel config={config} />;
-      case "filter":    return <FilterPanel cfg={filterCfg} setCfg={setFilterCfgManual} analyzeResult={analyzeResult} />;
-
-      case "features":  return <FeaturesPanel features={features} setFeatures={setFeaturesManual} />;
-      case "model":     return <ModelPanel model={model} setModel={setModelManual} />;
-      default:          return null;
-    }
-  }
-
-  function renderViz() {
-    if (!analyzeResult) return null;
-    if (activeBlock === "filter") {
-      return <FilterViz analyzeResult={analyzeResult} cutoffHz={filterCfg.cutoff} />;
-    }
-    if (activeBlock === "normalize") {
-      return <NormalizeViz analyzeResult={analyzeResult} windowMs={normCfg.window} />;
-    }
-    if (activeBlock === "features") {
-      return <FeaturesViz analyzeResult={analyzeResult} />;
-    }
-    return null;
-  }
-
-  const viz = renderViz();
-
-  return (
-    <div className="flex flex-col gap-5 min-h-0">
-
-      {/* ── AI Designer panel (full width, top) ─────────────────────────────── */}
-      {showDesignerPanel && aiPipelineDesign && (
-        <AiDesignerPanel
-          design={aiPipelineDesign}
-          config={config}
-          onApplyStage={applyStage}
-          onApplyAll={handleApplyAll}
-          onDismiss={() => setDismissed(true)}
-          animatingBlock={animatingBlock}
-        />
-      )}
-
-      {/* Loading state */}
-      {isDesigning && (
-        <div className="border border-sf-gray-100 rounded-xl px-5 py-4 flex items-center gap-3"
-             style={{ background: "#f8f7f3" }}>
-          <div className="w-3.5 h-3.5 rounded-full bg-sf-gray-100 flex items-center justify-center flex-shrink-0">
-            <div className="w-1.5 h-1.5 rounded-full bg-sf-black animate-ping" />
-          </div>
-          <p className="text-xs text-gray-600">Analyzing your application and signal data…</p>
-        </div>
-      )}
-
-      {/* Error state */}
-      {designError && !isDesigning && (
-        <div className="border border-red-200 bg-red-50 rounded-xl px-5 py-3 flex items-center justify-between">
-          <p className="text-xs text-red-600">{designError}</p>
-          <button onClick={handleDesign} className="text-xs text-red-500 underline ml-4">Retry</button>
-        </div>
-      )}
-
-      {/* ── Main layout: left (chain + config) + right (sidebar) ────────────── */}
-      <div className="flex gap-6 min-h-0 flex-1">
-
-        {/* ── Left: chain + config ──────────────────────────────────────────── */}
-        <div className="flex-1 flex flex-col gap-5 min-w-0">
-
-          {/* Pipeline chain */}
-          <div className="border border-gray-200 rounded-xl p-5 bg-white flex-shrink-0">
-            <div className="flex items-center justify-between mb-4">
-              <p className="text-xs text-gray-400 uppercase tracking-widest">Pipeline</p>
-
-              {/* Design / Redesign button */}
-              {!isDesigning && (
-                hasAppDesc ? (
-                  <button
-                    onClick={handleDesign}
-                    className="flex items-center gap-1.5 text-xs font-bold text-accent border border-accent/30 px-3 py-1 rounded-lg hover:bg-accent/5 transition-colors"
-                  >
-                    <span className="w-1.5 h-1.5 rounded-full bg-accent animate-pulse" />
-                    {aiPipelineDesign && !dismissed ? "Redesign with AI" : "Design Pipeline with AI"}
-                    <span className="text-[9px] font-semibold uppercase tracking-widest text-accent/60 bg-accent/10 px-1.5 py-0.5 rounded">Beta</span>
-                  </button>
-                ) : (
-                  <button
-                    onClick={onGoToSetup}
-                    className="text-[10px] text-gray-400 hover:text-accent transition-colors"
-                  >
-                    Add application context on Setup to enable AI design →
-                  </button>
-                )
+      <div className="grid grid-cols-3 gap-6">
+        {/* ── Left column: controls ─────────────────────────────────────── */}
+        <div className="col-span-1 space-y-6">
+          {/* Time series settings */}
+          <div className="border border-gray-200 rounded-xl p-5 space-y-5">
+            <div className="flex items-center gap-2 mb-1">
+              <h3 className="text-xs font-bold text-gray-800 uppercase tracking-widest">
+                Time Series
+              </h3>
+              {result?.fs && (
+                <span className="text-[10px] text-accent font-semibold bg-accent/10 px-1.5 py-0.5 rounded">
+                  {result.fs} Hz
+                </span>
               )}
             </div>
 
-            <DragDropContext onDragEnd={handleDragEnd}>
-              <div className="flex items-center gap-1 overflow-x-auto pb-1">
-                {/* Raw block — always first, static */}
-                <PipelineBlock
-                  block={{ id: "raw", label: "Raw Signal", sublabel: "Source", type: "builtin", skipped: false }}
-                  isActive={activeBlock === "raw"}
-                  isPast={false}
-                  onClick={() => handleBlockClick("raw")}
-                  isFlashing={false}
-                  isAnimating={false}
-                  isAiBadged={false}
-                />
-                <ChevronArrow lit={activeBlock !== "raw"} />
-
-                {/* Dynamic blocks (draggable) */}
-                <Droppable droppableId="pipeline-chain" direction="horizontal">
-                  {(provided) => (
-                    <div
-                      ref={provided.innerRef}
-                      {...provided.droppableProps}
-                      className="flex items-center gap-1"
-                    >
-                      {(pipelineBlocks || []).map((block, i) => {
-                        const blockIdx   = i;  // position in pipelineBlocks
-                        const isPast     = activeIdx > blockIdx;
-                        const canSkip    = block.type === "builtin" && block.id !== "model" && block.id !== "raw";
-                        const canRemove  = block.type === "custom" || block.type === "standard";
-                        const isLast     = i === (pipelineBlocks || []).length - 1;
-
-                        return (
-                          <Draggable key={block.id} draggableId={block.id} index={i}>
-                            {(drag) => (
-                              <div
-                                ref={drag.innerRef}
-                                {...drag.draggableProps}
-                                className="flex items-center gap-1"
-                              >
-                                <PipelineBlock
-                                  block={block}
-                                  isActive={activeBlock === block.id}
-                                  isPast={isPast}
-                                  onClick={() => handleBlockClick(block.id)}
-                                  isFlashing={flashingBlock === block.id}
-                                  isAnimating={animatingBlock === block.id}
-                                  isAiBadged={!!(aiConfiguredBlocks?.[block.id])}
-                                  canSkip={canSkip}
-                                  canRemove={canRemove}
-                                  onSkipToggle={() => toggleSkip(block.id)}
-                                  onRemove={() => removeBlock(block.id)}
-                                  dragHandleProps={drag.dragHandleProps}
-                                />
-                                {!isLast && (
-                                  <ChevronArrow lit={isPast && !block.skipped} dashed={block.skipped} />
-                                )}
-                              </div>
-                            )}
-                          </Draggable>
-                        );
-                      })}
-                      {provided.placeholder}
-                    </div>
-                  )}
-                </Droppable>
-
-                {/* + Add Block button */}
-                <button
-                  onClick={() => setShowAddModal(true)}
-                  className="flex-shrink-0 flex flex-col items-center gap-2 px-3 py-3 rounded-xl border-2 border-dashed border-gray-200 text-gray-300 hover:border-purple-300 hover:text-purple-400 hover:bg-purple-50/30 transition-all min-w-[72px]"
-                  title="Add a custom processing block"
-                >
-                  <svg viewBox="0 0 20 20" className="w-5 h-5" fill="none">
-                    <path d="M10 4v12M4 10h12" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round"/>
-                  </svg>
-                  <span className="text-[10px] font-semibold tracking-wide">Add</span>
-                </button>
-              </div>
-            </DragDropContext>
+            <NumberInput
+              label="Window size"
+              value={cfg.window_ms}
+              onChange={(v) => setParam("window_ms", v)}
+              min={100} max={10000} unit="ms"
+            />
+            <NumberInput
+              label="Window increase (stride)"
+              value={cfg.stride_ms}
+              onChange={(v) => setParam("stride_ms", v)}
+              min={50} max={10000} unit="ms"
+            />
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={cfg.zero_pad}
+                onChange={(e) => setParam("zero_pad", e.target.checked)}
+                className="accent-accent"
+              />
+              <span className="text-xs text-gray-600">Zero-pad short windows</span>
+            </label>
           </div>
 
-          {/* Stage breadcrumb — always visible; clicking a stage navigates to it */}
-          <div className="flex items-center justify-center gap-1 -mt-2 mb-1 flex-wrap">
-            {[
-              { id: "filter",    label: "Filter"    },
-              { id: "normalize", label: "Normalize" },
-              { id: "features",  label: "Features"  },
-              { id: "model",     label: "Model"     },
-            ].map(({ id, label }, i) => {
-              const isActive  = activeBlock === id;
-              const isVisited = visitedBlocks.has(id);
-              return (
-                <React.Fragment key={id}>
-                  {i > 0 && (
-                    <svg className="w-2.5 h-2.5 text-gray-200 flex-shrink-0" viewBox="0 0 10 10" fill="none">
-                      <path d="M3 2l4 3-4 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"/>
-                    </svg>
-                  )}
-                  <button
-                    onClick={() => handleBlockClick(id)}
-                    className={`text-xs px-1.5 py-0.5 rounded transition-colors ${
-                      isActive
-                        ? "bg-accent/10 text-accent font-semibold"
-                        : isVisited
-                        ? "text-gray-500 hover:text-gray-700 hover:bg-gray-100"
-                        : "text-gray-300 hover:text-gray-500 hover:bg-gray-50"
+          {/* Filter */}
+          <div className="border border-gray-200 rounded-xl p-5 space-y-5">
+            <h3 className="text-xs font-bold text-gray-800 uppercase tracking-widest mb-1">
+              Filter
+            </h3>
+
+            <div>
+              <SectionLabel>Type</SectionLabel>
+              <div className="space-y-1.5">
+                {FILTER_TYPES.map(({ id, label, desc }) => (
+                  <label
+                    key={id}
+                    className={`flex items-start gap-3 p-2.5 rounded-lg border cursor-pointer transition-colors ${
+                      filterCfg.filterType === id
+                        ? "border-accent/40 bg-accent/5"
+                        : "border-gray-200 hover:border-gray-300"
                     }`}
                   >
-                    {label}
-                  </button>
-                </React.Fragment>
-              );
-            })}
-            <span className="text-gray-300 text-[10px] ml-1.5 tracking-wide">
-              — configure each stage, then hit Next →
-            </span>
+                    <span className={`mt-0.5 w-3.5 h-3.5 rounded-full border-2 flex-shrink-0 flex items-center justify-center ${
+                      filterCfg.filterType === id ? "border-accent" : "border-gray-300"
+                    }`}>
+                      {filterCfg.filterType === id && <span className="w-1.5 h-1.5 rounded-full bg-accent" />}
+                    </span>
+                    <input
+                      type="radio" className="sr-only" value={id}
+                      checked={filterCfg.filterType === id}
+                      onChange={() => setFilter({ filterType: id })}
+                    />
+                    <div>
+                      <span className={`text-xs font-semibold ${filterCfg.filterType === id ? "text-gray-800" : "text-gray-600"}`}>
+                        {label}
+                      </span>
+                      <p className="text-xs text-gray-400 mt-0.5">{desc}</p>
+                    </div>
+                  </label>
+                ))}
+              </div>
+            </div>
+
+            {filterCfg.filterType !== "none" && (
+              <>
+                <NumberInput
+                  label="Cutoff frequency"
+                  value={filterCfg.cutoff}
+                  onChange={(v) => setFilter({ cutoff: v })}
+                  min={0.1} max={500} step={0.1} unit="Hz"
+                />
+                <div>
+                  <SectionLabel>Order</SectionLabel>
+                  <div className="inline-flex border border-gray-200 rounded overflow-hidden">
+                    {ORDER_OPTIONS.map((o) => (
+                      <button
+                        key={o}
+                        onClick={() => setFilter({ order: o })}
+                        className={`px-3 py-1.5 text-xs transition-colors ${
+                          filterCfg.order === o ? "bg-accent text-white" : "text-gray-500 hover:bg-gray-50"
+                        }`}
+                      >
+                        {o}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              </>
+            )}
           </div>
 
-          {/* Config panel */}
-          <div className="border border-gray-200 rounded-xl p-6 bg-white flex-1">
-            {(() => {
-              const activeBlockObj  = (pipelineBlocks || []).find((b) => b.id === activeBlock);
-              const isCustomActive  = activeBlockObj && (activeBlockObj.type === "custom" || activeBlockObj.type === "standard");
-              const staticBlock     = activeBlock === "raw"
-                ? { label: "Raw Signal", sublabel: "Source" }
-                : (pipelineBlocks || []).find((b) => b.id === activeBlock)
-                  ?? { label: activeBlock, sublabel: "" };
-              return (
-                <div className="flex items-center gap-3 mb-6 pb-4 border-b border-gray-100">
-                  <div className={`w-2 h-2 rounded-full ${isCustomActive ? "bg-purple-500" : "bg-accent"}`} />
-                  <h2 className="text-sm font-bold text-gray-800 tracking-wide uppercase">
-                    {staticBlock.label || staticBlock.name}
-                  </h2>
-                  {isCustomActive && (
-                    <span className="text-[9px] font-bold bg-purple-100 text-purple-600 px-1.5 py-0.5 rounded tracking-wide uppercase">
-                      {activeBlockObj.type}
-                    </span>
-                  )}
-                  <span className="text-xs text-gray-400">
-                    {staticBlock.sublabel || (isCustomActive ? "Custom processing" : "")}
-                  </span>
-                </div>
-              );
-            })()}
+          {/* Analysis */}
+          <div className="border border-gray-200 rounded-xl p-5 space-y-5">
+            <h3 className="text-xs font-bold text-gray-800 uppercase tracking-widest mb-1">
+              Spectral Analysis
+            </h3>
 
-            {/* Two-column: controls left, viz right */}
-            <div className="flex gap-6">
-              <div className="flex-1 min-w-0">
-                {renderConfigPanel()}
+            <div>
+              <SectionLabel>FFT length</SectionLabel>
+              <div className="inline-flex border border-gray-200 rounded overflow-hidden">
+                {FFT_OPTIONS.map((n) => (
+                  <button
+                    key={n}
+                    onClick={() => setParam("fft_length", n)}
+                    className={`px-3 py-1.5 text-xs transition-colors ${
+                      cfg.fft_length === n ? "bg-accent text-white" : "text-gray-500 hover:bg-gray-50"
+                    }`}
+                  >
+                    {n}
+                  </button>
+                ))}
               </div>
-              {viz && (
-                <div className="w-48 flex-shrink-0 border-l border-gray-100 pl-5">
-                  {viz}
+            </div>
+
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                checked={cfg.take_log}
+                onChange={(e) => setParam("take_log", e.target.checked)}
+                className="accent-accent"
+              />
+              <span className="text-xs text-gray-600">Take log of spectrum</span>
+            </label>
+          </div>
+
+          {/* Generate button */}
+          <button
+            onClick={handleGenerate}
+            disabled={generating || !projectId}
+            className={`w-full py-3 rounded-xl text-sm font-bold tracking-wide transition-all ${
+              generating || !projectId
+                ? "bg-gray-100 text-gray-300 cursor-not-allowed"
+                : "bg-accent text-white hover:bg-accent-dark shadow-md shadow-accent/25 active:scale-[0.98]"
+            }`}
+          >
+            {generating ? "Generating features…" : "Generate Features"}
+          </button>
+          {genError && (
+            <p className="text-xs text-red-500 mt-1">{genError}</p>
+          )}
+        </div>
+
+        {/* ── Right columns: results / DSP viz ──────────────────────────── */}
+        <div className="col-span-2 space-y-6">
+          {!result && !generating && (
+            <div className="flex flex-col items-center justify-center py-20 text-center">
+              <div className="w-14 h-14 rounded-full border-2 border-dashed border-gray-200 flex items-center justify-center mb-4">
+                <svg className="w-6 h-6 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
+                    d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
+                </svg>
+              </div>
+              <p className="text-sm text-gray-400">
+                Configure parameters and click <strong>Generate Features</strong>
+              </p>
+              <p className="text-xs text-gray-300 mt-1">
+                Upload data on the Collect screen first.
+              </p>
+            </div>
+          )}
+
+          {generating && (
+            <div className="flex flex-col items-center justify-center py-20">
+              <div className="w-8 h-8 border-2 border-accent border-t-transparent rounded-full animate-spin mb-4" />
+              <p className="text-sm text-gray-500">Extracting features…</p>
+            </div>
+          )}
+
+          {result && !generating && (
+            <>
+              {/* Summary cards */}
+              <div className="grid grid-cols-4 gap-3">
+                {[
+                  { label: "Sample Rate", value: `${result.fs} Hz` },
+                  { label: "Train Windows", value: result.n_train_windows },
+                  { label: "Test Windows", value: result.n_test_windows },
+                  { label: "Features", value: result.n_features },
+                ].map(({ label, value }) => (
+                  <div key={label} className="border border-gray-200 rounded-lg px-3 py-3">
+                    <p className="text-[10px] text-gray-400 uppercase tracking-widest mb-1">{label}</p>
+                    <p className="text-lg font-bold text-gray-800 tabular-nums">{value}</p>
+                  </div>
+                ))}
+              </div>
+
+              {/* Window counts per class */}
+              {result.window_counts && (
+                <div className="border border-gray-200 rounded-xl p-4">
+                  <p className="text-xs text-gray-400 uppercase tracking-widest mb-3">Windows per Class</p>
+                  <div className="space-y-2">
+                    {Object.entries(result.window_counts).map(([label, counts], i) => (
+                      <div key={label} className="flex items-center gap-3 text-xs">
+                        <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: PALETTE[i % PALETTE.length] }} />
+                        <span className="font-semibold text-gray-700 w-20">{label}</span>
+                        <span className="text-gray-500">train: {counts.train}</span>
+                        <span className="text-gray-400">test: {counts.test}</span>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
-            </div>
-          </div>
-        </div>
 
-        {/* ── Right: copilot sidebar ─────────────────────────────────────────── */}
-        <div className="w-60 flex-shrink-0">
-          <div className="border border-gray-200 rounded-xl p-4 bg-white h-full">
-            <CopilotSidebar
-              analyzeResult={analyzeResult}
-              separabilityNote={separabilityNote}
-              onApplyCutoff={applyRecommendedCutoff}
-              onApplyWindow={applyRecommendedWindow}
-              chatHistory={chatHistory}
-              setChatHistory={setChatHistory}
-              projectId={projectId}
-              onApplyAction={onApplyAction}
-              pipelineConfig={pipelineConfig}
-            />
-          </div>
+              {/* DSP visualizations */}
+              <div className="grid grid-cols-2 gap-4">
+                <div className="border border-gray-200 rounded-xl p-4 space-y-4">
+                  <FilterResponsePlot
+                    freqs={result.filter_response?.freqs_hz}
+                    gains={result.filter_response?.gain_db}
+                  />
+                  <SignalPlot data={result.example_filtered_signal} label="After-filter Signal" />
+                </div>
+                <div className="border border-gray-200 rounded-xl p-4">
+                  <SignalPlot data={result.example_log_spectrum} label="Spectral Power (log)" />
+                </div>
+              </div>
+
+              {/* Feature Explorer + Importance */}
+              <div className="grid grid-cols-2 gap-6">
+                <div className="border border-gray-200 rounded-xl p-5">
+                  <FeatureExplorer
+                    coords={result.pca?.coords}
+                    labels={result.pca?.labels}
+                  />
+                </div>
+                <div className="border border-gray-200 rounded-xl p-5">
+                  <FeatureImportance features={result.feature_importance} />
+                </div>
+              </div>
+            </>
+          )}
         </div>
       </div>
-
-      {/* ── Pipeline internal navigation ─────────────────────────────────────── */}
-      <div className="flex items-center justify-between py-3 border-t border-gray-100 mt-1 flex-shrink-0">
-        <button
-          onClick={handlePipelineBack}
-          className="px-5 py-2 rounded border text-sm tracking-wide transition-colors border-gray-300 text-gray-600 hover:border-gray-400 hover:text-gray-800"
-        >
-          ← Back
-        </button>
-
-        {/* Step progress dots */}
-        <div className="flex items-center gap-1.5">
-          {PIPELINE_STEPS.map((step, i) => (
-            <span
-              key={step}
-              onClick={() => goToStep(i)}
-              className={`w-2 h-2 rounded-full cursor-pointer transition-colors ${
-                i === pipelineStep ? "bg-accent" : i < pipelineStep ? "bg-accent/40" : "bg-gray-200"
-              }`}
-            />
-          ))}
-        </div>
-
-        <button
-          onClick={handlePipelineNext}
-          className="px-5 py-2 rounded text-sm tracking-wide transition-colors bg-accent text-white hover:bg-accent-dark min-w-[160px] text-center"
-        >
-          {NEXT_LABELS[pipelineStep]}
-        </button>
-      </div>
-
-      {/* ── Add Block Modal ──────────────────────────────────────────────────── */}
-      {showAddModal && (
-        <AddBlockModal
-          projectId={projectId}
-          onAdd={addBlock}
-          onClose={() => setShowAddModal(false)}
-        />
-      )}
     </div>
   );
 }
