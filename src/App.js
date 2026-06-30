@@ -118,7 +118,7 @@ function AppContent() {
   const [aiConfiguredBlocks,setAiConfiguredBlocks]= useState(saved?.aiConfiguredBlocks?? {});
   const [pipelineBlocks,    setPipelineBlocks]    = useState(saved?.pipelineBlocks    ?? INITIAL_BLOCKS);
   const [trainResults,      setTrainResults]      = useState(saved?.trainResults      ?? null);
-  const [pendingFlash,      setPendingFlash]      = useState(null);
+  const [pendingFlash,      setPendingFlash]      = useState(null); // eslint-disable-line no-unused-vars
   const [submitLoading,     setSubmitLoading]     = useState(false);
   const [submitError,       setSubmitError]       = useState(null);
   const [showResetConfirm,  setShowResetConfirm]  = useState(false);
