@@ -482,7 +482,7 @@ export default function SpectralFeaturesScreen({ pipelineConfig, setPipelineConf
       <div className="flex items-center gap-3 mb-4">
         <button onClick={onBack}
           className="text-xs text-gray-500 border border-gray-200 rounded px-3 py-1.5 hover:bg-gray-50 transition-colors">
-          ← Impulse
+          ← Go back
         </button>
         <h2 className="text-lg font-bold text-gray-800">Spectral Features</h2>
       </div>
