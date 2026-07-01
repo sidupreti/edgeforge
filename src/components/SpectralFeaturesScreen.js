@@ -39,10 +39,10 @@ function NumberInput({ label, value, onChange, min, max, step = 1, unit = "" }) 
 
 function AxisLegend({ axes }) {
   return (
-    <div className="flex gap-3 mt-1.5">
+    <div className="flex gap-3 mt-1">
       {(axes || ["a_x", "a_y", "a_z"]).map((ax) => (
         <span key={ax} className="flex items-center gap-1 text-[10px] text-gray-500">
-          <span className="w-2 h-2 rounded-sm" style={{ backgroundColor: AXIS_COLORS[ax] || "#999" }} />
+          <span className="w-2.5 h-0.5 rounded-sm" style={{ backgroundColor: AXIS_COLORS[ax] || "#999" }} />
           {AXIS_LABELS[ax] || ax}
         </span>
       ))}
@@ -50,9 +50,132 @@ function AxisLegend({ axes }) {
   );
 }
 
-// ── Multi-axis Signal Canvas ─────────────────────────────────────────────────
+function CopyButton({ text }) {
+  const [copied, setCopied] = useState(false);
+  return (
+    <button
+      onClick={() => {
+        navigator.clipboard.writeText(text).then(() => {
+          setCopied(true);
+          setTimeout(() => setCopied(false), 1500);
+        });
+      }}
+      className={`text-[10px] font-semibold px-2 py-0.5 rounded border transition-colors flex-shrink-0 ${
+        copied
+          ? "text-accent border-accent/30 bg-accent/5"
+          : "text-gray-400 border-gray-200 hover:text-gray-600 hover:border-gray-300"
+      }`}
+    >
+      {copied ? "Copied" : "Copy"}
+    </button>
+  );
+}
 
-function MultiAxisPlot({ dataPerAxis, label, axes }) {
+// ── Hero Raw Signal (full recording, window highlighted) ─────────────────────
+
+function HeroRawSignal({ fullRaw, axes, windowStartMs, windowEndMs, durationMs, fs }) {
+  const canvasRef = useRef(null);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || !fullRaw) return;
+    const entries = Object.entries(fullRaw);
+    if (entries.length === 0) return;
+
+    const dpr = window.devicePixelRatio || 1;
+    const W = canvas.offsetWidth;
+    const H = 200;
+    canvas.width = W * dpr;
+    canvas.height = H * dpr;
+    canvas.style.height = `${H}px`;
+    const ctx = canvas.getContext("2d");
+    ctx.scale(dpr, dpr);
+
+    const LM = 40; // left margin for Y axis label
+    const BM = 20; // bottom margin for X axis label
+    const plotW = W - LM - 8;
+    const plotH = H - BM - 8;
+
+    ctx.fillStyle = "#fbfaf6";
+    ctx.fillRect(0, 0, W, H);
+
+    // Grid
+    ctx.strokeStyle = "rgba(10,10,10,0.06)";
+    ctx.lineWidth = 1;
+    for (let g = 0; g <= 5; g++) {
+      const y = Math.round(4 + (g / 5) * plotH) + 0.5;
+      ctx.beginPath(); ctx.moveTo(LM, y); ctx.lineTo(W - 8, y); ctx.stroke();
+    }
+
+    // Global min/max
+    const allVals = entries.flatMap(([, arr]) => arr);
+    const minV = Math.min(...allVals);
+    const maxV = Math.max(...allVals);
+    const range = Math.max(maxV - minV, 1e-6);
+
+    // Window highlight
+    if (durationMs > 0) {
+      const x1 = LM + (windowStartMs / durationMs) * plotW;
+      const x2 = LM + (windowEndMs / durationMs) * plotW;
+      ctx.fillStyle = "rgba(29,158,117,0.08)";
+      ctx.fillRect(x1, 4, x2 - x1, plotH);
+      ctx.strokeStyle = "rgba(29,158,117,0.35)";
+      ctx.lineWidth = 1;
+      ctx.strokeRect(x1, 4, x2 - x1, plotH);
+    }
+
+    // Draw axes
+    entries.forEach(([col, data]) => {
+      ctx.beginPath();
+      data.forEach((v, i) => {
+        const x = LM + (i / Math.max(data.length - 1, 1)) * plotW;
+        const y = 4 + plotH - ((v - minV) / range) * plotH;
+        i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+      });
+      ctx.strokeStyle = AXIS_COLORS[col] || "#999";
+      ctx.lineWidth = 1.2;
+      ctx.stroke();
+    });
+
+    // Y axis label
+    ctx.save();
+    ctx.translate(10, 4 + plotH / 2);
+    ctx.rotate(-Math.PI / 2);
+    ctx.fillStyle = "#9ca3af";
+    ctx.font = "9px system-ui, sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText("Acceleration (m/s\u00B2)", 0, 0);
+    ctx.restore();
+
+    // X axis label
+    ctx.fillStyle = "#9ca3af";
+    ctx.font = "9px system-ui, sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText("Time (ms)", LM + plotW / 2, H - 4);
+
+    // X axis ticks
+    ctx.textAlign = "left";
+    ctx.fillText("0", LM, H - 10);
+    ctx.textAlign = "right";
+    ctx.fillText(`${Math.round(durationMs)}`, W - 8, H - 10);
+  }, [fullRaw, axes, windowStartMs, windowEndMs, durationMs, fs]);
+
+  if (!fullRaw) return null;
+  return (
+    <div>
+      <div className="flex items-center justify-between mb-1.5">
+        <p className="text-xs text-gray-400 uppercase tracking-widest">Raw Data</p>
+        <AxisLegend axes={axes} />
+      </div>
+      <canvas ref={canvasRef} className="w-full block rounded-lg"
+        style={{ height: "200px", border: "1px solid #ebeae5" }} />
+    </div>
+  );
+}
+
+// ── Labeled Multi-axis Signal Canvas ─────────────────────────────────────────
+
+function LabeledPlot({ dataPerAxis, title, yLabel, xLabel, axes, height = 140 }) {
   const canvasRef = useRef(null);
 
   useEffect(() => {
@@ -63,12 +186,17 @@ function MultiAxisPlot({ dataPerAxis, label, axes }) {
 
     const dpr = window.devicePixelRatio || 1;
     const W = canvas.offsetWidth;
-    const H = 100;
+    const H = height;
     canvas.width = W * dpr;
     canvas.height = H * dpr;
     canvas.style.height = `${H}px`;
     const ctx = canvas.getContext("2d");
     ctx.scale(dpr, dpr);
+
+    const LM = 36;
+    const BM = 18;
+    const plotW = W - LM - 8;
+    const plotH = H - BM - 8;
 
     ctx.fillStyle = "#fbfaf6";
     ctx.fillRect(0, 0, W, H);
@@ -77,11 +205,10 @@ function MultiAxisPlot({ dataPerAxis, label, axes }) {
     ctx.strokeStyle = "rgba(10,10,10,0.06)";
     ctx.lineWidth = 1;
     for (let g = 0; g <= 4; g++) {
-      const y = Math.round((g / 4) * H) + 0.5;
-      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
+      const y = Math.round(4 + (g / 4) * plotH) + 0.5;
+      ctx.beginPath(); ctx.moveTo(LM, y); ctx.lineTo(W - 8, y); ctx.stroke();
     }
 
-    // Global min/max across all axes
     const allVals = entries.flatMap(([, arr]) => arr);
     const minV = Math.min(...allVals);
     const maxV = Math.max(...allVals);
@@ -90,82 +217,41 @@ function MultiAxisPlot({ dataPerAxis, label, axes }) {
     entries.forEach(([col, data]) => {
       ctx.beginPath();
       data.forEach((v, i) => {
-        const x = (i / Math.max(data.length - 1, 1)) * W;
-        const y = H - 4 - ((v - minV) / range) * (H - 8);
+        const x = LM + (i / Math.max(data.length - 1, 1)) * plotW;
+        const y = 4 + plotH - ((v - minV) / range) * plotH;
         i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
       });
       ctx.strokeStyle = AXIS_COLORS[col] || "#999";
       ctx.lineWidth = 1.5;
       ctx.stroke();
     });
-  }, [dataPerAxis, axes]);
+
+    // Y axis label
+    ctx.save();
+    ctx.translate(10, 4 + plotH / 2);
+    ctx.rotate(-Math.PI / 2);
+    ctx.fillStyle = "#9ca3af";
+    ctx.font = "9px system-ui, sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText(yLabel, 0, 0);
+    ctx.restore();
+
+    // X axis label
+    ctx.fillStyle = "#9ca3af";
+    ctx.font = "9px system-ui, sans-serif";
+    ctx.textAlign = "center";
+    ctx.fillText(xLabel, LM + plotW / 2, H - 3);
+  }, [dataPerAxis, axes, yLabel, xLabel, height]);
 
   if (!dataPerAxis || Object.keys(dataPerAxis).length === 0) return null;
   return (
     <div>
-      <p className="text-[10px] text-gray-400 uppercase tracking-widest mb-1.5">{label}</p>
-      <canvas ref={canvasRef} className="w-full block rounded" style={{ height: "100px", border: "1px solid #ebeae5" }} />
-      <AxisLegend axes={axes} />
-    </div>
-  );
-}
-
-// ── Filter Response Canvas ───────────────────────────────────────────────────
-
-function FilterResponsePlot({ freqs, gains }) {
-  const canvasRef = useRef(null);
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas || !freqs?.length) return;
-    const dpr = window.devicePixelRatio || 1;
-    const W = canvas.offsetWidth;
-    const H = 100;
-    canvas.width = W * dpr;
-    canvas.height = H * dpr;
-    canvas.style.height = `${H}px`;
-    const ctx = canvas.getContext("2d");
-    ctx.scale(dpr, dpr);
-
-    ctx.fillStyle = "#fbfaf6";
-    ctx.fillRect(0, 0, W, H);
-
-    ctx.strokeStyle = "rgba(10,10,10,0.06)";
-    ctx.lineWidth = 1;
-    for (let g = 0; g <= 4; g++) {
-      const y = Math.round((g / 4) * H) + 0.5;
-      ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(W, y); ctx.stroke();
-    }
-
-    const minG = Math.min(...gains);
-    const maxG = Math.max(...gains);
-    const range = Math.max(maxG - minG, 1);
-
-    // -3 dB line
-    const y3db = H - 8 - ((-3 - minG) / range) * (H - 16);
-    ctx.beginPath(); ctx.moveTo(0, y3db); ctx.lineTo(W, y3db);
-    ctx.strokeStyle = "rgba(239,68,68,0.3)"; ctx.lineWidth = 1;
-    ctx.setLineDash([4, 4]); ctx.stroke(); ctx.setLineDash([]);
-
-    ctx.beginPath();
-    freqs.forEach((f, i) => {
-      const x = (i / (freqs.length - 1)) * W;
-      const y = H - 8 - ((gains[i] - minG) / range) * (H - 16);
-      i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
-    });
-    ctx.strokeStyle = "#1D9E75"; ctx.lineWidth = 2; ctx.stroke();
-  }, [freqs, gains]);
-
-  if (!freqs?.length) return null;
-  return (
-    <div>
-      <p className="text-[10px] text-gray-400 uppercase tracking-widest mb-1.5">Filter Response</p>
-      <canvas ref={canvasRef} className="w-full block rounded" style={{ height: "100px", border: "1px solid #ebeae5" }} />
-      <div className="flex justify-between text-[10px] text-gray-400 mt-1">
-        <span>0 Hz</span>
-        <span className="text-red-400">-3 dB</span>
-        <span>{Math.round(freqs[freqs.length - 1])} Hz</span>
+      <div className="flex items-center justify-between mb-1.5">
+        <p className="text-[10px] text-gray-400 uppercase tracking-widest">{title}</p>
+        <AxisLegend axes={axes} />
       </div>
+      <canvas ref={canvasRef} className="w-full block rounded-lg"
+        style={{ height: `${height}px`, border: "1px solid #ebeae5" }} />
     </div>
   );
 }
@@ -316,7 +402,7 @@ export default function SpectralFeaturesScreen({
       .catch(() => {});
   }, [projectId, selectedDsId]);
 
-  // ── Preview window when recording or params change ───────────────────────
+  // ── Preview window ──────────────────────────────────────────────────────
   const fetchPreview = useCallback(async () => {
     if (!selectedDsId) return;
     setPreviewLoading(true);
@@ -348,11 +434,7 @@ export default function SpectralFeaturesScreen({
       filterCfg.filterType, filterCfg.cutoff, filterCfg.order,
       cfg.fft_length, cfg.take_log]);
 
-  useEffect(() => {
-    fetchPreview();
-  }, [fetchPreview]);
-
-  // Reset window index when recording changes
+  useEffect(() => { fetchPreview(); }, [fetchPreview]);
   useEffect(() => { setWindowIndex(0); }, [selectedDsId]);
 
   // ── Generate Features ────────────────────────────────────────────────────
@@ -385,7 +467,7 @@ export default function SpectralFeaturesScreen({
     }
   }
 
-  // ── Group recordings by label for the dropdown ───────────────────────────
+  // ── Recording dropdown groups ────────────────────────────────────────────
   const recordingsByLabel = {};
   recordings.forEach((r) => {
     if (!recordingsByLabel[r.label]) recordingsByLabel[r.label] = [];
@@ -395,87 +477,111 @@ export default function SpectralFeaturesScreen({
   const selectedRec = recordings.find((r) => r.id === selectedDsId);
   const nWindows = preview?.n_windows || 1;
 
+  // Build raw/processed feature strings for copy panels
+  const rawFeatStr = preview
+    ? Object.values(preview.raw).flat().map((v) => v.toFixed(4)).join(", ")
+    : "";
+  const procFeatStr = preview?.processed_features
+    ? preview.processed_features.map((v) => v.toFixed(4)).join(", ")
+    : "";
+
   return (
     <div className="flex flex-col min-h-0 max-w-6xl mx-auto w-full">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-5">
+      {/* ── 1. Header + selectors ──────────────────────────────────────── */}
+      <div className="flex items-center justify-between mb-4">
         <div className="flex items-center gap-3">
-          <button
-            onClick={onBack}
-            className="text-xs text-gray-500 border border-gray-200 rounded px-3 py-1.5 hover:bg-gray-50 transition-colors"
-          >
+          <button onClick={onBack}
+            className="text-xs text-gray-500 border border-gray-200 rounded px-3 py-1.5 hover:bg-gray-50 transition-colors">
             ← Impulse
           </button>
-          <div>
-            <h2 className="text-lg font-bold text-gray-800">Spectral Features</h2>
-            <p className="text-xs text-gray-400 mt-0.5">
-              Configure filter + FFT parameters, preview per-window DSP, then generate the feature set.
-            </p>
-          </div>
+          <h2 className="text-lg font-bold text-gray-800">Spectral Features</h2>
         </div>
       </div>
 
-      {/* ── Top: Sample / Window selector ──────────────────────────────────── */}
-      <div className="border border-gray-200 rounded-xl p-4 mb-5">
-        <div className="flex items-center gap-4 flex-wrap">
-          {/* Recording dropdown */}
-          <div>
-            <label className="text-[10px] text-gray-400 uppercase tracking-widest block mb-1">Recording</label>
-            <select
-              value={selectedDsId ?? ""}
-              onChange={(e) => setSelectedDsId(Number(e.target.value))}
-              className="border border-gray-200 rounded px-2.5 py-1.5 text-xs outline-none focus:border-accent min-w-[220px]"
-            >
-              {Object.entries(recordingsByLabel).map(([label, recs]) => (
-                <optgroup key={label} label={label}>
-                  {recs.map((r) => (
-                    <option key={r.id} value={r.id}>
-                      {r.source_filename} ({r.n_samples} samples)
-                    </option>
-                  ))}
-                </optgroup>
-              ))}
-            </select>
-          </div>
-
-          {/* Window dropdown */}
-          <div>
-            <label className="text-[10px] text-gray-400 uppercase tracking-widest block mb-1">Window</label>
-            <select
-              value={windowIndex}
-              onChange={(e) => setWindowIndex(Number(e.target.value))}
-              className="border border-gray-200 rounded px-2.5 py-1.5 text-xs outline-none focus:border-accent min-w-[120px]"
-            >
-              {Array.from({ length: nWindows }, (_, i) => (
-                <option key={i} value={i}>Window {i + 1}</option>
-              ))}
-            </select>
-          </div>
-
-          {/* Label badge + raw feature summary */}
-          {selectedRec && (
-            <div className="flex items-center gap-3 ml-auto">
-              <span className="text-[10px] text-gray-400 uppercase tracking-widest">Label</span>
-              <span className="text-xs font-bold text-white bg-accent px-2 py-0.5 rounded">
-                {selectedRec.label}
+      {/* Recording / Window selector bar */}
+      <div className="flex items-end gap-4 flex-wrap mb-4">
+        <div>
+          <label className="text-[10px] text-gray-400 uppercase tracking-widest block mb-1">Recording</label>
+          <select value={selectedDsId ?? ""} onChange={(e) => setSelectedDsId(Number(e.target.value))}
+            className="border border-gray-200 rounded px-2.5 py-1.5 text-xs outline-none focus:border-accent min-w-[240px]">
+            {Object.entries(recordingsByLabel).map(([label, recs]) => (
+              <optgroup key={label} label={label}>
+                {recs.map((r) => (
+                  <option key={r.id} value={r.id}>{r.source_filename} ({r.n_samples} samples)</option>
+                ))}
+              </optgroup>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="text-[10px] text-gray-400 uppercase tracking-widest block mb-1">Window</label>
+          <select value={windowIndex} onChange={(e) => setWindowIndex(Number(e.target.value))}
+            className="border border-gray-200 rounded px-2.5 py-1.5 text-xs outline-none focus:border-accent min-w-[120px]">
+            {Array.from({ length: nWindows }, (_, i) => (
+              <option key={i} value={i}>Window {i + 1}</option>
+            ))}
+          </select>
+        </div>
+        {selectedRec && (
+          <div className="flex items-center gap-2 ml-auto">
+            <span className="text-xs font-bold text-white bg-accent px-2 py-0.5 rounded">{selectedRec.label}</span>
+            {preview && (
+              <span className="text-[10px] text-gray-400 tabular-nums">
+                {preview.window_start_ms}–{preview.window_end_ms} ms · {preview.fs} Hz
               </span>
-              {preview && (
-                <span className="text-[10px] text-gray-400">
-                  {preview.window_start_ms}–{preview.window_end_ms} ms
-                  {preview.fs && <> · {preview.fs} Hz</>}
-                </span>
-              )}
-            </div>
-          )}
-
-          {previewLoading && (
-            <div className="w-4 h-4 border-2 border-accent border-t-transparent rounded-full animate-spin ml-2" />
-          )}
-        </div>
+            )}
+          </div>
+        )}
+        {previewLoading && (
+          <div className="w-4 h-4 border-2 border-accent border-t-transparent rounded-full animate-spin" />
+        )}
       </div>
 
-      <div className="grid grid-cols-3 gap-5">
-        {/* ── Left column: Parameters ──────────────────────────────────────── */}
+      {/* ── 2. Hero raw signal (full recording, window highlighted) ───── */}
+      {preview?.full_raw && (
+        <div className="mb-5">
+          <HeroRawSignal
+            fullRaw={preview.full_raw}
+            axes={preview.axes}
+            windowStartMs={preview.window_start_ms}
+            windowEndMs={preview.window_end_ms}
+            durationMs={preview.duration_ms}
+            fs={preview.fs}
+          />
+        </div>
+      )}
+
+      {/* ── 3. Raw features + Processed features (copyable) ──────────── */}
+      {preview && (
+        <div className="grid grid-cols-2 gap-4 mb-5">
+          <div className="border border-gray-200 rounded-xl p-3">
+            <div className="flex items-center justify-between mb-1.5">
+              <p className="text-[10px] text-gray-400 uppercase tracking-widest font-semibold">Raw features</p>
+              <CopyButton text={rawFeatStr} />
+            </div>
+            <div className="max-h-16 overflow-y-auto">
+              <p className="text-[9px] font-mono text-gray-500 leading-relaxed break-all">
+                {rawFeatStr.slice(0, 600)}{rawFeatStr.length > 600 ? "…" : ""}
+              </p>
+            </div>
+          </div>
+          <div className="border border-gray-200 rounded-xl p-3">
+            <div className="flex items-center justify-between mb-1.5">
+              <p className="text-[10px] text-gray-400 uppercase tracking-widest font-semibold">Processed features</p>
+              <CopyButton text={procFeatStr} />
+            </div>
+            <div className="max-h-16 overflow-y-auto">
+              <p className="text-[9px] font-mono text-gray-500 leading-relaxed break-all">
+                {procFeatStr.slice(0, 600)}{procFeatStr.length > 600 ? "…" : ""}
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── 4. Parameters (left) + DSP result charts (right, stacked) ── */}
+      <div className="grid grid-cols-3 gap-5 mb-5">
+        {/* Left: parameters */}
         <div className="col-span-1 space-y-5">
           {/* Filter */}
           <div className="border border-gray-200 rounded-xl p-4 space-y-4">
@@ -543,127 +649,117 @@ export default function SpectralFeaturesScreen({
               <span className="text-xs text-gray-600">Take log of spectrum</span>
             </label>
           </div>
-
-          {/* Generate button */}
-          <button onClick={handleGenerate} disabled={generating || !projectId}
-            className={`w-full py-3 rounded-xl text-sm font-bold tracking-wide transition-all ${
-              generating || !projectId
-                ? "bg-gray-100 text-gray-300 cursor-not-allowed"
-                : "bg-accent text-white hover:bg-accent-dark shadow-md shadow-accent/25 active:scale-[0.98]"
-            }`}>
-            {generating ? "Generating features…" : "Generate Features"}
-          </button>
-          {genError && <p className="text-xs text-red-500 mt-1">{genError}</p>}
         </div>
 
-        {/* ── Right columns: DSP preview + results ─────────────────────────── */}
-        <div className="col-span-2 space-y-5">
-          {/* Per-window DSP preview */}
+        {/* Right: DSP result charts — stacked vertically, enlarged */}
+        <div className="col-span-2 space-y-4">
           {preview && !previewLoading && (
-            <div className="grid grid-cols-2 gap-4">
-              <div className="border border-gray-200 rounded-xl p-4 space-y-4">
-                <FilterResponsePlot
-                  freqs={preview.filter_response?.freqs_hz}
-                  gains={preview.filter_response?.gain_db}
-                />
-                <MultiAxisPlot
+            <>
+              <div className="border border-gray-200 rounded-xl p-4">
+                <LabeledPlot
                   dataPerAxis={preview.filtered}
-                  label="After-filter Signal"
+                  title="After-filter Signal"
+                  yLabel="Value"
+                  xLabel="Sample #"
                   axes={preview.axes}
+                  height={160}
                 />
               </div>
-              <div className="border border-gray-200 rounded-xl p-4 space-y-4">
-                <MultiAxisPlot
-                  dataPerAxis={preview.raw}
-                  label="Raw Signal"
-                  axes={preview.axes}
-                />
-                <MultiAxisPlot
+              <div className="border border-gray-200 rounded-xl p-4">
+                <LabeledPlot
                   dataPerAxis={preview.spectrum}
-                  label="Spectral Power (log)"
+                  title="Spectral Power"
+                  yLabel="Energy"
+                  xLabel="Frequency (Hz)"
                   axes={preview.axes}
+                  height={160}
                 />
               </div>
-            </div>
+            </>
           )}
 
-          {/* No preview yet */}
           {!preview && !previewLoading && recordings.length === 0 && (
             <div className="flex flex-col items-center justify-center py-16 text-center">
-              <div className="w-14 h-14 rounded-full border-2 border-dashed border-gray-200 flex items-center justify-center mb-4">
-                <svg className="w-6 h-6 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5}
-                    d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z" />
-                </svg>
-              </div>
               <p className="text-sm text-gray-400">
                 Upload data on the <strong>Collect</strong> screen to see per-window DSP preview.
               </p>
             </div>
           )}
 
-          {/* Loading spinner for preview */}
           {previewLoading && (
             <div className="flex items-center justify-center py-12">
               <div className="w-6 h-6 border-2 border-accent border-t-transparent rounded-full animate-spin" />
             </div>
           )}
+        </div>
+      </div>
 
-          {/* ── Generate features results ────────────────────────────────── */}
-          {generating && (
-            <div className="flex flex-col items-center justify-center py-12">
-              <div className="w-8 h-8 border-2 border-accent border-t-transparent rounded-full animate-spin mb-4" />
-              <p className="text-sm text-gray-500">Extracting features across all recordings…</p>
-            </div>
-          )}
+      {/* ── 5. Generate Features button ────────────────────────────────── */}
+      <div className="mb-6">
+        <button onClick={handleGenerate} disabled={generating || !projectId}
+          className={`w-full max-w-xs mx-auto block py-3 rounded-xl text-sm font-bold tracking-wide transition-all ${
+            generating || !projectId
+              ? "bg-gray-100 text-gray-300 cursor-not-allowed"
+              : "bg-accent text-white hover:bg-accent-dark shadow-md shadow-accent/25 active:scale-[0.98]"
+          }`}>
+          {generating ? "Generating features…" : "Generate Features"}
+        </button>
+        {genError && <p className="text-xs text-red-500 mt-2 text-center">{genError}</p>}
+      </div>
 
-          {result && !generating && (
-            <>
-              {/* Summary cards */}
-              <div className="grid grid-cols-4 gap-3">
-                {[
-                  { label: "Sample Rate", value: `${result.fs} Hz` },
-                  { label: "Train Windows", value: result.n_train_windows },
-                  { label: "Test Windows", value: result.n_test_windows },
-                  { label: "Features", value: result.n_features },
-                ].map(({ label, value }) => (
-                  <div key={label} className="border border-gray-200 rounded-lg px-3 py-3">
-                    <p className="text-[10px] text-gray-400 uppercase tracking-widest mb-1">{label}</p>
-                    <p className="text-lg font-bold text-gray-800 tabular-nums">{value}</p>
+      {/* ── 6. Dataset-level results ───────────────────────────────────── */}
+      {generating && (
+        <div className="flex flex-col items-center justify-center py-12">
+          <div className="w-8 h-8 border-2 border-accent border-t-transparent rounded-full animate-spin mb-4" />
+          <p className="text-sm text-gray-500">Extracting features across all recordings…</p>
+        </div>
+      )}
+
+      {result && !generating && (
+        <div className="space-y-5 pb-8">
+          {/* Summary cards */}
+          <div className="grid grid-cols-4 gap-3">
+            {[
+              { label: "Sample Rate", value: `${result.fs} Hz` },
+              { label: "Train Windows", value: result.n_train_windows },
+              { label: "Test Windows", value: result.n_test_windows },
+              { label: "Features", value: result.n_features },
+            ].map(({ label, value }) => (
+              <div key={label} className="border border-gray-200 rounded-lg px-3 py-3">
+                <p className="text-[10px] text-gray-400 uppercase tracking-widest mb-1">{label}</p>
+                <p className="text-lg font-bold text-gray-800 tabular-nums">{value}</p>
+              </div>
+            ))}
+          </div>
+
+          {/* Window counts per class */}
+          {result.window_counts && (
+            <div className="border border-gray-200 rounded-xl p-4">
+              <p className="text-xs text-gray-400 uppercase tracking-widest mb-3">Windows per Class</p>
+              <div className="space-y-2">
+                {Object.entries(result.window_counts).map(([label, counts], i) => (
+                  <div key={label} className="flex items-center gap-3 text-xs">
+                    <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: PALETTE[i % PALETTE.length] }} />
+                    <span className="font-semibold text-gray-700 w-20">{label}</span>
+                    <span className="text-gray-500">train: {counts.train}</span>
+                    <span className="text-gray-400">test: {counts.test}</span>
                   </div>
                 ))}
               </div>
-
-              {/* Window counts per class */}
-              {result.window_counts && (
-                <div className="border border-gray-200 rounded-xl p-4">
-                  <p className="text-xs text-gray-400 uppercase tracking-widest mb-3">Windows per Class</p>
-                  <div className="space-y-2">
-                    {Object.entries(result.window_counts).map(([label, counts], i) => (
-                      <div key={label} className="flex items-center gap-3 text-xs">
-                        <span className="w-2.5 h-2.5 rounded-full flex-shrink-0" style={{ backgroundColor: PALETTE[i % PALETTE.length] }} />
-                        <span className="font-semibold text-gray-700 w-20">{label}</span>
-                        <span className="text-gray-500">train: {counts.train}</span>
-                        <span className="text-gray-400">test: {counts.test}</span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Feature Explorer + Importance */}
-              <div className="grid grid-cols-2 gap-5">
-                <div className="border border-gray-200 rounded-xl p-5">
-                  <FeatureExplorer coords={result.pca?.coords} labels={result.pca?.labels} />
-                </div>
-                <div className="border border-gray-200 rounded-xl p-5">
-                  <FeatureImportance features={result.feature_importance} />
-                </div>
-              </div>
-            </>
+            </div>
           )}
+
+          {/* Feature Explorer + Importance */}
+          <div className="grid grid-cols-2 gap-5">
+            <div className="border border-gray-200 rounded-xl p-5">
+              <FeatureExplorer coords={result.pca?.coords} labels={result.pca?.labels} />
+            </div>
+            <div className="border border-gray-200 rounded-xl p-5">
+              <FeatureImportance features={result.feature_importance} />
+            </div>
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }
