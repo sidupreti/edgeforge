@@ -194,7 +194,7 @@ export default function PipelineScreen({
         </div>
       </div>
 
-      {/* Save Impulse */}
+      {/* Save */}
       <div className="flex justify-end">
         <button
           onClick={handleSave}
@@ -204,7 +204,7 @@ export default function PipelineScreen({
               : "bg-accent text-white hover:bg-accent-dark shadow-md shadow-accent/25"
           }`}
         >
-          {saved ? "✓ Impulse Saved" : "Save Impulse"}
+          {saved ? "✓ Saved" : "Save"}
         </button>
       </div>
     </div>
