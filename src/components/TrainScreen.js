@@ -239,6 +239,35 @@ export default function TrainScreen({ projectId, pipelineConfig, onRetrain }) {
             </div>
           </div>
 
+          {/* Split composition */}
+          {result.split_counts && (
+            <div className="border border-gray-200 rounded-xl p-4">
+              <p className="text-[10px] text-gray-400 uppercase tracking-widest mb-2">Train / Validation Split</p>
+              <div className="flex gap-6">
+                <div>
+                  <p className="text-[10px] text-gray-500 font-semibold mb-1">Train ({result.n_train})</p>
+                  <div className="flex gap-2">
+                    {Object.entries(result.split_counts.train).map(([cls, count]) => (
+                      <span key={cls} className="text-[10px] text-gray-600">
+                        <span className="font-semibold">{cls}</span>: {count}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+                <div className="border-l border-gray-200 pl-6">
+                  <p className="text-[10px] text-gray-500 font-semibold mb-1">Validation ({result.n_val})</p>
+                  <div className="flex gap-2">
+                    {Object.entries(result.split_counts.val).map(([cls, count]) => (
+                      <span key={cls} className="text-[10px] text-gray-600">
+                        <span className="font-semibold">{cls}</span>: {count}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Loss curve + confusion */}
           <div className="grid grid-cols-2 gap-6">
             <div className="border border-gray-200 rounded-xl p-5">
