@@ -391,7 +391,7 @@ function FeatureImportance({ features }) {
 
 // ── Main Component ───────────────────────────────────────────────────────────
 
-export default function SpectralFeaturesScreen({ pipelineConfig, setPipelineConfig, projectId, onBack }) {
+export default function SpectralFeaturesScreen({ pipelineConfig, setPipelineConfig, projectId, onBack, savedResult, onResult }) {
   const [recordings, setRecordings] = useState([]);
   const [selectedDsId, setSelectedDsId] = useState(null);
   const [windowIndex, setWindowIndex] = useState(0);
@@ -399,7 +399,7 @@ export default function SpectralFeaturesScreen({ pipelineConfig, setPipelineConf
   const [previewLoading, setPreviewLoading] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [genError, setGenError] = useState(null);
-  const [result, setResult] = useState(null);
+  const [result, setResult] = useState(savedResult || null);
 
   const cfg = pipelineConfig;
   const filterCfg = cfg.filter;
@@ -459,6 +459,7 @@ export default function SpectralFeaturesScreen({ pipelineConfig, setPipelineConf
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || `Server ${res.status}`);
       setResult(data);
+      onResult?.(data);
     } catch (err) { setGenError(err.message); }
     finally { setGenerating(false); }
   }

@@ -119,6 +119,10 @@ function AppContent() {
   const [aiConfiguredBlocks,setAiConfiguredBlocks]= useState(saved?.aiConfiguredBlocks?? {});
   const [pipelineBlocks,    setPipelineBlocks]    = useState(saved?.pipelineBlocks    ?? INITIAL_BLOCKS);
   const [trainResults,      setTrainResults]      = useState(saved?.trainResults      ?? null);
+  const [featureResult,     setFeatureResult]     = useState(saved?.featureResult     ?? null);
+  const [classifierResult,  setClassifierResult]  = useState(saved?.classifierResult  ?? null);
+  const [anomalyTrainResult,setAnomalyTrainResult]= useState(saved?.anomalyTrainResult?? null);
+  const [anomalyTestResult, setAnomalyTestResult] = useState(saved?.anomalyTestResult ?? null);
   const [pendingFlash,      setPendingFlash]      = useState(null); // eslint-disable-line no-unused-vars
   const [pipelineSubPage,   setPipelineSubPage]   = useState("blocks"); // "blocks" | "spectral"
   const [submitLoading,     setSubmitLoading]     = useState(false);
@@ -145,12 +149,17 @@ function AppContent() {
         aiConfiguredBlocks,
         pipelineBlocks,
         trainResults,
+        featureResult,
+        classifierResult,
+        anomalyTrainResult,
+        anomalyTestResult,
       }));
     } catch {
       // Ignore quota errors
     }
   }, [activeStep, config, classes, activeClassId, events, analyzeResult, separabilityNote,
-      pipelineConfig, chatHistory, aiPipelineDesign, aiConfiguredBlocks, pipelineBlocks, trainResults]);
+      pipelineConfig, chatHistory, aiPipelineDesign, aiConfiguredBlocks, pipelineBlocks, trainResults,
+      featureResult, classifierResult, anomalyTrainResult, anomalyTestResult]);
 
   // ── Reset project ─────────────────────────────────────────────────────────
   const handleReset = useCallback(async () => {
@@ -178,6 +187,10 @@ function AppContent() {
     setAiConfiguredBlocks({});
     setPipelineBlocks(INITIAL_BLOCKS);
     setTrainResults(null);
+    setFeatureResult(null);
+    setClassifierResult(null);
+    setAnomalyTrainResult(null);
+    setAnomalyTestResult(null);
     setShowResetConfirm(false);
   }, [config.projectName]);
 
@@ -288,6 +301,8 @@ function AppContent() {
             setPipelineConfig={setPipelineConfig}
             projectId={projectId}
             onBack={() => setPipelineSubPage("blocks")}
+            savedResult={featureResult}
+            onResult={setFeatureResult}
           />
         );
       }
@@ -308,7 +323,12 @@ function AppContent() {
         <TrainScreen
           projectId={projectId}
           pipelineConfig={pipelineConfig}
+          classes={classes}
           onRetrain={() => setActiveStep(2)}
+          savedClassifierResult={classifierResult}
+          onClassifierResult={setClassifierResult}
+          savedAnomalyResult={anomalyTrainResult}
+          onAnomalyResult={setAnomalyTrainResult}
         />
       );
     }
@@ -317,6 +337,8 @@ function AppContent() {
         <ValidateScreen
           projectId={projectId}
           onGoToTrain={() => setActiveStep(3)}
+          savedResult={anomalyTestResult}
+          onResult={setAnomalyTestResult}
         />
       );
     }
