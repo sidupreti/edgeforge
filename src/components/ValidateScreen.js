@@ -45,9 +45,9 @@ function ConfusionMatrix({ matrix, classLabels, uncertainCount }) {
   );
 }
 
-// ── Score Histogram (anomaly) ────────────────────────────────────────────────
+// ── Score Histogram (anomaly, no threshold) ──────────────────────────────────
 
-function ScoreHistogram({ scores, threshold, labels }) {
+function ScoreHistogram({ scores, labels }) {
   const canvasRef = useRef(null);
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -71,31 +71,26 @@ function ScoreHistogram({ scores, threshold, labels }) {
     bins.forEach((count, i) => {
       const x = 30 + i * barW;
       const h = (count / maxBin) * (H - 30);
-      const binCenter = min + (i + 0.5) * binW;
-      ctx.fillStyle = binCenter > threshold ? "rgba(239,68,68,0.5)" : "rgba(29,158,117,0.4)";
+      ctx.fillStyle = "rgba(29,158,117,0.4)";
       ctx.fillRect(x, H - 20 - h, barW - 1, h);
     });
 
-    const tx = 30 + ((threshold - min) / range) * (W - 40);
-    ctx.beginPath(); ctx.moveTo(tx, 4); ctx.lineTo(tx, H - 20);
-    ctx.strokeStyle = "#EF4444"; ctx.lineWidth = 2; ctx.setLineDash([4, 3]); ctx.stroke(); ctx.setLineDash([]);
-    ctx.fillStyle = "#EF4444"; ctx.font = "9px system-ui"; ctx.textAlign = "center";
-    ctx.fillText(`threshold: ${threshold.toFixed(2)}`, tx, H - 6);
-  }, [scores, threshold, labels]);
+    ctx.fillStyle = "#9ca3af"; ctx.font = "9px system-ui"; ctx.textAlign = "left";
+    ctx.fillText(min.toFixed(1), 30, H - 6);
+    ctx.textAlign = "right";
+    ctx.fillText(max.toFixed(1), W - 10, H - 6);
+    ctx.textAlign = "center";
+    ctx.fillText("Anomaly score (distance to nearest cluster)", W / 2, H - 6);
+  }, [scores, labels]);
 
   if (!scores?.length) return null;
   return (
     <div>
       <p className="text-[10px] text-gray-400 uppercase tracking-widest mb-1.5">Held-out Anomaly Score Distribution</p>
       <canvas ref={canvasRef} className="w-full block rounded" style={{ height: "160px", border: "1px solid #ebeae5" }} />
-      <div className="flex gap-3 mt-1">
-        <span className="flex items-center gap-1 text-[10px] text-gray-500">
-          <span className="w-2.5 h-2 rounded-sm" style={{ background: "rgba(29,158,117,0.4)" }} /> Normal
-        </span>
-        <span className="flex items-center gap-1 text-[10px] text-gray-500">
-          <span className="w-2.5 h-2 rounded-sm" style={{ background: "rgba(239,68,68,0.5)" }} /> Anomalous
-        </span>
-      </div>
+      <p className="text-[9px] text-gray-400 mt-1 italic">
+        Higher score = window is farther from learned clusters = more unlike training data.
+      </p>
     </div>
   );
 }
@@ -103,10 +98,10 @@ function ScoreHistogram({ scores, threshold, labels }) {
 // ── Main Component ───────────────────────────────────────────────────────────
 
 export default function ValidateScreen({ projectId, onGoToTrain }) {
-  const [mode, setMode]         = useState("classification"); // matches what was trained
-  const [testing, setTesting]   = useState(false);
-  const [result, setResult]     = useState(null);
-  const [error, setError]       = useState(null);
+  const [mode, setMode]       = useState("classification");
+  const [testing, setTesting] = useState(false);
+  const [result, setResult]   = useState(null);
+  const [error, setError]     = useState(null);
 
   async function handleClassificationTest() {
     setTesting(true); setError(null); setResult(null);
@@ -157,17 +152,12 @@ export default function ValidateScreen({ projectId, onGoToTrain }) {
 
       {/* Mode toggle */}
       <div className="flex gap-2 mb-6">
-        {[
-          { id: "classification", label: "Classification" },
-          { id: "anomaly", label: "Anomaly Detection" },
-        ].map(({ id, label }) => (
+        {[{ id: "classification", label: "Classification" }, { id: "anomaly", label: "Anomaly Detection" }].map(({ id, label }) => (
           <button key={id}
             onClick={() => { setMode(id); setResult(null); setError(null); }}
             className={`px-4 py-2 text-xs font-semibold rounded-lg border transition-colors ${
               mode === id ? "border-accent text-accent bg-accent/5" : "border-gray-200 text-gray-500 hover:border-gray-300"
-            }`}>
-            {label}
-          </button>
+            }`}>{label}</button>
         ))}
       </div>
 
@@ -176,7 +166,7 @@ export default function ValidateScreen({ projectId, onGoToTrain }) {
         <div className="flex flex-col items-center gap-5 py-10">
           <p className="text-sm text-gray-400 text-center max-w-sm">
             {mode === "anomaly"
-              ? "Score held-out windows with the anomaly model to measure novelty detection."
+              ? "Score held-out windows by distance to learned clusters (raw anomaly scores)."
               : "Classify held-out test windows to measure real-world accuracy."}
           </p>
           <button onClick={handleTest} disabled={testing || !projectId}
@@ -245,49 +235,47 @@ export default function ValidateScreen({ projectId, onGoToTrain }) {
         </div>
       )}
 
-      {/* ── Anomaly results ─────────────────────────────────────────────── */}
+      {/* ── Anomaly results (raw scores only) ───────────────────────────── */}
       {result?.type === "anomaly" && (
         <div className="space-y-6">
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-2 gap-4">
             <div className="border border-gray-200 rounded-xl p-5">
               <p className="text-xs text-gray-400 uppercase tracking-widest mb-2">Test Windows</p>
               <p className="text-4xl font-bold text-gray-700 tabular-nums leading-none">{result.n_test_windows}</p>
             </div>
             <div className="border border-gray-200 rounded-xl p-5">
-              <p className="text-xs text-gray-400 uppercase tracking-widest mb-2">Flagged Anomalous</p>
-              <p className="text-4xl font-bold text-red-500 tabular-nums leading-none">{result.n_flagged}</p>
-              <p className="text-xs text-gray-400 mt-2">score &gt; {result.threshold?.toFixed(2)}</p>
-            </div>
-            <div className="border border-gray-200 rounded-xl p-5">
-              <p className="text-xs text-gray-400 uppercase tracking-widest mb-2">Threshold</p>
-              <p className="text-4xl font-bold text-accent tabular-nums leading-none">{result.threshold?.toFixed(2)}</p>
+              <p className="text-xs text-gray-400 uppercase tracking-widest mb-2">Score Range</p>
+              <p className="text-lg font-bold text-gray-700 tabular-nums leading-none">
+                {Math.min(...(result.scores || [0])).toFixed(2)} — {Math.max(...(result.scores || [0])).toFixed(2)}
+              </p>
+              <p className="text-xs text-gray-400 mt-2">distance to nearest cluster center</p>
             </div>
           </div>
 
           <div className="border border-gray-200 rounded-xl p-5">
-            <ScoreHistogram scores={result.scores} threshold={result.threshold} labels={result.labels} />
+            <ScoreHistogram scores={result.scores} labels={result.labels} />
           </div>
 
           {result.per_class && (
             <div className="border border-gray-200 rounded-xl p-5">
-              <p className="text-xs text-gray-400 uppercase tracking-widest mb-3">Per-class Anomaly Results</p>
+              <p className="text-xs text-gray-400 uppercase tracking-widest mb-3">Per-class Anomaly Scores</p>
               <p className="text-[10px] text-gray-400 mb-3 italic">
-                Unsupervised novelty detection — higher scores indicate windows farther from learned clusters.
+                Unsupervised novelty scoring — higher mean score indicates windows farther from learned clusters.
               </p>
               <table className="w-full text-xs">
                 <thead><tr className="text-gray-400 uppercase tracking-widest">
                   <th className="text-left pb-2">Class</th><th className="text-right pb-2">Windows</th>
-                  <th className="text-right pb-2">Flagged</th><th className="text-right pb-2">Mean Score</th>
+                  <th className="text-right pb-2">Mean Score</th><th className="text-right pb-2">Min</th>
+                  <th className="text-right pb-2">Max</th>
                 </tr></thead>
                 <tbody>
-                  {Object.entries(result.per_class).map(([cls, data]) => (
+                  {Object.entries(result.per_class).map(([cls, d]) => (
                     <tr key={cls} className="border-t border-gray-50">
                       <td className="py-2 font-semibold text-gray-700">{cls}</td>
-                      <td className="py-2 text-right tabular-nums text-gray-600">{data.n_windows}</td>
-                      <td className="py-2 text-right tabular-nums" style={{ color: data.n_flagged > 0 ? "#EF4444" : "#6b7280" }}>
-                        {data.n_flagged}
-                      </td>
-                      <td className="py-2 text-right tabular-nums text-gray-600">{data.mean_score.toFixed(3)}</td>
+                      <td className="py-2 text-right tabular-nums text-gray-600">{d.n_windows}</td>
+                      <td className="py-2 text-right tabular-nums text-gray-600">{d.mean_score.toFixed(3)}</td>
+                      <td className="py-2 text-right tabular-nums text-gray-600">{d.min_score.toFixed(3)}</td>
+                      <td className="py-2 text-right tabular-nums text-gray-600">{d.max_score.toFixed(3)}</td>
                     </tr>
                   ))}
                 </tbody>

@@ -67,16 +67,14 @@ function LossCurve({ curve }) {
     <div>
       <p className="text-[10px] text-gray-400 uppercase tracking-widest mb-1.5">Training Loss</p>
       <canvas ref={canvasRef} className="w-full block rounded" style={{ height: "120px", border: "1px solid #ebeae5" }} />
-      <div className="flex justify-between text-[10px] text-gray-400 mt-1">
-        <span>Epoch 1</span><span>Epoch {curve.length}</span>
-      </div>
+      <div className="flex justify-between text-[10px] text-gray-400 mt-1"><span>Epoch 1</span><span>Epoch {curve.length}</span></div>
     </div>
   );
 }
 
-// ── Score Distribution Histogram (anomaly) ───────────────────────────────────
+// ── Score Distribution Histogram (anomaly, no threshold line) ────────────────
 
-function ScoreHistogram({ scores, threshold, title = "Anomaly Score Distribution" }) {
+function ScoreHistogram({ scores, title = "Training Anomaly Scores" }) {
   const canvasRef = useRef(null);
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -100,32 +98,27 @@ function ScoreHistogram({ scores, threshold, title = "Anomaly Score Distribution
     bins.forEach((count, i) => {
       const x = 30 + i * barW;
       const h = (count / maxBin) * (H - 30);
-      const binCenter = min + (i + 0.5) * binW;
-      ctx.fillStyle = binCenter > threshold ? "rgba(239,68,68,0.5)" : "rgba(29,158,117,0.4)";
+      ctx.fillStyle = "rgba(29,158,117,0.4)";
       ctx.fillRect(x, H - 20 - h, barW - 1, h);
     });
 
-    // Threshold line
-    const tx = 30 + ((threshold - min) / range) * (W - 40);
-    ctx.beginPath(); ctx.moveTo(tx, 4); ctx.lineTo(tx, H - 20);
-    ctx.strokeStyle = "#EF4444"; ctx.lineWidth = 2; ctx.setLineDash([4, 3]); ctx.stroke(); ctx.setLineDash([]);
-    ctx.fillStyle = "#EF4444"; ctx.font = "9px system-ui"; ctx.textAlign = "center";
-    ctx.fillText(`threshold: ${threshold.toFixed(2)}`, tx, H - 6);
-  }, [scores, threshold]);
+    // X axis labels
+    ctx.fillStyle = "#9ca3af"; ctx.font = "9px system-ui"; ctx.textAlign = "left";
+    ctx.fillText(min.toFixed(1), 30, H - 6);
+    ctx.textAlign = "right";
+    ctx.fillText(max.toFixed(1), W - 10, H - 6);
+    ctx.textAlign = "center";
+    ctx.fillText("Distance to nearest cluster", W / 2, H - 6);
+  }, [scores]);
 
   if (!scores?.length) return null;
   return (
     <div>
       <p className="text-[10px] text-gray-400 uppercase tracking-widest mb-1.5">{title}</p>
       <canvas ref={canvasRef} className="w-full block rounded" style={{ height: "140px", border: "1px solid #ebeae5" }} />
-      <div className="flex gap-3 mt-1">
-        <span className="flex items-center gap-1 text-[10px] text-gray-500">
-          <span className="w-2.5 h-2 rounded-sm" style={{ background: "rgba(29,158,117,0.4)" }} /> Normal
-        </span>
-        <span className="flex items-center gap-1 text-[10px] text-gray-500">
-          <span className="w-2.5 h-2 rounded-sm" style={{ background: "rgba(239,68,68,0.5)" }} /> Anomalous
-        </span>
-      </div>
+      <p className="text-[9px] text-gray-400 mt-1 italic">
+        Higher score = farther from learned clusters = more anomalous. This shows the normal-data score range.
+      </p>
     </div>
   );
 }
@@ -133,8 +126,7 @@ function ScoreHistogram({ scores, threshold, title = "Anomaly Score Distribution
 // ── Main Component ───────────────────────────────────────────────────────────
 
 export default function TrainScreen({ projectId, pipelineConfig, onRetrain }) {
-  // Learning block type
-  const [blockType, setBlockType] = useState("classification"); // "classification" | "anomaly"
+  const [blockType, setBlockType] = useState("classification");
 
   // Classification config
   const [epochs, setEpochs]       = useState(30);
@@ -143,8 +135,7 @@ export default function TrainScreen({ projectId, pipelineConfig, onRetrain }) {
   const [neurons2, setNeurons2]   = useState(10);
 
   // Anomaly config
-  const [nClusters, setNClusters]     = useState(32);
-  const [threshPctile, setThreshPctile] = useState(95);
+  const [nClusters, setNClusters] = useState(32);
 
   // Shared state
   const [training, setTraining] = useState(false);
@@ -173,10 +164,7 @@ export default function TrainScreen({ projectId, pipelineConfig, onRetrain }) {
     try {
       const res = await fetch(`${API_BASE_URL}/features/anomaly/train`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          project_id: projectId, n_clusters: nClusters,
-          threshold_pctile: threshPctile,
-        }),
+        body: JSON.stringify({ project_id: projectId, n_clusters: nClusters }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.detail || `Server ${res.status}`);
@@ -195,7 +183,6 @@ export default function TrainScreen({ projectId, pipelineConfig, onRetrain }) {
 
   return (
     <div className="flex flex-col min-h-0 max-w-4xl mx-auto w-full">
-      {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div>
           <h2 className="text-lg font-bold text-gray-800">
@@ -203,7 +190,7 @@ export default function TrainScreen({ projectId, pipelineConfig, onRetrain }) {
           </h2>
           <p className="text-xs text-gray-400 mt-1">
             {blockType === "anomaly"
-              ? "K-means distance-based novelty detection"
+              ? "K-means distance-based novelty scoring"
               : `Dense(${neurons1}, relu) → Dense(${neurons2}, relu) → Softmax`}
           </p>
         </div>
@@ -212,19 +199,14 @@ export default function TrainScreen({ projectId, pipelineConfig, onRetrain }) {
         </button>
       </div>
 
-      {/* Learning block type toggle */}
+      {/* Learning block toggle */}
       <div className="flex gap-2 mb-6">
-        {[
-          { id: "classification", label: "Classification" },
-          { id: "anomaly", label: "Anomaly Detection" },
-        ].map(({ id, label }) => (
+        {[{ id: "classification", label: "Classification" }, { id: "anomaly", label: "Anomaly Detection" }].map(({ id, label }) => (
           <button key={id}
             onClick={() => { setBlockType(id); setResult(null); setError(null); }}
             className={`px-4 py-2 text-xs font-semibold rounded-lg border transition-colors ${
               blockType === id ? "border-accent text-accent bg-accent/5" : "border-gray-200 text-gray-500 hover:border-gray-300"
-            }`}>
-            {label}
-          </button>
+            }`}>{label}</button>
         ))}
       </div>
 
@@ -255,17 +237,13 @@ export default function TrainScreen({ projectId, pipelineConfig, onRetrain }) {
               </div>
             </div>
           ) : (
-            <div className="grid grid-cols-2 gap-4 w-full max-w-lg">
-              <div>
-                <label className="text-xs text-gray-400 uppercase tracking-widest block mb-1.5">Number of clusters (K)</label>
-                <input type="number" min={2} max={64} value={nClusters} onChange={(e) => setNClusters(Number(e.target.value))}
-                  className="w-full border border-gray-200 rounded px-3 py-2 text-xs font-mono outline-none focus:border-accent" />
-              </div>
-              <div>
-                <label className="text-xs text-gray-400 uppercase tracking-widest block mb-1.5">Anomaly threshold percentile</label>
-                <input type="number" min={50} max={99.9} step={0.5} value={threshPctile} onChange={(e) => setThreshPctile(Number(e.target.value))}
-                  className="w-full border border-gray-200 rounded px-3 py-2 text-xs font-mono outline-none focus:border-accent" />
-              </div>
+            <div className="w-full max-w-lg">
+              <label className="text-xs text-gray-400 uppercase tracking-widest block mb-1.5">Number of clusters (K)</label>
+              <input type="number" min={2} max={64} value={nClusters} onChange={(e) => setNClusters(Number(e.target.value))}
+                className="w-48 border border-gray-200 rounded px-3 py-2 text-xs font-mono outline-none focus:border-accent" />
+              <p className="text-[10px] text-gray-400 mt-1.5">
+                Windows are scored by distance to their nearest cluster center. No threshold — you interpret the raw score.
+              </p>
             </div>
           )}
 
@@ -347,14 +325,10 @@ export default function TrainScreen({ projectId, pipelineConfig, onRetrain }) {
             <div className="border border-gray-200 rounded-xl p-5">
               <p className="text-xs text-gray-400 uppercase tracking-widest mb-3">Per-class Metrics</p>
               <table className="w-full text-xs">
-                <thead>
-                  <tr className="text-gray-400 uppercase tracking-widest">
-                    <th className="text-left pb-2">Class</th>
-                    <th className="text-right pb-2">F1</th>
-                    <th className="text-right pb-2">Precision</th>
-                    <th className="text-right pb-2">Recall</th>
-                  </tr>
-                </thead>
+                <thead><tr className="text-gray-400 uppercase tracking-widest">
+                  <th className="text-left pb-2">Class</th><th className="text-right pb-2">F1</th>
+                  <th className="text-right pb-2">Precision</th><th className="text-right pb-2">Recall</th>
+                </tr></thead>
                 <tbody>
                   {result.per_class.map((c) => (
                     <tr key={c.label} className="border-t border-gray-50">
@@ -369,61 +343,59 @@ export default function TrainScreen({ projectId, pipelineConfig, onRetrain }) {
             </div>
           )}
 
-          <div className="flex justify-between pb-2">
+          <div className="flex pb-2">
             <button onClick={() => { setResult(null); setError(null); }}
-              className="px-5 py-2 rounded border border-gray-300 text-sm text-gray-600 hover:border-gray-400 transition-colors">
-              ← Retrain
-            </button>
+              className="px-5 py-2 rounded border border-gray-300 text-sm text-gray-600 hover:border-gray-400 transition-colors">← Retrain</button>
           </div>
         </div>
       )}
 
-      {/* ── Anomaly results ─────────────────────────────────────────────── */}
+      {/* ── Anomaly results (raw scores, no threshold) ──────────────────── */}
       {result?.type === "anomaly" && (
         <div className="space-y-6">
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-2 gap-4">
             <div className="border border-gray-200 rounded-xl p-5">
               <p className="text-xs text-gray-400 uppercase tracking-widest mb-2">Clusters (K)</p>
               <p className="text-4xl font-bold text-gray-700 tabular-nums leading-none">{result.n_clusters}</p>
             </div>
             <div className="border border-gray-200 rounded-xl p-5">
-              <p className="text-xs text-gray-400 uppercase tracking-widest mb-2">Threshold</p>
-              <p className="text-4xl font-bold text-accent tabular-nums leading-none">{result.threshold?.toFixed(2)}</p>
-              <p className="text-xs text-gray-400 mt-2">p{result.threshold_pctile} of training distances</p>
-            </div>
-            <div className="border border-gray-200 rounded-xl p-5">
-              <p className="text-xs text-gray-400 uppercase tracking-widest mb-2">Flagged (train)</p>
-              <p className="text-4xl font-bold text-amber-500 tabular-nums leading-none">{result.n_flagged}</p>
-              <p className="text-xs text-gray-400 mt-2">of {result.n_train_windows} windows</p>
+              <p className="text-xs text-gray-400 uppercase tracking-widest mb-2">Training Windows</p>
+              <p className="text-4xl font-bold text-gray-700 tabular-nums leading-none">{result.n_train_windows}</p>
             </div>
           </div>
 
           <div className="border border-gray-200 rounded-xl p-5">
-            <ScoreHistogram scores={result.scores} threshold={result.threshold} title="Training Anomaly Score Distribution" />
+            <ScoreHistogram scores={result.scores} title="Training Anomaly Score Distribution" />
           </div>
 
           {result.per_class_scores && (
             <div className="border border-gray-200 rounded-xl p-5">
-              <p className="text-xs text-gray-400 uppercase tracking-widest mb-3">Per-class Mean Anomaly Score</p>
-              <div className="space-y-2">
-                {Object.entries(result.per_class_scores).map(([cls, score]) => (
-                  <div key={cls} className="flex items-center gap-3">
-                    <span className="text-xs font-semibold text-gray-700 w-20">{cls}</span>
-                    <div className="flex-1 h-2 bg-gray-100 rounded-full overflow-hidden">
-                      <div className="h-full rounded-full bg-accent" style={{ width: `${Math.min(100, (score / result.threshold) * 100)}%` }} />
-                    </div>
-                    <span className="text-xs text-gray-500 tabular-nums w-14 text-right">{score.toFixed(3)}</span>
-                  </div>
-                ))}
-              </div>
+              <p className="text-xs text-gray-400 uppercase tracking-widest mb-3">Per-class Anomaly Scores</p>
+              <table className="w-full text-xs">
+                <thead><tr className="text-gray-400 uppercase tracking-widest">
+                  <th className="text-left pb-2">Class</th><th className="text-right pb-2">Mean</th>
+                  <th className="text-right pb-2">Min</th><th className="text-right pb-2">Max</th>
+                </tr></thead>
+                <tbody>
+                  {Object.entries(result.per_class_scores).map(([cls, stats]) => (
+                    <tr key={cls} className="border-t border-gray-50">
+                      <td className="py-2 font-semibold text-gray-700">{cls}</td>
+                      <td className="py-2 text-right tabular-nums text-gray-600">{stats.mean.toFixed(3)}</td>
+                      <td className="py-2 text-right tabular-nums text-gray-600">{stats.min.toFixed(3)}</td>
+                      <td className="py-2 text-right tabular-nums text-gray-600">{stats.max.toFixed(3)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <p className="text-[9px] text-gray-400 mt-2 italic">
+                Higher mean score = that class's windows are farther from the learned clusters.
+              </p>
             </div>
           )}
 
-          <div className="flex justify-between pb-2">
+          <div className="flex pb-2">
             <button onClick={() => { setResult(null); setError(null); }}
-              className="px-5 py-2 rounded border border-gray-300 text-sm text-gray-600 hover:border-gray-400 transition-colors">
-              ← Retrain
-            </button>
+              className="px-5 py-2 rounded border border-gray-300 text-sm text-gray-600 hover:border-gray-400 transition-colors">← Retrain</button>
           </div>
         </div>
       )}
