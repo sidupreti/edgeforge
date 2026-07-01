@@ -6,6 +6,7 @@ import Sidebar from "./components/Sidebar";
 import SetupScreen from "./components/SetupScreen";
 import CollectScreen from "./components/CollectScreen";
 import PipelineScreen from "./components/PipelineScreen";
+import SpectralFeaturesScreen from "./components/SpectralFeaturesScreen";
 import TrainScreen from "./components/TrainScreen";
 import ValidateScreen from "./components/ValidateScreen";
 import ExportScreen from "./components/ExportScreen";
@@ -119,6 +120,7 @@ function AppContent() {
   const [pipelineBlocks,    setPipelineBlocks]    = useState(saved?.pipelineBlocks    ?? INITIAL_BLOCKS);
   const [trainResults,      setTrainResults]      = useState(saved?.trainResults      ?? null);
   const [pendingFlash,      setPendingFlash]      = useState(null); // eslint-disable-line no-unused-vars
+  const [pipelineSubPage,   setPipelineSubPage]   = useState("blocks"); // "blocks" | "spectral"
   const [submitLoading,     setSubmitLoading]     = useState(false);
   const [submitError,       setSubmitError]       = useState(null);
   const [showResetConfirm,  setShowResetConfirm]  = useState(false);
@@ -170,6 +172,7 @@ function AppContent() {
     setAnalyzeResult(null);
     setSeparabilityNote(null);
     setPipelineConfig(INITIAL_PIPELINE_CONFIG);
+    setPipelineSubPage("blocks");
     setChatHistory([]);
     setAiPipelineDesign(null);
     setAiConfiguredBlocks({});
@@ -278,12 +281,24 @@ function AppContent() {
       );
     }
     if (currentKey === "pipeline") {
+      if (pipelineSubPage === "spectral") {
+        return (
+          <SpectralFeaturesScreen
+            pipelineConfig={pipelineConfig}
+            setPipelineConfig={setPipelineConfig}
+            projectId={projectId}
+            onBack={() => setPipelineSubPage("blocks")}
+          />
+        );
+      }
       return (
         <PipelineScreen
           pipelineConfig={pipelineConfig}
           setPipelineConfig={setPipelineConfig}
           projectId={projectId}
-          onNext={() => setActiveStep((s) => Math.min(s + 1, STEPS.length - 1))}
+          classes={classes}
+          onOpenSpectral={() => setPipelineSubPage("spectral")}
+          onGoToTrain={() => setActiveStep(3)}
           onBack={() => setActiveStep((s) => Math.max(s - 1, 0))}
         />
       );
