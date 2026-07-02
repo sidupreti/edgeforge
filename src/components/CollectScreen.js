@@ -585,6 +585,7 @@ function FileDetailPanel({ ev, allEvents, onClose, onAskCopilot, classes }) {
           class_descriptions[cls.name] = cls.description.trim();
         }
       }
+      const label_names = classes.map((c) => c.name);
       const r = await fetch(`${API_BASE_URL}/datasets/${ev.datasetId}/auto-label`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -592,6 +593,7 @@ function FileDetailPanel({ ev, allEvents, onClose, onAskCopilot, classes }) {
           interval_s: 1.0,
           min_span_ms: 0,
           window_frames: 3,
+          label_names,
           class_descriptions,
         }),
       });
@@ -1276,6 +1278,7 @@ function FileUploadMode({
   const [uploadSuccess,  setUploadSuccess]  = useState(null);
   const [dragOver,       setDragOver]       = useState(false);
   const [selectedEventId, setSelectedEventId] = useState(null);
+  const [poolTab,         setPoolTab]         = useState("train"); // "train" | "test"
   const inputRef = useRef(null);
 
   // ── Paste mode ───────────────────────────────────────────────────────────────
@@ -1432,6 +1435,7 @@ function FileUploadMode({
           autoAssigned:  true,
           detectedLabel: null,
           sampleRateHz:  fileRateMap[ev.filename] ?? null,
+          pool:          ev.pool ?? "train",
         };
       });
       setEvents((prev) => [...newEvents, ...prev]);
@@ -1827,7 +1831,35 @@ function FileUploadMode({
         );
       })()}
 
-      {/* ── Event list ──────────────────────────────────────────────────────── */}
+      {/* ── Train / Test tabs + split summary ────────────────────────────── */}
+      {events.length > 0 && (() => {
+        const trainEvents = events.filter((e) => (e.pool || "train") === "train");
+        const testEvents  = events.filter((e) => (e.pool || "train") === "test");
+        const total = events.length;
+        const trainPct = total > 0 ? Math.round((trainEvents.length / total) * 100) : 0;
+        return (
+          <div className="flex items-center justify-between border-b border-gray-200 mb-1 flex-shrink-0">
+            <div className="flex gap-0">
+              {[
+                { id: "train", label: "Training data", count: trainEvents.length },
+                { id: "test",  label: "Test data",     count: testEvents.length },
+              ].map(({ id, label, count }) => (
+                <button key={id} onClick={() => setPoolTab(id)}
+                  className={`px-3 py-2 text-xs font-semibold border-b-2 transition-colors ${
+                    poolTab === id ? "border-accent text-accent" : "border-transparent text-gray-400 hover:text-gray-600"
+                  }`}>
+                  {label} <span className="tabular-nums text-[10px] ml-1">({count})</span>
+                </button>
+              ))}
+            </div>
+            <span className="text-[10px] text-gray-400 tabular-nums">
+              {trainPct}% train / {100 - trainPct}% test
+            </span>
+          </div>
+        );
+      })()}
+
+      {/* ── Event list (filtered by pool tab) ─────────────────────────────── */}
       <div className="flex-1 overflow-y-auto min-h-0 space-y-1.5 pr-0.5">
         {events.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-24 border border-dashed border-gray-200 rounded gap-1">
@@ -1835,8 +1867,11 @@ function FileUploadMode({
             <span className="text-gray-200 text-xs">Upload CSV files to add events</span>
           </div>
         ) : (
-          events.map((ev) => {
+          events
+            .filter((ev) => (ev.pool || "train") === poolTab)
+            .map((ev) => {
             const isSelected = ev.id === selectedEventId;
+            const otherPool = poolTab === "train" ? "test" : "train";
             return (
               <div
                 key={ev.id}
@@ -1879,16 +1914,33 @@ function FileUploadMode({
                       ) : null;
                     })()}
                   </div>
-                  {ev.autoAssigned ? (
-                    <p className="text-[10px] text-yellow-600 mt-0.5 leading-tight">
-                      Class not detected — assigned to {ev.className}. Change if needed.
-                    </p>
-                  ) : (
-                    ev.filename && (
-                      <p className="text-[10px] text-gray-300 mt-0.5 truncate">{ev.filename}</p>
-                    )
+                  {ev.filename && (
+                    <p className="text-[10px] text-gray-300 mt-0.5 truncate">{ev.filename}</p>
                   )}
                 </div>
+                {/* Move to other pool */}
+                {ev.datasetId && (
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      fetch(`${API_BASE_URL}/datasets/${ev.datasetId}/pool`, {
+                        method: "PATCH",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ pool: otherPool }),
+                      }).then((r) => {
+                        if (r.ok) {
+                          setEvents((prev) => prev.map((e2) =>
+                            e2.id === ev.id ? { ...e2, pool: otherPool } : e2
+                          ));
+                        }
+                      });
+                    }}
+                    className="opacity-0 group-hover:opacity-100 text-[9px] text-gray-400 hover:text-accent border border-gray-200 hover:border-accent/40 rounded px-1.5 py-0.5 transition-all flex-shrink-0 whitespace-nowrap"
+                    title={`Move to ${otherPool}`}
+                  >
+                    → {otherPool === "test" ? "Test" : "Train"}
+                  </button>
+                )}
                 {/* Detail chevron */}
                 <svg viewBox="0 0 8 12" className="w-2 h-3 flex-shrink-0 text-gray-300" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round">
                   <path d="M2 2l4 4-4 4" />
@@ -2014,6 +2066,7 @@ export default function CollectScreen({ config, projectId, classes, setClasses, 
         autoAssigned:  false,
         detectedLabel: cls.name,
         sampleRateHz:  classSr && classSr > 0 ? classSr : null,
+        pool:          ev.pool ?? "train",
       }));
       setEvents((prev) => [...newEvents, ...prev]);
     } catch (err) {
