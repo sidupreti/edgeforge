@@ -1293,8 +1293,8 @@ function FileUploadMode({
 
   // Sync pool assignments from project-index (by datasetId OR by filename fallback)
   function syncPoolsFromIndex() {
-    if (!projectId) return;
-    fetch(`${API_BASE_URL}/project-index/${projectId}`)
+    if (!projectId) return Promise.resolve();
+    return fetch(`${API_BASE_URL}/project-index/${projectId}`)
       .then((r) => r.ok ? r.json() : { datasets: [] })
       .then((d) => {
         const datasets = d.datasets || [];
@@ -1303,22 +1303,29 @@ function FileUploadMode({
         const byId = {};
         const byName = {};
         datasets.forEach((ds) => {
-          byId[ds.id] = ds.pool || "train";
-          byName[ds.source_filename] = ds.pool || "train";
+          byId[ds.id] = { pool: ds.pool || "train", datasetId: ds.id };
+          byName[ds.source_filename] = { pool: ds.pool || "train", datasetId: ds.id };
         });
         setEvents((prev) => prev.map((ev) => {
-          // Match by datasetId first, then by filename
-          if (ev.datasetId && byId[ev.datasetId]) return { ...ev, pool: byId[ev.datasetId] };
-          if (ev.filename && byName[ev.filename]) return { ...ev, pool: byName[ev.filename] };
+          // Match by datasetId first, then by filename — also backfill missing datasetId
+          if (ev.datasetId && byId[ev.datasetId]) {
+            return { ...ev, pool: byId[ev.datasetId].pool };
+          }
+          if (ev.filename && byName[ev.filename]) {
+            const match = byName[ev.filename];
+            return { ...ev, pool: match.pool, datasetId: ev.datasetId || match.datasetId };
+          }
           return ev;
         }));
       })
-      .catch(() => {});
+      .catch(() => {}); // network errors are non-fatal
   }
 
-  // Hydrate pool assignments on mount
+  // Hydrate pool assignments on mount (only when events exist)
+  useEffect(() => {
+    if (events.length > 0) syncPoolsFromIndex();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  useEffect(() => { syncPoolsFromIndex(); }, [projectId]);
+  }, [projectId, events.length]);
 
   // Auto-split handler
   async function handleAutoSplit() {
