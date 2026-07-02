@@ -1289,6 +1289,25 @@ function FileUploadMode({
   const [pasteHz,        setPasteHz]        = useState("");     // optional Hz override (string)
   const [pasteError,     setPasteError]     = useState(null);
 
+  // Hydrate pool assignments from project-index on mount
+  useEffect(() => {
+    if (!projectId || events.length === 0) return;
+    fetch(`${API_BASE_URL}/project-index/${projectId}`)
+      .then((r) => r.ok ? r.json() : { datasets: [] })
+      .then((d) => {
+        const pm = {};
+        (d.datasets || []).forEach((ds) => { if (ds.pool) pm[ds.id] = ds.pool; });
+        if (Object.keys(pm).length > 0) {
+          setEvents((prev) => prev.map((ev) => {
+            if (ev.datasetId && pm[ev.datasetId]) return { ...ev, pool: pm[ev.datasetId] };
+            return ev;
+          }));
+        }
+      })
+      .catch(() => {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId]);
+
   // Read a CSV file and update its entry in state
   function readCsvEntry(file, targetFile = null) {
     const reader = new FileReader();
@@ -1831,31 +1850,70 @@ function FileUploadMode({
         );
       })()}
 
-      {/* ── Train / Test tabs + split summary ────────────────────────────── */}
+      {/* ── Train / Test tabs + split summary + auto-split button ─────── */}
       {events.length > 0 && (() => {
         const trainEvents = events.filter((e) => (e.pool || "train") === "train");
         const testEvents  = events.filter((e) => (e.pool || "train") === "test");
         const total = events.length;
         const trainPct = total > 0 ? Math.round((trainEvents.length / total) * 100) : 0;
+
+        // Warning: any class with 0 training recordings
+        const trainClasses = new Set(trainEvents.map((e) => e.className));
+        const allClasses = [...new Set(events.map((e) => e.className))];
+        const missingFromTrain = allClasses.filter((c) => !trainClasses.has(c));
+
+        async function handleAutoSplit() {
+          try {
+            const res = await fetch(`${API_BASE_URL}/datasets/auto-split`, {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ project_id: projectId, test_ratio: 0.2 }),
+            });
+            const data = await res.json();
+            if (!res.ok) return;
+            // Update local event pools from the response pool_map
+            const pm = data.pool_map || {};
+            setEvents((prev) => prev.map((ev) => {
+              const dsId = ev.datasetId;
+              if (dsId && pm[dsId]) return { ...ev, pool: pm[dsId] };
+              return ev;
+            }));
+          } catch { /* ignore */ }
+        }
+
         return (
-          <div className="flex items-center justify-between border-b border-gray-200 mb-1 flex-shrink-0">
-            <div className="flex gap-0">
-              {[
-                { id: "train", label: "Training data", count: trainEvents.length },
-                { id: "test",  label: "Test data",     count: testEvents.length },
-              ].map(({ id, label, count }) => (
-                <button key={id} onClick={() => setPoolTab(id)}
-                  className={`px-3 py-2 text-xs font-semibold border-b-2 transition-colors ${
-                    poolTab === id ? "border-accent text-accent" : "border-transparent text-gray-400 hover:text-gray-600"
-                  }`}>
-                  {label} <span className="tabular-nums text-[10px] ml-1">({count})</span>
+          <>
+            <div className="flex items-center justify-between border-b border-gray-200 mb-1 flex-shrink-0">
+              <div className="flex gap-0">
+                {[
+                  { id: "train", label: "Training data", count: trainEvents.length },
+                  { id: "test",  label: "Test data",     count: testEvents.length },
+                ].map(({ id, label, count }) => (
+                  <button key={id} onClick={() => setPoolTab(id)}
+                    className={`px-3 py-2 text-xs font-semibold border-b-2 transition-colors ${
+                      poolTab === id ? "border-accent text-accent" : "border-transparent text-gray-400 hover:text-gray-600"
+                    }`}>
+                    {label} <span className="tabular-nums text-[10px] ml-1">({count})</span>
+                  </button>
+                ))}
+              </div>
+              <div className="flex items-center gap-2">
+                <span className="text-[10px] text-gray-400 tabular-nums">
+                  {trainPct}% train / {100 - trainPct}% test
+                </span>
+                <button onClick={handleAutoSplit}
+                  className="text-[10px] font-semibold text-accent border border-accent/30 rounded px-2 py-1 hover:bg-accent/5 transition-colors">
+                  Auto-split (80/20)
                 </button>
-              ))}
+              </div>
             </div>
-            <span className="text-[10px] text-gray-400 tabular-nums">
-              {trainPct}% train / {100 - trainPct}% test
-            </span>
-          </div>
+            {missingFromTrain.length > 0 && testEvents.length > 0 && (
+              <div className="flex items-start gap-1.5 px-2 py-1.5 bg-amber-50 border border-amber-200 rounded text-[10px] text-amber-700 flex-shrink-0 mb-1">
+                <span className="flex-shrink-0">⚠</span>
+                <span>Class{missingFromTrain.length > 1 ? "es" : ""} <strong>{missingFromTrain.join(", ")}</strong> ha{missingFromTrain.length > 1 ? "ve" : "s"} no training data — training will fail. Move some recordings back to Training.</span>
+              </div>
+            )}
+          </>
         );
       })()}
 
