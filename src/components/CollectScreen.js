@@ -1279,6 +1279,8 @@ function FileUploadMode({
   const [dragOver,       setDragOver]       = useState(false);
   const [selectedEventId, setSelectedEventId] = useState(null);
   const [poolTab,         setPoolTab]         = useState("train"); // "train" | "test"
+  const [splitting,       setSplitting]       = useState(false);
+  const [splitMsg,        setSplitMsg]        = useState(null);
   const inputRef = useRef(null);
 
   // ── Paste mode ───────────────────────────────────────────────────────────────
@@ -1289,24 +1291,78 @@ function FileUploadMode({
   const [pasteHz,        setPasteHz]        = useState("");     // optional Hz override (string)
   const [pasteError,     setPasteError]     = useState(null);
 
-  // Hydrate pool assignments from project-index on mount
-  useEffect(() => {
-    if (!projectId || events.length === 0) return;
+  // Sync pool assignments from project-index (by datasetId OR by filename fallback)
+  function syncPoolsFromIndex() {
+    if (!projectId) return;
     fetch(`${API_BASE_URL}/project-index/${projectId}`)
       .then((r) => r.ok ? r.json() : { datasets: [] })
       .then((d) => {
-        const pm = {};
-        (d.datasets || []).forEach((ds) => { if (ds.pool) pm[ds.id] = ds.pool; });
-        if (Object.keys(pm).length > 0) {
-          setEvents((prev) => prev.map((ev) => {
-            if (ev.datasetId && pm[ev.datasetId]) return { ...ev, pool: pm[ev.datasetId] };
-            return ev;
-          }));
-        }
+        const datasets = d.datasets || [];
+        if (datasets.length === 0) return;
+        // Build lookup by id AND by filename
+        const byId = {};
+        const byName = {};
+        datasets.forEach((ds) => {
+          byId[ds.id] = ds.pool || "train";
+          byName[ds.source_filename] = ds.pool || "train";
+        });
+        setEvents((prev) => prev.map((ev) => {
+          // Match by datasetId first, then by filename
+          if (ev.datasetId && byId[ev.datasetId]) return { ...ev, pool: byId[ev.datasetId] };
+          if (ev.filename && byName[ev.filename]) return { ...ev, pool: byName[ev.filename] };
+          return ev;
+        }));
       })
       .catch(() => {});
+  }
+
+  // Hydrate pool assignments on mount
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId]);
+  useEffect(() => { syncPoolsFromIndex(); }, [projectId]);
+
+  // Auto-split handler
+  async function handleAutoSplit() {
+    setSplitting(true);
+    setSplitMsg(null);
+    try {
+      const res = await fetch(`${API_BASE_URL}/datasets/auto-split`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ project_id: projectId, test_ratio: 0.2 }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setSplitMsg(data.detail || "Auto-split failed");
+        return;
+      }
+      // Sync pools from the index (most reliable — matches by id and filename)
+      syncPoolsFromIndex();
+      const warnings = data.warnings || [];
+      setSplitMsg(warnings.length > 0 ? warnings.join("; ") : "Split complete");
+      setTimeout(() => setSplitMsg(null), 4000);
+    } catch (err) {
+      setSplitMsg(err.message || "Auto-split failed");
+    } finally {
+      setSplitting(false);
+    }
+  }
+
+  // Move a single recording to a different pool
+  async function moveToPool(ev, targetPool) {
+    if (!ev.datasetId) return;
+    try {
+      const res = await fetch(`${API_BASE_URL}/datasets/${ev.datasetId}/pool`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pool: targetPool }),
+      });
+      if (res.ok) {
+        setEvents((prev) => prev.map((e) =>
+          e.id === ev.id ? { ...e, pool: targetPool } : e
+        ));
+      }
+    } catch { /* ignore */ }
+  }
 
   // Read a CSV file and update its entry in state
   function readCsvEntry(file, targetFile = null) {
@@ -1856,30 +1912,9 @@ function FileUploadMode({
         const testEvents  = events.filter((e) => (e.pool || "train") === "test");
         const total = events.length;
         const trainPct = total > 0 ? Math.round((trainEvents.length / total) * 100) : 0;
-
-        // Warning: any class with 0 training recordings
         const trainClasses = new Set(trainEvents.map((e) => e.className));
         const allClasses = [...new Set(events.map((e) => e.className))];
         const missingFromTrain = allClasses.filter((c) => !trainClasses.has(c));
-
-        async function handleAutoSplit() {
-          try {
-            const res = await fetch(`${API_BASE_URL}/datasets/auto-split`, {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ project_id: projectId, test_ratio: 0.2 }),
-            });
-            const data = await res.json();
-            if (!res.ok) return;
-            // Update local event pools from the response pool_map
-            const pm = data.pool_map || {};
-            setEvents((prev) => prev.map((ev) => {
-              const dsId = ev.datasetId;
-              if (dsId && pm[dsId]) return { ...ev, pool: pm[dsId] };
-              return ev;
-            }));
-          } catch { /* ignore */ }
-        }
 
         return (
           <>
@@ -1899,18 +1934,21 @@ function FileUploadMode({
               </div>
               <div className="flex items-center gap-2">
                 <span className="text-[10px] text-gray-400 tabular-nums">
-                  {trainPct}% train / {100 - trainPct}% test
+                  {trainPct}% / {100 - trainPct}%
                 </span>
-                <button onClick={handleAutoSplit}
-                  className="text-[10px] font-semibold text-accent border border-accent/30 rounded px-2 py-1 hover:bg-accent/5 transition-colors">
-                  Auto-split (80/20)
+                <button onClick={handleAutoSplit} disabled={splitting}
+                  className="text-[10px] font-semibold text-accent border border-accent/30 rounded px-2 py-1 hover:bg-accent/5 transition-colors disabled:opacity-50">
+                  {splitting ? "Splitting…" : "Auto-split (80/20)"}
                 </button>
               </div>
             </div>
+            {splitMsg && (
+              <p className="text-[10px] text-accent px-2 py-1 flex-shrink-0">{splitMsg}</p>
+            )}
             {missingFromTrain.length > 0 && testEvents.length > 0 && (
               <div className="flex items-start gap-1.5 px-2 py-1.5 bg-amber-50 border border-amber-200 rounded text-[10px] text-amber-700 flex-shrink-0 mb-1">
                 <span className="flex-shrink-0">⚠</span>
-                <span>Class{missingFromTrain.length > 1 ? "es" : ""} <strong>{missingFromTrain.join(", ")}</strong> ha{missingFromTrain.length > 1 ? "ve" : "s"} no training data — training will fail. Move some recordings back to Training.</span>
+                <span>Class{missingFromTrain.length > 1 ? "es" : ""} <strong>{missingFromTrain.join(", ")}</strong> ha{missingFromTrain.length > 1 ? "ve" : "s"} no training data.</span>
               </div>
             )}
           </>
@@ -1934,7 +1972,7 @@ function FileUploadMode({
               <div
                 key={ev.id}
                 onClick={() => setSelectedEventId(ev.id)}
-                className="flex items-center gap-2 px-3 py-2 border rounded group transition-colors bg-white"
+                className="flex items-center gap-2 px-3 py-2 border rounded transition-colors bg-white"
                 style={{
                   borderColor:  isSelected ? "#0a0a0a" : "#f0efe9",
                   cursor:       "pointer",
@@ -1960,52 +1998,25 @@ function FileUploadMode({
                       ))}
                     </select>
                     <span className="text-xs text-gray-400 tabular-nums">{ev.duration} ms</span>
-                    {(() => {
-                      const sc = ev.snapshot?.ax?.length ?? 0;
-                      const rowRate = sc > 0 && ev.duration > 0
-                        ? Math.round((sc / (ev.duration / 1000)) * 10) / 10
-                        : ev.sampleRateHz;
-                      return rowRate ? (
-                        <span className="text-[10px] tabular-nums" style={{ fontFamily: "'DM Mono', monospace", color: "#b0afa8" }}>
-                          {rowRate} Hz
-                        </span>
-                      ) : null;
-                    })()}
                   </div>
                   {ev.filename && (
                     <p className="text-[10px] text-gray-300 mt-0.5 truncate">{ev.filename}</p>
                   )}
                 </div>
-                {/* Move to other pool */}
-                {ev.datasetId && (
+                {/* Move to other pool — always visible */}
+                {ev.datasetId ? (
                   <button
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      fetch(`${API_BASE_URL}/datasets/${ev.datasetId}/pool`, {
-                        method: "PATCH",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ pool: otherPool }),
-                      }).then((r) => {
-                        if (r.ok) {
-                          setEvents((prev) => prev.map((e2) =>
-                            e2.id === ev.id ? { ...e2, pool: otherPool } : e2
-                          ));
-                        }
-                      });
-                    }}
-                    className="opacity-0 group-hover:opacity-100 text-[9px] text-gray-400 hover:text-accent border border-gray-200 hover:border-accent/40 rounded px-1.5 py-0.5 transition-all flex-shrink-0 whitespace-nowrap"
-                    title={`Move to ${otherPool}`}
+                    onClick={(e) => { e.stopPropagation(); moveToPool(ev, otherPool); }}
+                    className="text-[9px] text-gray-400 hover:text-accent border border-gray-200 hover:border-accent/40 rounded px-1.5 py-0.5 transition-colors flex-shrink-0 whitespace-nowrap"
                   >
                     → {otherPool === "test" ? "Test" : "Train"}
                   </button>
+                ) : (
+                  <span className="text-[9px] text-gray-300 flex-shrink-0">no index</span>
                 )}
-                {/* Detail chevron */}
-                <svg viewBox="0 0 8 12" className="w-2 h-3 flex-shrink-0 text-gray-300" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round">
-                  <path d="M2 2l4 4-4 4" />
-                </svg>
                 <button
                   onClick={(e) => { e.stopPropagation(); setEvents((prev) => prev.filter((e2) => e2.id !== ev.id)); }}
-                  className="opacity-0 group-hover:opacity-100 text-gray-300 hover:text-red-400 transition-all text-base leading-none px-1 flex-shrink-0"
+                  className="text-gray-300 hover:text-red-400 transition-colors text-base leading-none px-1 flex-shrink-0"
                   title="Delete"
                 >
                   ×
