@@ -10,7 +10,7 @@ const FILTER_TYPES = [
 ];
 
 const ORDER_OPTIONS = [2, 4, 6, 8];
-const FFT_OPTIONS   = [128, 256, 512, 1024];
+const FFT_OPTIONS   = [16, 32, 64, 128, 256, 512];
 
 const PALETTE = ["#1D9E75", "#F59E0B", "#EF4444", "#8B5CF6", "#EC4899", "#3B82F6", "#06B6D4", "#84CC16"];
 const AXIS_COLORS = { a_x: "#1D9E75", a_y: "#3B82F6", a_z: "#F59E0B" };
@@ -430,6 +430,7 @@ export default function SpectralFeaturesScreen({ pipelineConfig, setPipelineConf
           window_ms: cfg.window_ms, stride_ms: cfg.stride_ms,
           filter_type: filterCfg.filterType, cutoff_hz: filterCfg.cutoff,
           order: filterCfg.order, fft_length: cfg.fft_length, take_log: cfg.take_log,
+          overlap_frames: cfg.overlap_frames, decimation: cfg.decimation,
         }),
       });
       const data = await res.json();
@@ -438,7 +439,8 @@ export default function SpectralFeaturesScreen({ pipelineConfig, setPipelineConf
     } catch { setPreview(null); }
     finally { setPreviewLoading(false); }
   }, [selectedDsId, windowIndex, cfg.window_ms, cfg.stride_ms,
-      filterCfg.filterType, filterCfg.cutoff, filterCfg.order, cfg.fft_length, cfg.take_log]);
+      filterCfg.filterType, filterCfg.cutoff, filterCfg.order, cfg.fft_length, cfg.take_log,
+      cfg.overlap_frames, cfg.decimation]);
 
   useEffect(() => { fetchPreview(); }, [fetchPreview]);
   useEffect(() => { setWindowIndex(0); }, [selectedDsId]);
@@ -454,6 +456,8 @@ export default function SpectralFeaturesScreen({ pipelineConfig, setPipelineConf
           zero_pad: cfg.zero_pad, filter_type: filterCfg.filterType,
           cutoff_hz: filterCfg.cutoff, order: filterCfg.order,
           fft_length: cfg.fft_length, take_log: cfg.take_log,
+          overlap_frames: cfg.overlap_frames, decimation: cfg.decimation,
+          normalize_features: cfg.normalize_features,
         }),
       });
       const data = await res.json();
@@ -622,6 +626,18 @@ export default function SpectralFeaturesScreen({ pipelineConfig, setPipelineConf
                 onChange={(e) => setParam("take_log", e.target.checked)} className="accent-accent" />
               <span className="text-xs text-gray-600">Take log of spectrum</span>
             </label>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" checked={cfg.overlap_frames}
+                onChange={(e) => setParam("overlap_frames", e.target.checked)} className="accent-accent" />
+              <span className="text-xs text-gray-600">Overlap frames (50%)</span>
+            </label>
+            <label className="flex items-center gap-2 cursor-pointer">
+              <input type="checkbox" checked={cfg.normalize_features}
+                onChange={(e) => setParam("normalize_features", e.target.checked)} className="accent-accent" />
+              <span className="text-xs text-gray-600">Normalize features</span>
+            </label>
+            <NumberInput label="Input decimation" value={cfg.decimation}
+              onChange={(v) => setParam("decimation", Math.max(1, v))} min={1} max={8} unit="×" />
           </div>
         </div>
 
@@ -681,12 +697,13 @@ export default function SpectralFeaturesScreen({ pipelineConfig, setPipelineConf
       )}
       {result && !generating && (
         <div className="space-y-5 pb-8">
-          <div className="grid grid-cols-4 gap-3">
+          <div className="grid grid-cols-5 gap-3">
             {[
               { label: "Sample Rate", value: `${result.fs} Hz` },
               { label: "Train Windows", value: result.n_train_windows },
               { label: "Test Windows", value: result.n_test_windows },
               { label: "Features", value: result.n_features },
+              { label: "Est. Model", value: `${result.est_model_size_kb || "?"} KB` },
             ].map(({ label, value }) => (
               <div key={label} className="border border-gray-200 rounded-lg px-3 py-3">
                 <p className="text-[10px] text-gray-400 uppercase tracking-widest mb-1">{label}</p>

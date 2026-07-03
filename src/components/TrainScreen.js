@@ -109,6 +109,8 @@ export default function TrainScreen({
   const [neurons1, setNeurons1] = useState(20);
   const [neurons2, setNeurons2] = useState(10);
   const [nClusters, setNClusters] = useState(32);
+  const [anomalyAxes, setAnomalyAxes] = useState([]);  // selected feature names for anomaly
+  const [suggestedN, setSuggestedN] = useState(6);
   const [training, setTraining] = useState(false);
   const [error, setError] = useState(null);
 
@@ -152,6 +154,17 @@ export default function TrainScreen({
     finally { setTraining(false); }
   }
 
+  async function handleSuggestAxes() {
+    try {
+      const res = await fetch(`${API_BASE_URL}/features/anomaly/suggest-axes`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ project_id: projectId, top_n: suggestedN }),
+      });
+      const data = await res.json();
+      if (res.ok && data.suggested) setAnomalyAxes(data.suggested);
+    } catch { /* ignore */ }
+  }
+
   async function handleTrainAnomaly() {
     setTraining(true); setError(null); setAnomResult(null);
     try {
@@ -160,6 +173,7 @@ export default function TrainScreen({
         body: JSON.stringify({
           project_id: projectId, n_clusters: nClusters,
           normal_classes: normalClasses,
+          anomaly_axes: anomalyAxes,
         }),
       });
       const data = await res.json();
@@ -251,6 +265,27 @@ export default function TrainScreen({
                   </p>
                 )}
               </div>
+              <div>
+                <div className="flex items-center gap-2 mb-2">
+                  <label className="text-xs text-gray-400 uppercase tracking-widest">Anomaly axes</label>
+                  <input type="number" min={1} max={20} value={suggestedN} onChange={(e) => setSuggestedN(Number(e.target.value))}
+                    className="w-12 border border-gray-200 rounded px-1.5 py-0.5 text-[10px] font-mono outline-none focus:border-accent" />
+                  <button onClick={handleSuggestAxes}
+                    className="text-[10px] font-semibold text-accent border border-accent/30 rounded px-2 py-0.5 hover:bg-accent/5 transition-colors">
+                    Select suggested axes
+                  </button>
+                </div>
+                {anomalyAxes.length > 0 ? (
+                  <div className="flex gap-1 flex-wrap">
+                    {anomalyAxes.map((ax) => (
+                      <span key={ax} className="text-[9px] font-mono bg-accent/10 text-accent px-1.5 py-0.5 rounded">{ax}</span>
+                    ))}
+                    <button onClick={() => setAnomalyAxes([])} className="text-[9px] text-gray-400 hover:text-red-400 px-1">clear</button>
+                  </div>
+                ) : (
+                  <p className="text-[10px] text-gray-400 italic">All features (click "Select suggested" to pick top-N by importance)</p>
+                )}
+              </div>
             </div>
           )}
 
@@ -322,10 +357,14 @@ export default function TrainScreen({
       {/* ── Anomaly results ─────────────────────────────────────────────── */}
       {result?.type === "anomaly" && (
         <div className="space-y-6">
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-4 gap-4">
             <div className="border border-gray-200 rounded-xl p-5">
               <p className="text-xs text-gray-400 uppercase tracking-widest mb-2">Clusters (K)</p>
               <p className="text-4xl font-bold text-gray-700 tabular-nums leading-none">{result.n_clusters}</p>
+            </div>
+            <div className="border border-gray-200 rounded-xl p-5">
+              <p className="text-xs text-gray-400 uppercase tracking-widest mb-2">Axes Used</p>
+              <p className="text-4xl font-bold text-gray-700 tabular-nums leading-none">{result.n_axes_used || "all"}</p>
             </div>
             <div className="border border-gray-200 rounded-xl p-5">
               <p className="text-xs text-gray-400 uppercase tracking-widest mb-2">Normal Windows</p>

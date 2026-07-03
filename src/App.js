@@ -57,11 +57,14 @@ const INITIAL_PIPELINE_CONFIG = {
   },
   model: "auto",
   // EI-style spectral block params
-  window_ms:   2000,
-  stride_ms:   1000,
-  zero_pad:    true,
-  fft_length:  512,
-  take_log:    true,
+  window_ms:            2000,
+  stride_ms:            1000,
+  zero_pad:             true,
+  fft_length:           64,
+  take_log:             true,
+  overlap_frames:       true,
+  decimation:           1,
+  normalize_features:   false,
 };
 
 const INITIAL_BLOCKS = [
