@@ -539,19 +539,26 @@ export default function ExportScreen({ projectId, pipelineConfig }) {
     setDownloading(true);
     setDownloadError(null);
 
+    const isNewC = selected === "c";
     const url = selected === "python"
       ? `${API_BASE_URL}/export/python/${effectiveProjectId}`
-      : selected === "c"
-      ? `${API_BASE_URL}/export/c/${effectiveProjectId}?chip=${chip}`
-      : `${API_BASE_URL}/export/efp/${effectiveProjectId}`;
+      : selected === "efp"
+      ? `${API_BASE_URL}/export/efp/${effectiveProjectId}`
+      : null; // C uses POST
     const filename = selected === "python"
       ? "session.py"
       : selected === "c"
-      ? `${effectiveProjectId}_classifier.h`
+      ? `${effectiveProjectId}_classifier_v2.h`
       : `${effectiveProjectId}.efp`;
 
     try {
-      const res = await fetch(url);
+      const res = isNewC
+        ? await fetch(`${API_BASE_URL}/export/c`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ project_id: effectiveProjectId, chip }),
+          })
+        : await fetch(url);
       if (!res.ok) {
         const body = await res.json().catch(() => ({}));
         throw new Error(body.detail ?? `Server error ${res.status}`);

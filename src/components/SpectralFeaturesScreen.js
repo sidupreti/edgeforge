@@ -311,10 +311,13 @@ function FilterResponsePlot({ freqs, gains, height = 160 }) {
   );
 }
 
-// ── Feature Explorer ─────────────────────────────────────────────────────────
+// ── Feature Explorer (hover tooltip) ─────────────────────────────────────────
 
-function FeatureExplorer({ coords, labels }) {
+function FeatureExplorer({ coords, labels, meta }) {
   const canvasRef = useRef(null);
+  const [tooltip, setTooltip] = useState(null);
+  const pointsRef = useRef([]);   // [{px, py, idx}] for hit-testing
+
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || !coords?.length) return;
@@ -339,13 +342,43 @@ function FeatureExplorer({ coords, labels }) {
     const pad = 20;
     const uq = [...new Set(labels)].sort(); const cm = {};
     uq.forEach((l, i) => { cm[l] = PALETTE[i % PALETTE.length]; });
+    const pts = [];
     coords.forEach((c, i) => {
       const px = pad + ((c[0] - xMin) / xR) * (W - 2 * pad);
       const py = H - pad - ((c.length > 1 ? c[1] : 0) - yMin) / yR * (H - 2 * pad);
       ctx.beginPath(); ctx.arc(px, py, 3.5, 0, Math.PI * 2);
       ctx.fillStyle = cm[labels[i]] || "#999"; ctx.globalAlpha = 0.7; ctx.fill(); ctx.globalAlpha = 1;
+      pts.push({ px, py, idx: i });
     });
+    pointsRef.current = pts;
   }, [coords, labels]);
+
+  function handleMouseMove(e) {
+    const canvas = canvasRef.current;
+    if (!canvas || !coords?.length) return;
+    const rect = canvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left;
+    const my = e.clientY - rect.top;
+    const hitRadius = 8;
+    let closest = null;
+    let closestDist = hitRadius;
+    for (const pt of pointsRef.current) {
+      const d = Math.sqrt((mx - pt.px) ** 2 + (my - pt.py) ** 2);
+      if (d < closestDist) { closest = pt; closestDist = d; }
+    }
+    if (closest) {
+      const m = meta?.[closest.idx];
+      setTooltip({
+        x: closest.px, y: closest.py,
+        label: labels[closest.idx],
+        file: m?.file || "?",
+        window: m?.window ?? "?",
+        range: m?.range_ms || "?",
+      });
+    } else {
+      setTooltip(null);
+    }
+  }
 
   if (!coords?.length) return null;
   const uq = [...new Set(labels)].sort(); const cm = {};
@@ -353,7 +386,19 @@ function FeatureExplorer({ coords, labels }) {
   return (
     <div>
       <p className="text-xs text-gray-400 uppercase tracking-widest mb-3">Feature Explorer</p>
-      <canvas ref={canvasRef} className="w-full block rounded-lg" style={{ height: "280px", border: "1px solid #ebeae5" }} />
+      <div className="relative">
+        <canvas ref={canvasRef} className="w-full block rounded-lg"
+          style={{ height: "280px", border: "1px solid #ebeae5", cursor: "crosshair" }}
+          onMouseMove={handleMouseMove} onMouseLeave={() => setTooltip(null)} />
+        {tooltip && (
+          <div className="absolute pointer-events-none bg-white border border-gray-200 rounded-lg shadow-lg px-2.5 py-1.5 text-[10px] z-10"
+            style={{ left: Math.min(tooltip.x + 10, 280), top: Math.max(tooltip.y - 50, 0) }}>
+            <p className="font-semibold" style={{ color: cm[tooltip.label] || "#999" }}>{tooltip.label}</p>
+            <p className="text-gray-500">{tooltip.file}</p>
+            <p className="text-gray-400">Window {tooltip.window + 1} · {tooltip.range} ms</p>
+          </div>
+        )}
+      </div>
       <div className="flex gap-4 mt-2">
         {uq.map((l) => (
           <span key={l} className="flex items-center gap-1.5 text-xs text-gray-600">
@@ -728,7 +773,7 @@ export default function SpectralFeaturesScreen({ pipelineConfig, setPipelineConf
           )}
           <div className="grid grid-cols-2 gap-5">
             <div className="border border-gray-200 rounded-xl p-5">
-              <FeatureExplorer coords={result.pca?.coords} labels={result.pca?.labels} />
+              <FeatureExplorer coords={result.pca?.coords} labels={result.pca?.labels} meta={result.pca?.meta} />
             </div>
             <div className="border border-gray-200 rounded-xl p-5">
               <FeatureImportance features={result.feature_importance} />
