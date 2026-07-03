@@ -190,22 +190,51 @@ export default function ValidateScreen({ projectId, onGoToTrain, savedResult, on
       {/* Anomaly results */}
       {result?.type === "anomaly" && (
         <div className="space-y-6">
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-4 gap-4">
             <div className="border border-gray-200 rounded-xl p-5">
               <p className="text-xs text-gray-400 uppercase tracking-widest mb-2">Test Windows</p>
               <p className="text-4xl font-bold text-gray-700 tabular-nums leading-none">{result.n_test_windows}</p>
             </div>
             <div className="border border-gray-200 rounded-xl p-5">
-              <p className="text-xs text-gray-400 uppercase tracking-widest mb-2">Normal Classes</p>
-              <div className="flex gap-1.5 flex-wrap">
-                {(result.normal_classes || []).map((c) => <span key={c} className="text-[10px] font-semibold bg-accent/10 text-accent px-1.5 py-0.5 rounded">{c}</span>)}
+              <p className="text-xs text-gray-400 uppercase tracking-widest mb-2">Threshold</p>
+              <p className="text-2xl font-bold text-accent tabular-nums leading-none">{result.threshold?.toFixed(2)}</p>
+              <p className="text-[10px] text-gray-400 mt-1">95th pct normal held-out</p>
+            </div>
+            {result.detection_rate != null && (
+              <div className="border border-gray-200 rounded-xl p-5">
+                <p className="text-xs text-gray-400 uppercase tracking-widest mb-2">Detection Rate</p>
+                <p className="text-4xl font-bold text-accent tabular-nums leading-none">
+                  {result.detection_rate}<span className="text-lg font-normal text-gray-400">%</span>
+                </p>
+                <p className="text-[10px] text-gray-400 mt-1">novel above threshold</p>
               </div>
+            )}
+            {result.false_positive_rate != null && (
+              <div className="border border-gray-200 rounded-xl p-5">
+                <p className="text-xs text-gray-400 uppercase tracking-widest mb-2">False Positive</p>
+                <p className={`text-4xl font-bold tabular-nums leading-none ${
+                  result.false_positive_rate <= 5 ? "text-accent" : result.false_positive_rate <= 15 ? "text-amber-500" : "text-red-500"
+                }`}>
+                  {result.false_positive_rate}<span className="text-lg font-normal text-gray-400">%</span>
+                </p>
+                <p className="text-[10px] text-gray-400 mt-1">normal above threshold</p>
+              </div>
+            )}
+          </div>
+
+          <div className="border border-gray-200 rounded-xl p-5">
+            <div className="flex gap-1.5 flex-wrap mb-3">
+              <span className="text-[10px] text-gray-400 uppercase tracking-widest">Normal:</span>
+              {(result.normal_classes || []).map((c) => <span key={c} className="text-[10px] font-semibold bg-accent/10 text-accent px-1.5 py-0.5 rounded">{c}</span>)}
             </div>
           </div>
 
           {result.novelty_readout && (
             <div className="border border-accent/20 bg-accent/5 rounded-xl p-4">
               <p className="text-xs text-accent leading-relaxed">{result.novelty_readout}</p>
+              <p className="text-[9px] text-gray-400 mt-2 italic">
+                Normal and novel score ranges overlap slightly; the threshold trades detection against false alarms. Unsupervised — metrics shown only because a known novel class is held out.
+              </p>
             </div>
           )}
 
@@ -216,12 +245,16 @@ export default function ValidateScreen({ projectId, onGoToTrain, savedResult, on
               <p className="text-xs text-gray-400 uppercase tracking-widest mb-3">Per-class Anomaly Scores</p>
               <table className="w-full text-xs"><thead><tr className="text-gray-400 uppercase tracking-widest">
                 <th className="text-left pb-2">Class</th><th className="text-right pb-2">Windows</th>
+                <th className="text-right pb-2">Flagged</th>
                 <th className="text-right pb-2">Mean</th><th className="text-right pb-2">Min</th><th className="text-right pb-2">Max</th><th className="text-right pb-2">Role</th>
               </tr></thead><tbody>
                 {Object.entries(result.per_class).map(([cls, d]) => (
                   <tr key={cls} className="border-t border-gray-50">
                     <td className="py-2 font-semibold text-gray-700">{cls}</td>
                     <td className="py-2 text-right tabular-nums text-gray-600">{d.n_windows}</td>
+                    <td className="py-2 text-right tabular-nums" style={{ color: d.n_anomalous > 0 ? (d.is_normal ? "#F59E0B" : "#1D9E75") : "#9ca3af" }}>
+                      {d.n_anomalous}
+                    </td>
                     <td className="py-2 text-right tabular-nums text-gray-600">{d.mean_score.toFixed(3)}</td>
                     <td className="py-2 text-right tabular-nums text-gray-600">{d.min_score.toFixed(3)}</td>
                     <td className="py-2 text-right tabular-nums text-gray-600">{d.max_score.toFixed(3)}</td>

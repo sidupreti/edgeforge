@@ -337,7 +337,7 @@ function FeatureExplorer({ coords, labels }) {
     const yMin = Math.min(...ys), yMax = Math.max(...ys);
     const xR = Math.max(xMax - xMin, 1e-6), yR = Math.max(yMax - yMin, 1e-6);
     const pad = 20;
-    const uq = [...new Set(labels)]; const cm = {};
+    const uq = [...new Set(labels)].sort(); const cm = {};
     uq.forEach((l, i) => { cm[l] = PALETTE[i % PALETTE.length]; });
     coords.forEach((c, i) => {
       const px = pad + ((c[0] - xMin) / xR) * (W - 2 * pad);
@@ -348,7 +348,7 @@ function FeatureExplorer({ coords, labels }) {
   }, [coords, labels]);
 
   if (!coords?.length) return null;
-  const uq = [...new Set(labels)]; const cm = {};
+  const uq = [...new Set(labels)].sort(); const cm = {};
   uq.forEach((l, i) => { cm[l] = PALETTE[i % PALETTE.length]; });
   return (
     <div>
