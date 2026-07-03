@@ -349,7 +349,6 @@ function AppContent() {
       return (
         <ExportScreen
           projectId={projectId}
-          pipelineConfig={pipelineConfig}
         />
       );
     }
