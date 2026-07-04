@@ -168,12 +168,28 @@ export default function TrainScreen({
   async function handleTrainAnomaly() {
     setTraining(true); setError(null); setAnomResult(null);
     try {
+      // Auto-suggest axes if none selected (default = top-N by importance)
+      let axes = anomalyAxes;
+      if (axes.length === 0) {
+        try {
+          const sr = await fetch(`${API_BASE_URL}/features/anomaly/suggest-axes`, {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ project_id: projectId, top_n: suggestedN }),
+          });
+          const sd = await sr.json();
+          if (sr.ok && sd.suggested?.length > 0) {
+            axes = sd.suggested;
+            setAnomalyAxes(axes);
+          }
+        } catch { /* proceed with all if suggest fails */ }
+      }
+
       const res = await fetch(`${API_BASE_URL}/features/anomaly/train`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           project_id: projectId, n_clusters: nClusters,
           normal_classes: normalClasses,
-          anomaly_axes: anomalyAxes,
+          anomaly_axes: axes,
         }),
       });
       const data = await res.json();
