@@ -13,8 +13,14 @@ const ORDER_OPTIONS = [2, 4, 6, 8];
 const FFT_OPTIONS   = [16, 32, 64, 128, 256, 512];
 
 const PALETTE = ["#1D9E75", "#F59E0B", "#EF4444", "#8B5CF6", "#EC4899", "#3B82F6", "#06B6D4", "#84CC16"];
-const AXIS_COLORS = { a_x: "#1D9E75", a_y: "#3B82F6", a_z: "#F59E0B" };
-const AXIS_LABELS = { a_x: "accX", a_y: "accY", a_z: "accZ" };
+// Dynamic axis colors — known channels get stable colors, unknown get from palette
+const _KNOWN_AXIS_COLORS = { a_x: "#1D9E75", a_y: "#3B82F6", a_z: "#F59E0B" };
+const _AXIS_PALETTE = ["#1D9E75", "#3B82F6", "#F59E0B", "#EF4444", "#8B5CF6", "#EC4899", "#06B6D4", "#84CC16"];
+function axisColor(name, idx) { return _KNOWN_AXIS_COLORS[name] || _AXIS_PALETTE[idx % _AXIS_PALETTE.length]; }
+function axisLabel(name) {
+  const labels = { a_x: "accX", a_y: "accY", a_z: "accZ" };
+  return labels[name] || name;
+}
 
 // ── Shared helpers ───────────────────────────────────────────────────────────
 
@@ -39,10 +45,10 @@ function NumberInput({ label, value, onChange, min, max, step = 1, unit = "" }) 
 function AxisLegend({ axes }) {
   return (
     <div className="flex gap-3">
-      {(axes || ["a_x", "a_y", "a_z"]).map((ax) => (
+      {(axes || []).map((ax, i) => (
         <span key={ax} className="flex items-center gap-1 text-[10px] text-gray-500">
-          <span className="w-3 h-[2px] rounded-sm" style={{ backgroundColor: AXIS_COLORS[ax] || "#999" }} />
-          {AXIS_LABELS[ax] || ax}
+          <span className="w-3 h-[2px] rounded-sm" style={{ backgroundColor: axisColor(ax, i) }} />
+          {axisLabel(ax)}
         </span>
       ))}
     </div>
@@ -178,14 +184,14 @@ function HeroRawSignal({ fullRaw, axes, windowStartMs, windowEndMs, durationMs }
     }
 
     const range = Math.max(yMax - yMin, 1e-6);
-    entries.forEach(([col, data]) => {
+    entries.forEach(([col, data], ai) => {
       ctx.beginPath();
       data.forEach((v, i) => {
         const x = LM + (i / Math.max(data.length - 1, 1)) * plotW;
         const y = TM + plotH - ((v - yMin) / range) * plotH;
         i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
       });
-      ctx.strokeStyle = AXIS_COLORS[col] || "#999"; ctx.lineWidth = 1.2; ctx.stroke();
+      ctx.strokeStyle = axisColor(col, ai); ctx.lineWidth = 1.2; ctx.stroke();
     });
   }, [fullRaw, axes, windowStartMs, windowEndMs, durationMs]);
 
@@ -232,7 +238,7 @@ function LabeledPlot({ dataPerAxis, title, yLabel, xLabel, axes, height = 180, x
     const { plotW, plotH } = drawAxes(ctx, W, H, LM, BM, TM, RM, yMin, yMax, xMin, xMax, yLabel, xLabel, yTicks, xTicks);
 
     const range = Math.max(yMax - yMin, 1e-6);
-    entries.forEach(([col, data]) => {
+    entries.forEach(([col, data], ai) => {
       ctx.beginPath();
       data.forEach((v, i) => {
         const xVal = xValues ? xValues[i] : i;
@@ -240,7 +246,7 @@ function LabeledPlot({ dataPerAxis, title, yLabel, xLabel, axes, height = 180, x
         const y = TM + plotH - ((v - yMin) / range) * plotH;
         i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
       });
-      ctx.strokeStyle = AXIS_COLORS[col] || "#999"; ctx.lineWidth = 1.5; ctx.stroke();
+      ctx.strokeStyle = axisColor(col, ai); ctx.lineWidth = 1.5; ctx.stroke();
     });
   }, [dataPerAxis, axes, yLabel, xLabel, height, xValues]);
 
