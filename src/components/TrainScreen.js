@@ -111,6 +111,8 @@ export default function TrainScreen({
   const [nClusters, setNClusters] = useState(32);
   const [anomalyAxes, setAnomalyAxes] = useState([]);  // selected feature names for anomaly
   const [suggestedN, setSuggestedN] = useState(6);
+  const [allFeatures, setAllFeatures] = useState([]);  // [{name, importance}]
+  const [axisFilter, setAxisFilter] = useState("");
   const [training, setTraining] = useState(false);
   const [error, setError] = useState(null);
 
@@ -154,16 +156,35 @@ export default function TrainScreen({
     finally { setTraining(false); }
   }
 
-  async function handleSuggestAxes() {
+  async function fetchFeatureList() {
     try {
       const res = await fetch(`${API_BASE_URL}/features/anomaly/suggest-axes`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ project_id: projectId, top_n: suggestedN }),
       });
       const data = await res.json();
-      if (res.ok && data.suggested) setAnomalyAxes(data.suggested);
+      if (res.ok) {
+        const flist = (data.all_features || []).map((name, i) => ({
+          name,
+          importance: data.all_importances?.[i] ?? 0,
+        }));
+        setAllFeatures(flist);
+        return data;
+      }
     } catch { /* ignore */ }
+    return null;
   }
+
+  async function handleSuggestAxes() {
+    const data = await fetchFeatureList();
+    if (data?.suggested) setAnomalyAxes(data.suggested);
+  }
+
+  // Load feature list on first switch to anomaly mode
+  useEffect(() => {
+    if (blockType === "anomaly" && allFeatures.length === 0 && projectId) fetchFeatureList();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [blockType, projectId]);
 
   async function handleTrainAnomaly() {
     setTraining(true); setError(null); setAnomResult(null);
@@ -281,31 +302,101 @@ export default function TrainScreen({
                   </p>
                 )}
               </div>
-              <div>
-                <div className="flex items-center gap-2 mb-2">
-                  <label className="text-xs text-gray-400 uppercase tracking-widest">Anomaly axes</label>
-                  <input type="number" min={1} max={20} value={suggestedN} onChange={(e) => setSuggestedN(Number(e.target.value))}
-                    className="w-12 border border-gray-200 rounded px-1.5 py-0.5 text-[10px] font-mono outline-none focus:border-accent" />
+              <div className="border border-gray-200 rounded-xl p-3">
+                {/* Top bar */}
+                <div className="flex items-center gap-2 mb-2 flex-wrap">
+                  <label className="text-xs text-gray-400 uppercase tracking-widest">Anomaly Axes</label>
+                  <span className="text-[10px] text-gray-500 tabular-nums ml-auto">
+                    {anomalyAxes.length} of {allFeatures.length} selected
+                    {anomalyAxes.length > 0 && (() => {
+                      const chans = [...new Set(anomalyAxes.map(n => n.split("-")[0]))];
+                      return <span className="text-gray-400"> · {chans.join(", ")}</span>;
+                    })()}
+                  </span>
+                </div>
+                <div className="flex items-center gap-2 mb-2 flex-wrap">
+                  <div className="flex items-center gap-1">
+                    <span className="text-[10px] text-gray-400">Top</span>
+                    <input type="number" min={1} max={50} value={suggestedN} onChange={(e) => setSuggestedN(Number(e.target.value))}
+                      className="w-10 border border-gray-200 rounded px-1 py-0.5 text-[10px] font-mono outline-none focus:border-accent text-center" />
+                  </div>
                   <button onClick={handleSuggestAxes}
                     className="text-[10px] font-semibold text-accent border border-accent/30 rounded px-2 py-0.5 hover:bg-accent/5 transition-colors">
-                    Select suggested axes
+                    Auto-select top-{suggestedN}
                   </button>
+                  <button onClick={() => setAnomalyAxes(allFeatures.map(f => f.name))}
+                    className="text-[10px] text-gray-400 border border-gray-200 rounded px-2 py-0.5 hover:text-gray-600 transition-colors">All</button>
+                  <button onClick={() => setAnomalyAxes([])}
+                    className="text-[10px] text-gray-400 border border-gray-200 rounded px-2 py-0.5 hover:text-red-400 transition-colors">Clear</button>
+                  <input type="text" placeholder="Filter…" value={axisFilter} onChange={(e) => setAxisFilter(e.target.value)}
+                    className="text-[10px] border border-gray-200 rounded px-2 py-0.5 outline-none focus:border-accent w-28 ml-auto" />
                 </div>
-                {anomalyAxes.length > 0 ? (
-                  <div className="flex gap-1 flex-wrap">
-                    {anomalyAxes.map((ax) => (
-                      <span key={ax} className="text-[9px] font-mono bg-accent/10 text-accent px-1.5 py-0.5 rounded">{ax}</span>
-                    ))}
-                    <button onClick={() => setAnomalyAxes([])} className="text-[9px] text-gray-400 hover:text-red-400 px-1">clear</button>
-                  </div>
-                ) : (
-                  <p className="text-[10px] text-gray-400 italic">All features (click "Select suggested" to pick top-N by importance)</p>
+
+                {/* Grouped feature list */}
+                {allFeatures.length > 0 && (() => {
+                  const filterLc = axisFilter.toLowerCase();
+                  const groups = {};
+                  allFeatures.forEach((f) => {
+                    const ch = f.name.split("-")[0];
+                    if (!groups[ch]) groups[ch] = [];
+                    groups[ch].push(f);
+                  });
+                  const maxImp = Math.max(...allFeatures.map(f => f.importance), 1e-9);
+
+                  return (
+                    <div className="max-h-48 overflow-y-auto border border-gray-100 rounded space-y-0.5">
+                      {Object.entries(groups).map(([ch, feats]) => {
+                        const visible = feats.filter(f => !filterLc || f.name.toLowerCase().includes(filterLc));
+                        if (visible.length === 0) return null;
+                        const selCount = visible.filter(f => anomalyAxes.includes(f.name)).length;
+                        const allSel = selCount === visible.length;
+                        const someSel = selCount > 0 && !allSel;
+
+                        function toggleChannel() {
+                          if (allSel) {
+                            setAnomalyAxes(prev => prev.filter(n => !visible.some(f => f.name === n)));
+                          } else {
+                            setAnomalyAxes(prev => [...new Set([...prev, ...visible.map(f => f.name)])]);
+                          }
+                        }
+
+                        return (
+                          <div key={ch}>
+                            <div className="flex items-center gap-2 px-2 py-1 bg-gray-50 sticky top-0 cursor-pointer" onClick={toggleChannel}>
+                              <input type="checkbox" checked={allSel} ref={el => { if (el) el.indeterminate = someSel; }}
+                                onChange={toggleChannel} className="accent-accent w-3 h-3" />
+                              <span className="text-[10px] font-semibold text-gray-600 uppercase tracking-wider">{ch}</span>
+                              <span className="text-[9px] text-gray-400 ml-auto">{selCount}/{visible.length}</span>
+                            </div>
+                            {visible.map((f) => (
+                              <label key={f.name} className="flex items-center gap-2 px-3 py-0.5 cursor-pointer hover:bg-gray-50">
+                                <input type="checkbox" checked={anomalyAxes.includes(f.name)}
+                                  onChange={() => setAnomalyAxes(prev =>
+                                    prev.includes(f.name) ? prev.filter(n => n !== f.name) : [...prev, f.name]
+                                  )}
+                                  className="accent-accent w-3 h-3" />
+                                <span className="text-[9px] font-mono text-gray-600 flex-1 truncate">{f.name}</span>
+                                <span className="text-[9px] text-gray-300 tabular-nums w-8 text-right">{(f.importance / maxImp * 100).toFixed(0)}</span>
+                              </label>
+                            ))}
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })()}
+
+                {anomalyAxes.length < 2 && allFeatures.length > 0 && (
+                  <p className="text-[10px] text-amber-600 mt-1.5">Select at least 2 features to train the anomaly model.</p>
                 )}
+                <p className="text-[9px] text-gray-400 mt-2 italic leading-relaxed">
+                  Anomaly detection learns "normal" from the selected features. To detect degradation in one signal, pick that signal's channel(s) and leave out reference channels.
+                </p>
               </div>
             </div>
           )}
 
-          <button onClick={handleTrain} disabled={training || !projectId || (blockType === "anomaly" && normalClasses.length === 0)}
+          <button onClick={handleTrain} disabled={training || !projectId || (blockType === "anomaly" && (normalClasses.length === 0 || (anomalyAxes.length > 0 && anomalyAxes.length < 2)))}
             className={`px-10 py-3.5 rounded-xl text-sm font-bold tracking-wide transition-all ${
               training || !projectId ? "bg-gray-100 text-gray-300 cursor-not-allowed"
                 : "bg-accent text-white hover:bg-accent-dark shadow-md shadow-accent/25 active:scale-95"}`}>
