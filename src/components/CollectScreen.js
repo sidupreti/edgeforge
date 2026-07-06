@@ -337,25 +337,14 @@ function FileDetailPanel({ ev, allEvents, onClose, onAskCopilot, classes }) {
     ? Math.round((sampleCount / (ev.duration / 1000)) * 10) / 10
     : ev.sampleRateHz;
 
-  // Quality flags
-  const flags = [];
-  for (const axis of axes) {
-    const s = stats[axis];
-    if (!s) continue;
-    if (s.std < 0.005)              flags.push(`${axis}: flatline (std = ${s.std.toFixed(5)})`);
-    if (s.max > 15 || s.min < -15)  flags.push(`${axis}: possible clipping (range ${s.min.toFixed(2)} → ${s.max.toFixed(2)})`);
-  }
-  const allRates   = [...new Set(allEvents.map((e) => e.sampleRateHz).filter(Boolean))];
-  const otherRates = allRates.filter((r) => r !== ev.sampleRateHz);
-  if (ev.sampleRateHz && otherRates.length > 0) {
-    flags.push(`Sample rate ${ev.sampleRateHz} Hz differs from other files (${otherRates.join(", ")} Hz)`);
-  }
+  // Quality flags — read from the ingest quality gate (one source of truth)
+  const flags = (ev.qualityFlags || []).map((f) => f.detail || f.flag_type || "unknown issue");
 
   const copilotMsg = [
     `Analyze signal "${ev.filename ?? "unknown"}"`,
     displayRate ? `${displayRate} Hz` : null,
     `${ev.duration} ms`,
-    `${snap.ax?.length ?? 0} samples`,
+    `${axes.length > 0 ? (snap[axes[0]]?.length ?? 0) : 0} samples`,
     axes.map((a) => `${a}: mean=${stats[a]?.mean.toFixed(3)}, std=${stats[a]?.std.toFixed(3)}, min=${stats[a]?.min.toFixed(3)}, max=${stats[a]?.max.toFixed(3)}`).join("; "),
     flags.length ? `Flags: ${flags.join("; ")}` : null,
     "Any data quality concerns?",
