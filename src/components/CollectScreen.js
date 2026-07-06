@@ -1236,11 +1236,11 @@ function FormatGuide() {
         Supported formats
       </button>
       {open && (
-        <div className="mt-2 border border-gray-700 rounded-lg p-4 bg-gray-900 text-[11px] text-gray-400 space-y-3 leading-relaxed">
+        <div className="mt-2 border border-gray-200 rounded-lg p-4 bg-white text-[11px] text-gray-600 space-y-3 leading-relaxed">
           <div>
-            <p className="text-xs text-gray-300 font-semibold mb-1">CSV with header row (recommended)</p>
+            <p className="text-xs text-gray-800 font-semibold mb-1">CSV with header row (recommended)</p>
             <p>First row = column names. One column must be the timestamp (named <code className="text-accent">timestamp</code>, <code className="text-accent">time</code>, or <code className="text-accent">ts</code>). All other numeric columns become signal channels.</p>
-            <pre className="mt-1.5 bg-gray-800 rounded px-2 py-1.5 text-[10px] text-accent font-mono overflow-x-auto">
+            <pre className="mt-1.5 bg-gray-50 border border-gray-200 rounded px-2 py-1.5 text-[10px] text-accent font-mono overflow-x-auto">
 {`timestamp,ppg,accx,accy,accz
 0,0.0248,0.0741,0.3170,9.8411
 20,0.0854,-0.1288,0.2653,9.8502
@@ -1248,11 +1248,11 @@ function FormatGuide() {
             </pre>
           </div>
           <div>
-            <p className="text-xs text-gray-300 font-semibold mb-1">Any number of channels</p>
+            <p className="text-xs text-gray-800 font-semibold mb-1">Any number of channels</p>
             <p>1 channel (PPG only), 3 channels (accel), 6 channels (accel + gyro) — all work. Channel names come from the header and flow through the entire pipeline (features, explorer, export).</p>
           </div>
           <div>
-            <p className="text-xs text-gray-300 font-semibold mb-1">Timestamp handling</p>
+            <p className="text-xs text-gray-800 font-semibold mb-1">Timestamp handling</p>
             <ul className="list-disc list-inside space-y-0.5">
               <li>Absolute (0, 20, 40, …) or interval (20, 20, 20, …) — auto-detected.</li>
               <li>Unit auto-detected: the unit (µs, ms, or s) that yields a plausible rate (1–5000 Hz) is chosen automatically.</li>
@@ -1260,11 +1260,11 @@ function FormatGuide() {
             </ul>
           </div>
           <div>
-            <p className="text-xs text-gray-300 font-semibold mb-1">Headerless files</p>
+            <p className="text-xs text-gray-800 font-semibold mb-1">Headerless files</p>
             <p>If all values are numeric (no header row), the parser assigns generic column names. 4-column files are treated as <code className="text-accent">timestamp, a_x, a_y, a_z</code> for backward compatibility.</p>
           </div>
           <div>
-            <p className="text-xs text-gray-300 font-semibold mb-1">Quality checks (automatic)</p>
+            <p className="text-xs text-gray-800 font-semibold mb-1">Quality checks (automatic)</p>
             <p>Each file is checked for: flatlines, clipping, NaN/Inf, timestamp gaps, missing channels. Issues are flagged and failed files are quarantined from training by default.</p>
           </div>
         </div>
