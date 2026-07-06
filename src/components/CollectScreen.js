@@ -1516,8 +1516,11 @@ function FileUploadMode({
           notes:         ev.notes ?? [],
           autoAssigned:  true,
           detectedLabel: null,
-          sampleRateHz:  fileRateMap[ev.filename] ?? null,
+          sampleRateHz:  ev.sample_rate_hz ?? fileRateMap[ev.filename] ?? null,
           pool:          ev.pool ?? "train",
+          qualityStatus: ev.quality_status ?? "pass",
+          qualityFlags:  ev.quality_flags ?? [],
+          quarantined:   ev.quarantined ?? false,
         };
       });
       setEvents((prev) => [...newEvents, ...prev]);
@@ -2009,7 +2012,35 @@ function FileUploadMode({
                   {ev.filename && (
                     <p className="text-[10px] text-gray-300 mt-0.5 truncate">{ev.filename}</p>
                   )}
+                  {ev.qualityStatus && ev.qualityStatus !== "pass" && (
+                    <div className="flex items-center gap-1 mt-0.5">
+                      <span className={`text-[9px] font-semibold px-1 py-0.5 rounded ${
+                        ev.qualityStatus === "fail" ? "bg-red-50 text-red-600" : "bg-amber-50 text-amber-600"
+                      }`}>
+                        {ev.qualityStatus === "fail" ? "FAIL" : "WARN"}
+                      </span>
+                      <span className="text-[9px] text-gray-400 truncate">
+                        {(ev.qualityFlags || []).slice(0, 1).map(f => f.detail).join("; ")}
+                      </span>
+                    </div>
+                  )}
                 </div>
+                {/* Quarantine toggle */}
+                {ev.quarantined && (
+                  <button onClick={(e) => {
+                    e.stopPropagation();
+                    if (!ev.datasetId) return;
+                    fetch(`${API_BASE_URL}/datasets/${ev.datasetId}/quarantine`, {
+                      method: "PATCH", headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ quarantined: false }),
+                    }).then((r) => r.ok && setEvents((prev) => prev.map((e2) =>
+                      e2.id === ev.id ? { ...e2, quarantined: false } : e2
+                    )));
+                  }} className="text-[9px] text-red-400 hover:text-accent border border-red-200 hover:border-accent/40 rounded px-1.5 py-0.5 transition-colors flex-shrink-0 whitespace-nowrap"
+                    title="Include in training despite quality issues">
+                    Include
+                  </button>
+                )}
                 {/* Move to other pool — always visible */}
                 {ev.datasetId ? (
                   <button
@@ -2141,8 +2172,11 @@ export default function CollectScreen({ config, projectId, classes, setClasses, 
         notes:         ev.notes ?? [],
         autoAssigned:  false,
         detectedLabel: cls.name,
-        sampleRateHz:  classSr && classSr > 0 ? classSr : null,
+        sampleRateHz:  ev.sample_rate_hz ?? (classSr && classSr > 0 ? classSr : null),
         pool:          ev.pool ?? "train",
+        qualityStatus: ev.quality_status ?? "pass",
+        qualityFlags:  ev.quality_flags ?? [],
+        quarantined:   ev.quarantined ?? false,
       }));
       setEvents((prev) => [...newEvents, ...prev]);
     } catch (err) {
