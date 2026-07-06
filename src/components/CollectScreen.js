@@ -7,6 +7,10 @@ const COPILOT_DEBOUNCE  = 1500; // ms to wait after last event before calling AP
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
+// Dynamic channel colors — any channel name gets a stable color
+const _CH_PALETTE  = ["#1D9E75", "#3B82F6", "#F59E0B", "#EF4444", "#8B5CF6", "#EC4899"];
+function chColor(name, idx) { return _CH_PALETTE[idx % _CH_PALETTE.length]; }
+// Legacy compat aliases
 const AXIS_COLORS  = { ax: "#1D9E75", ay: "#3B82F6", az: "#F59E0B" };
 const AXIS_LABELS  = { ax: "a_x",     ay: "a_y",     az: "a_z"     };
 const SAMPLE_RATE  = 100;   // Hz — governs timing labels
@@ -322,7 +326,8 @@ function computeRows(items) {
 
 function FileDetailPanel({ ev, allEvents, onClose, onAskCopilot, classes }) {
   const snap  = ev.snapshot ?? {};
-  const axes  = ["ax", "ay", "az"].filter((k) => snap[k]?.length > 0);
+  // Use actual channel names from snapshot keys (dynamic, not hardcoded ax/ay/az)
+  const axes  = Object.keys(snap).filter((k) => snap[k]?.length > 0);
   const stats = {};
   for (const axis of axes) stats[axis] = computeAxisStats(snap[axis]);
 
@@ -819,12 +824,12 @@ function FileDetailPanel({ ev, allEvents, onClose, onAskCopilot, classes }) {
           style={{ marginBottom: 6, cursor: isDrag ? "col-resize" : ev.datasetId ? "crosshair" : "default", userSelect: "none" }}
           onMouseDown={ev.datasetId ? handleSigMouseDown : undefined}
         >
-          {axes.map((axis) => (
+          {axes.map((axis, ai) => (
             <SignalPlotRow
               key={axis}
               data={snap[axis]}
-              color={AXIS_COLORS[axis]}
-              label={AXIS_LABELS[axis]}
+              color={chColor(axis, ai)}
+              label={axis}
               height={36}
             />
           ))}
@@ -1035,8 +1040,8 @@ function FileDetailPanel({ ev, allEvents, onClose, onAskCopilot, classes }) {
           );
         })()}
 
-        {/* Per-axis stats */}
-        <p style={{ fontFamily: "'DM Mono', monospace", fontSize: 9, color: "#b0afa8", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 }}>Per-axis stats</p>
+        {/* Per-channel stats */}
+        <p style={{ fontFamily: "'DM Mono', monospace", fontSize: 9, color: "#b0afa8", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 }}>Per-channel stats</p>
         <table style={{ width: "100%", borderCollapse: "collapse", marginBottom: 14 }}>
           <thead>
             <tr>
@@ -1053,7 +1058,7 @@ function FileDetailPanel({ ev, allEvents, onClose, onAskCopilot, classes }) {
               if (!s) return null;
               return (
                 <tr key={axis} style={{ borderTop: "1px solid #f0efe9" }}>
-                  <td style={{ fontFamily: "'DM Mono', monospace", fontSize: 10, color: AXIS_COLORS[axis], padding: "3px 4px", fontWeight: 600 }}>{axis}</td>
+                  <td style={{ fontFamily: "'DM Mono', monospace", fontSize: 10, color: chColor(axis, axes.indexOf(axis)), padding: "3px 4px", fontWeight: 600 }}>{axis}</td>
                   {[s.mean, s.std, s.min, s.max].map((v, i) => (
                     <td key={i} style={{ fontFamily: "'DM Mono', monospace", fontSize: 10, color: "#3a3935", textAlign: "right", padding: "3px 4px" }}>{FMT(v)}</td>
                   ))}
@@ -1511,7 +1516,19 @@ function FileUploadMode({
           waveColor:     AXIS_COLORS.az,
           duration:      ev.duration_ms,
           timestamp:     new Date().toLocaleTimeString(),
-          snapshot:      { ax: ev.waveform_ax ?? [], ay: ev.waveform_ay ?? [], az: ev.waveform_az ?? [] },
+          snapshot:      (() => {
+            // Build snapshot from actual channel names, falling back to ax/ay/az
+            const chs = ev.channels || [];
+            const snap = {};
+            const waveforms = [ev.waveform_ax, ev.waveform_ay, ev.waveform_az];
+            if (chs.length > 0) {
+              chs.forEach((ch, i) => { snap[ch] = waveforms[i] ?? []; });
+            } else {
+              snap.ax = ev.waveform_ax ?? []; snap.ay = ev.waveform_ay ?? []; snap.az = ev.waveform_az ?? [];
+            }
+            return snap;
+          })(),
+          channels:      ev.channels || [],
           filename:      ev.filename,
           notes:         ev.notes ?? [],
           autoAssigned:  true,
@@ -2167,7 +2184,15 @@ export default function CollectScreen({ config, projectId, classes, setClasses, 
         waveColor:     AXIS_COLORS.az,
         duration:      ev.duration_ms,
         timestamp:     new Date().toLocaleTimeString(),
-        snapshot:      { ax: ev.waveform_ax ?? [], ay: ev.waveform_ay ?? [], az: ev.waveform_az ?? [] },
+        snapshot:      (() => {
+          const chs = ev.channels || [];
+          const snap = {};
+          const waveforms = [ev.waveform_ax, ev.waveform_ay, ev.waveform_az];
+          if (chs.length > 0) { chs.forEach((ch, i) => { snap[ch] = waveforms[i] ?? []; }); }
+          else { snap.ax = ev.waveform_ax ?? []; snap.ay = ev.waveform_ay ?? []; snap.az = ev.waveform_az ?? []; }
+          return snap;
+        })(),
+        channels:      ev.channels || [],
         filename:      ev.filename,
         notes:         ev.notes ?? [],
         autoAssigned:  false,
