@@ -1751,10 +1751,10 @@ function FileUploadMode({
             <p className={`text-sm font-semibold ${dragOver ? "text-accent" : "text-gray-400"}`}>
               {dragOver ? "Drop to upload" : "Drop CSV files here"}
             </p>
-            <p className="text-xs text-gray-600 mt-0.5">
+            <p className="text-xs text-gray-400 mt-0.5">
               Upload CSV files for each class using the buttons in the Classes panel →
             </p>
-            <p className="text-xs text-gray-700 mt-0.5">
+            <p className="text-xs text-gray-400 mt-0.5">
               CSV with header row, or headerless <code className="text-accent">timestamp,v1,v2,...</code>
             </p>
           </div>
