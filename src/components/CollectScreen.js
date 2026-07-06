@@ -1224,12 +1224,6 @@ function FileDetailPanel({ ev, allEvents, onClose, onAskCopilot, classes }) {
 
 function FormatGuide() {
   const [open, setOpen] = useState(false);
-  const formats = [
-    { label: "SensorFlow native",  cols: "timestamp, a_x, a_y, a_z",         note: "timestamp in µs between samples" },
-    { label: "WISDM",             cols: "user, activity, timestamp, x, y, z", note: "activity column auto-used as class" },
-    { label: "Generic XYZ",       cols: "any cols with time + x/y/z axes",   note: "column names auto-detected" },
-    { label: "Headerless",        cols: "numeric rows, no header",            note: "assumes 100 Hz, columns: ts, x, y, z" },
-  ];
   return (
     <div className="flex-shrink-0">
       <button
@@ -1242,16 +1236,37 @@ function FormatGuide() {
         Supported formats
       </button>
       {open && (
-        <div className="mt-2 border border-gray-700 rounded-lg overflow-hidden bg-gray-900">
-          {formats.map((f) => (
-            <div key={f.label} className="flex gap-3 px-3 py-2 border-b border-gray-800 last:border-0">
-              <span className="text-[10px] font-semibold text-gray-400 w-28 flex-shrink-0">{f.label}</span>
-              <div className="min-w-0">
-                <code className="text-[10px] text-accent">{f.cols}</code>
-                <p className="text-[10px] text-gray-600 mt-0.5">{f.note}</p>
-              </div>
-            </div>
-          ))}
+        <div className="mt-2 border border-gray-700 rounded-lg p-4 bg-gray-900 text-[11px] text-gray-400 space-y-3 leading-relaxed">
+          <div>
+            <p className="text-xs text-gray-300 font-semibold mb-1">CSV with header row (recommended)</p>
+            <p>First row = column names. One column must be the timestamp (named <code className="text-accent">timestamp</code>, <code className="text-accent">time</code>, or <code className="text-accent">ts</code>). All other numeric columns become signal channels.</p>
+            <pre className="mt-1.5 bg-gray-800 rounded px-2 py-1.5 text-[10px] text-accent font-mono overflow-x-auto">
+{`timestamp,ppg,accx,accy,accz
+0,0.0248,0.0741,0.3170,9.8411
+20,0.0854,-0.1288,0.2653,9.8502
+40,0.1479,0.0432,0.1837,9.8023`}
+            </pre>
+          </div>
+          <div>
+            <p className="text-xs text-gray-300 font-semibold mb-1">Any number of channels</p>
+            <p>1 channel (PPG only), 3 channels (accel), 6 channels (accel + gyro) — all work. Channel names come from the header and flow through the entire pipeline (features, explorer, export).</p>
+          </div>
+          <div>
+            <p className="text-xs text-gray-300 font-semibold mb-1">Timestamp handling</p>
+            <ul className="list-disc list-inside space-y-0.5">
+              <li>Absolute (0, 20, 40, …) or interval (20, 20, 20, …) — auto-detected.</li>
+              <li>Unit auto-detected: the unit (µs, ms, or s) that yields a plausible rate (1–5000 Hz) is chosen automatically.</li>
+              <li>If no timestamp column is found, a default rate of 100 Hz is assumed (shown as a note).</li>
+            </ul>
+          </div>
+          <div>
+            <p className="text-xs text-gray-300 font-semibold mb-1">Headerless files</p>
+            <p>If all values are numeric (no header row), the parser assigns generic column names. 4-column files are treated as <code className="text-accent">timestamp, a_x, a_y, a_z</code> for backward compatibility.</p>
+          </div>
+          <div>
+            <p className="text-xs text-gray-300 font-semibold mb-1">Quality checks (automatic)</p>
+            <p>Each file is checked for: flatlines, clipping, NaN/Inf, timestamp gaps, missing channels. Issues are flagged and failed files are quarantined from training by default.</p>
+          </div>
         </div>
       )}
     </div>
@@ -1751,8 +1766,8 @@ function FileUploadMode({
               Browse files
             </button>
             <a
-              href="/sample-data.zip"
-              download
+              href="/sample_data.csv"
+              download="sample_data.csv"
               onClick={(e) => e.stopPropagation()}
               className="text-xs text-accent hover:text-accent-dark transition-colors"
             >
