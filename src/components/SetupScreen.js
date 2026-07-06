@@ -328,7 +328,7 @@ export default function SetupScreen({ config, setConfig, submitError, onOnboardi
               Name files with your class as the first word:{" "}
               <code className="text-accent text-[11px]">metal_tap_01.csv</code>,{" "}
               <code className="text-accent text-[11px]">wood_sample.csv</code>.{" "}
-              Format: <code className="text-accent text-[11px]">timestamp_us, ax, ay, az</code> — no header row.
+              CSV with header row: <code className="text-accent text-[11px]">timestamp, channel1, channel2, ...</code> — any number of channels.
             </p>
           )}
         </div>

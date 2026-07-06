@@ -190,7 +190,7 @@ function cleanSerialText(raw, unit = "us", hzOverride = null) {
 
   if (dataRows.length < 2) {
     throw new Error(
-      "No valid data rows found — expected format: timestamp,ax,ay,az"
+      "No valid data rows found — expected CSV with timestamp + numeric signal columns"
     );
   }
 
@@ -1574,7 +1574,7 @@ function FileUploadMode({
         updated[idx] = {
           ...updated[idx],
           parsed:  result && !result.error ? result : null,
-          error:   result?.error ? "Could not parse — expected timestamp_us,ax,ay,az" : (!result ? "Parse failed" : null),
+          error:   result?.error ? "Could not parse — expected CSV with timestamp + signal columns" : (!result ? "Parse failed" : null),
           reading: false,
         };
         return updated;
@@ -1690,7 +1690,7 @@ function FileUploadMode({
 
           <p className="text-[10px] text-gray-600 leading-relaxed">
             Strips Arduino Serial Monitor timestamps (<code className="text-gray-500">HH:MM:SS.mmm →</code>),
-            boot messages, and marker lines. Expects rows: <code className="text-gray-500">timestamp,ax,ay,az</code>.
+            boot messages, and marker lines. Expects rows: <code className="text-gray-500">timestamp,value1,value2,...</code>.
             Timestamps are converted to µs deltas using the selected unit.
           </p>
         </div>
@@ -1731,7 +1731,7 @@ function FileUploadMode({
               Upload CSV files for each class using the buttons in the Classes panel →
             </p>
             <p className="text-xs text-gray-700 mt-0.5">
-              Format: <code className="text-accent">timestamp_us,ax,ay,az</code> (no header)
+              CSV with header row, or headerless <code className="text-accent">timestamp,v1,v2,...</code>
             </p>
           </div>
           <div className="flex items-center gap-3">

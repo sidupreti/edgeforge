@@ -315,6 +315,7 @@ function AppContent() {
           setPipelineConfig={setPipelineConfig}
           projectId={projectId}
           classes={classes}
+          featureResult={featureResult}
           onOpenSpectral={() => setPipelineSubPage("spectral")}
           onGoToTrain={() => setActiveStep(3)}
           onBack={() => setActiveStep((s) => Math.max(s - 1, 0))}

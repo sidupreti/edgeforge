@@ -55,6 +55,7 @@ export default function PipelineScreen({
   setPipelineConfig,
   projectId,
   classes,
+  featureResult,
   onOpenSpectral,
   onGoToTrain,
   onBack,
@@ -104,14 +105,22 @@ export default function PipelineScreen({
           <p className="text-xs font-bold text-gray-800 uppercase tracking-widest mb-2 mt-1">
             Time Series Data
           </p>
-          <p className="text-[10px] text-gray-400 mb-3">Input axes &amp; windowing</p>
+          <p className="text-[10px] text-gray-400 mb-3">Input channels &amp; windowing</p>
           <div className="space-y-2.5">
             <div className="flex items-center gap-3 text-[10px]">
-              <span className="text-gray-400 w-16">Axes</span>
-              <div className="flex gap-1.5">
-                {["accX", "accY", "accZ"].map((ax) => (
-                  <span key={ax} className="bg-gray-100 text-gray-600 font-semibold px-1.5 py-0.5 rounded">{ax}</span>
-                ))}
+              <span className="text-gray-400 w-16">Channels</span>
+              <div className="flex gap-1.5 flex-wrap">
+                {(() => {
+                  // Derive channel names from feature result or show placeholder
+                  const names = featureResult?.feature_list
+                    ? [...new Set(featureResult.feature_list.map(n => n.split("-")[0]))]
+                    : [];
+                  return names.length > 0
+                    ? names.map((ch) => (
+                        <span key={ch} className="bg-gray-100 text-gray-600 font-semibold px-1.5 py-0.5 rounded">{ch}</span>
+                      ))
+                    : <span className="text-gray-300 italic">generate features to detect</span>;
+                })()}
               </div>
             </div>
             <div className="flex items-center gap-2 text-[10px]">
@@ -163,7 +172,7 @@ export default function PipelineScreen({
           title="Classification"
           subtitle="Neural Network (Dense 20→10)"
           items={[
-            { label: "Input", value: `${cfg.fft_length / 2 + 1} × 3 features` },
+            { label: "Input", value: featureResult?.n_features ? `${featureResult.n_features} features` : "–" },
             { label: "Output", value: `${classNames.length} classes` },
           ]}
           onClick={onGoToTrain}

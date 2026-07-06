@@ -48,13 +48,9 @@ function parseCsvMeta(text) {
     : null;
 
   // Infer column names when no header
-  const defaultCols = colCount >= 4
-    ? ["timestamp_us", "ax", "ay", "az"]
-    : colCount === 3
-      ? ["timestamp_us", "ax", "ay"]
-      : colCount === 2
-        ? ["timestamp_us", "value"]
-        : Array.from({ length: colCount }, (_, i) => `col${i}`);
+  const defaultCols = colCount >= 2
+    ? ["timestamp", ...Array.from({ length: colCount - 1 }, (_, i) => `ch${i}`)]
+    : Array.from({ length: colCount }, (_, i) => `col${i}`);
   const columnNames = headers ?? defaultCols.slice(0, colCount);
 
   // Estimate sample rate
@@ -175,7 +171,7 @@ function CsvDropZone({ onDetected }) {
   if (status === "skipped") {
     return (
       <p className="text-xs" style={{ color: "#b0afa8" }}>
-        Skipped — using default format (timestamp_us, ax, ay, az)
+        Skipped — using default format (timestamp, ch0, ch1, ...)
       </p>
     );
   }
@@ -237,7 +233,7 @@ function CsvDropZone({ onDetected }) {
               {status === "error" ? "Couldn't parse that file — try another CSV" : "Drop a CSV file here or click to browse"}
             </p>
             <p className="text-xs mt-0.5" style={{ color: "#b0afa8" }}>
-              format: timestamp_us, ax, ay, az
+              CSV with timestamp + signal columns
             </p>
           </>
         )}

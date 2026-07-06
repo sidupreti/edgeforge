@@ -257,7 +257,7 @@ function BotBubble({ msg, onQuickReply, onFileSelect, onConfirm }) {
               <p className="text-xs text-gray-400 group-hover:text-gray-600 transition-colors font-medium">
                 Click to select a CSV file
               </p>
-              <p className="text-[10px] text-gray-300 mt-0.5">format: timestamp, ax, ay, az</p>
+              <p className="text-[10px] text-gray-300 mt-0.5">CSV with timestamp + signal columns</p>
             </button>
           </div>
         )}

@@ -18,8 +18,7 @@ const _KNOWN_AXIS_COLORS = { a_x: "#1D9E75", a_y: "#3B82F6", a_z: "#F59E0B" };
 const _AXIS_PALETTE = ["#1D9E75", "#3B82F6", "#F59E0B", "#EF4444", "#8B5CF6", "#EC4899", "#06B6D4", "#84CC16"];
 function axisColor(name, idx) { return _KNOWN_AXIS_COLORS[name] || _AXIS_PALETTE[idx % _AXIS_PALETTE.length]; }
 function axisLabel(name) {
-  const labels = { a_x: "accX", a_y: "accY", a_z: "accZ" };
-  return labels[name] || name;
+  return name;  // use actual channel name from the data
 }
 
 // ── Shared helpers ───────────────────────────────────────────────────────────
