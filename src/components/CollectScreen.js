@@ -252,14 +252,19 @@ function computeAxisStats(arr) {
 
 // ── Signal plot (3-axis, larger) ─────────────────────────────────────────────
 
-function SignalPlotRow({ data, color, label, height = 36 }) {
+function SignalPlotRow({ data, color, label, height = 36, startIdx = 0, endIdx }) {
   if (!data?.length) return null;
   const VW = 400; const VH = height;
-  const mn = Math.min(...data); const mx = Math.max(...data);
+  // Only render samples in the viewport range
+  const si = Math.max(0, startIdx);
+  const ei = endIdx != null ? Math.min(data.length, endIdx) : data.length;
+  const slice = data.slice(si, ei);
+  if (slice.length === 0) return null;
+  const mn = Math.min(...slice); const mx = Math.max(...slice);
   const range = (mx - mn) || 0.001;
-  const pts = data
+  const pts = slice
     .map((v, i) => {
-      const x = ((i / (data.length - 1)) * VW).toFixed(1);
+      const x = ((i / Math.max(slice.length - 1, 1)) * VW).toFixed(1);
       const y = (VH - 1 - ((v - mn) / range) * (VH - 2)).toFixed(1);
       return `${x},${y}`;
     })
@@ -341,7 +346,15 @@ function FileDetailPanel({ ev, allEvents, onClose, onAskCopilot, classes }) {
   // Quality flags — read from the ingest quality gate (one source of truth)
   const flags = (ev.qualityFlags || []).map((f) => f.detail || f.flag_type || "unknown issue");
 
-  // ── Auto-segmentation state ───────────────────────────────────────────────
+  // ── Viewport/zoom state ────────────────────────────────────────────────────
+  const [viewWindowSec, setViewWindowSec] = useState(0);  // 0 = show all
+  const [viewOffset, setViewOffset] = useState(0);  // ms offset from start
+  const totalMs = ev.duration || 1;
+  const viewStartMs = viewWindowSec > 0 ? viewOffset : 0;
+  const viewEndMs = viewWindowSec > 0 ? Math.min(viewOffset + viewWindowSec * 1000, totalMs) : totalMs;
+  const viewDurationMs = viewEndMs - viewStartMs;
+
+  // ── Auto-segmentation state ────────────────────────────────────────────────
   const [segments, setSegments] = useState([]);
   const [segSensitivity, setSegSensitivity] = useState(3.0);
   const [segLoading, setSegLoading] = useState(false);
@@ -441,18 +454,19 @@ function FileDetailPanel({ ev, allEvents, onClose, onAskCopilot, classes }) {
       .catch(() => {});
   }, [ev.datasetId]);
 
-  // Convert client X → ms (using the signal container div's bounding rect)
+  // Convert client X → ms (using the signal container div's bounding rect + viewport)
   function clientXToMs(clientX) {
     const rect = sigContainerRef.current?.getBoundingClientRect();
-    if (!rect || ev.duration <= 0) return 0;
+    if (!rect || viewDurationMs <= 0) return 0;
     const plotLeft = rect.left + AXIS_INSET;
     const plotW    = rect.width - AXIS_INSET;
-    return Math.max(0, Math.min(ev.duration, ((clientX - plotLeft) / plotW) * ev.duration));
+    const frac = Math.max(0, Math.min(1, (clientX - plotLeft) / plotW));
+    return viewStartMs + frac * viewDurationMs;
   }
 
-  // Convert ms → viewBox x (0-VW)
+  // Convert ms → viewBox x (0-VW), relative to current viewport
   function msToVW(ms) {
-    return ev.duration > 0 ? (ms / ev.duration) * VW : 0;
+    return viewDurationMs > 0 ? ((ms - viewStartMs) / viewDurationMs) * VW : 0;
   }
 
   // Seek video and update cursor to a given ms position
@@ -497,17 +511,22 @@ function FileDetailPanel({ ev, allEvents, onClose, onAskCopilot, classes }) {
       const endMs  = clientXToMs(e.clientX);
       const s_ms   = Math.min(dragStart, endMs);
       const dur_ms = Math.abs(endMs - dragStart);
-      setDragStart(null); setDragEnd(null);
-      // Plain click (no drag) → seek video
+      // Plain click (no drag) → seek video, clear selection
       if (dur_ms < 5) {
+        setDragStart(null); setDragEnd(null);
         seekTo(endMs);
         return;
       }
+      // Real drag → show label popup, keep selection VISIBLE until dismissed
       if (dur_ms >= 5 && ev.datasetId) {
+        setDragEnd(endMs);  // finalize the end position
         setDragPopup({ s_ms, dur_ms, clientX: e.clientX, clientY: e.clientY });
         setDragPopupName("");
         setTimeout(() => dragPopupInputRef.current?.focus(), 50);
+        return;  // do NOT clear dragStart/dragEnd — the highlight stays
       }
+      // No dataset → just clear
+      setDragStart(null); setDragEnd(null);
     }
     // Finish resize
     if (resizing) {
@@ -559,6 +578,7 @@ function FileDetailPanel({ ev, allEvents, onClose, onAskCopilot, classes }) {
     if (!name?.trim() || !dragPopup || !ev.datasetId) return;
     const { s_ms, dur_ms } = dragPopup;
     setDragPopup(null);
+    setDragStart(null); setDragEnd(null);  // clear selection after label created
     try {
       const r = await fetch(`${API_BASE_URL}/datasets/${ev.datasetId}/labels`, {
         method: "POST",
@@ -705,7 +725,7 @@ function FileDetailPanel({ ev, allEvents, onClose, onAskCopilot, classes }) {
       onMouseMove={handlePanelMouseMove}
       onMouseUp={handlePanelMouseUp}
       onMouseLeave={handlePanelMouseUp}
-      onClick={() => { setLabelMenu(null); setProposalMenu(null); setDragPopup(null); }}
+      onClick={() => { setLabelMenu(null); setProposalMenu(null); if (dragPopup) { setDragPopup(null); setDragStart(null); setDragEnd(null); } }}
     >
       {/* Header */}
       <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 12px", borderBottom: "1px solid #ebeae5", flexShrink: 0 }}>
@@ -846,31 +866,63 @@ function FileDetailPanel({ ev, allEvents, onClose, onAskCopilot, classes }) {
           </div>
         )}
 
-        {/* Signal plots — drag here to create span labels */}
-        <p style={{ fontFamily: "'DM Mono', monospace", fontSize: 9, color: "#b0afa8", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 }}>
-          Signal
-          {ev.datasetId && (
-            <span style={{ marginLeft: 8, textTransform: "none", letterSpacing: 0, color: isDrag && dragStart !== null && dragEnd !== null && Math.abs(dragEnd - dragStart) > 5 ? "#3B82F6" : "#c0bfb8" }}>
-              {isDrag && dragStart !== null && dragEnd !== null && Math.abs(dragEnd - dragStart) > 5
-                ? `${(Math.min(dragStart, dragEnd) / 1000).toFixed(2)}s → ${(Math.max(dragStart, dragEnd) / 1000).toFixed(2)}s  (${(Math.abs(dragEnd - dragStart) / 1000).toFixed(2)}s)`
-                : "— drag to label a span · click to seek"}
+        {/* Signal header + zoom controls */}
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+          <p style={{ fontFamily: "'DM Mono', monospace", fontSize: 9, color: "#b0afa8", textTransform: "uppercase", letterSpacing: "0.08em", margin: 0 }}>
+            Signal
+            {ev.datasetId && (
+              <span style={{ marginLeft: 8, textTransform: "none", letterSpacing: 0, color: isDrag && dragStart !== null && dragEnd !== null && Math.abs(dragEnd - dragStart) > 5 ? "#3B82F6" : "#c0bfb8" }}>
+                {isDrag && dragStart !== null && dragEnd !== null && Math.abs(dragEnd - dragStart) > 5
+                  ? `${(Math.min(dragStart, dragEnd) / 1000).toFixed(2)}s → ${(Math.max(dragStart, dragEnd) / 1000).toFixed(2)}s`
+                  : "— drag to label · click to seek"}
+              </span>
+            )}
+          </p>
+          <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 4 }}>
+            <span style={{ fontSize: 9, color: "#b0afa8", fontFamily: "'DM Mono', monospace" }}>
+              {(viewStartMs / 1000).toFixed(1)}s – {(viewEndMs / 1000).toFixed(1)}s
             </span>
-          )}
-        </p>
+            {[10, 30, 60, 0].map((sec) => (
+              <button key={sec} onClick={() => { setViewWindowSec(sec); setViewOffset(Math.min(viewOffset, Math.max(0, totalMs - sec * 1000))); }}
+                style={{
+                  fontSize: 9, padding: "1px 5px", borderRadius: 3, border: "1px solid",
+                  borderColor: viewWindowSec === sec ? "#8B5CF6" : "#e0e0e0",
+                  color: viewWindowSec === sec ? "#8B5CF6" : "#999",
+                  background: viewWindowSec === sec ? "rgba(139,92,246,0.05)" : "none",
+                  cursor: "pointer", fontFamily: "'DM Mono', monospace",
+                }}>
+                {sec === 0 ? "All" : `${sec}s`}
+              </button>
+            ))}
+          </div>
+        </div>
+        {/* Scroll bar for viewport (only when zoomed) */}
+        {viewWindowSec > 0 && totalMs > viewWindowSec * 1000 && (
+          <input type="range" min={0} max={Math.max(0, totalMs - viewWindowSec * 1000)} step={100}
+            value={viewOffset} onChange={(e) => setViewOffset(Number(e.target.value))}
+            style={{ width: "100%", height: 8, accentColor: "#8B5CF6", marginBottom: 4 }} />
+        )}
         <div
           ref={sigContainerRef}
           style={{ marginBottom: 6, cursor: isDrag ? "col-resize" : ev.datasetId ? "crosshair" : "default", userSelect: "none" }}
           onMouseDown={ev.datasetId ? handleSigMouseDown : undefined}
         >
-          {axes.map((axis, ai) => (
+          {axes.map((axis, ai) => {
+            const chanData = snap[axis] || [];
+            const samplesPerMs = chanData.length / Math.max(totalMs, 1);
+            const si = Math.floor(viewStartMs * samplesPerMs);
+            const ei = Math.ceil(viewEndMs * samplesPerMs);
+            return (
             <SignalPlotRow
               key={axis}
-              data={snap[axis]}
+              data={chanData}
               color={chColor(axis, ai)}
               label={axis}
               height={36}
+              startIdx={si}
+              endIdx={ei}
             />
-          ))}
+          );})}
 
           {/* Overlays: selection highlight + cursor line */}
           {((selX !== null && selW > 2) || ev.datasetId) && (() => {
@@ -915,12 +967,16 @@ function FileDetailPanel({ ev, allEvents, onClose, onAskCopilot, classes }) {
             {/* Segment color bar */}
             {segments.length > 0 && ev.duration > 0 && (
               <>
-                <div style={{ display: "flex", height: 16, borderRadius: 4, overflow: "hidden", marginBottom: 4 }}>
+                <div style={{ position: "relative", height: 16, borderRadius: 4, overflow: "hidden", marginBottom: 4, background: "#f0f0f0" }}>
                   {segments.map((seg, i) => {
-                    const w = ((seg.end_ms - seg.start_ms) / ev.duration) * 100;
+                    const leftPct = ((Math.max(seg.start_ms, viewStartMs) - viewStartMs) / viewDurationMs) * 100;
+                    const rightPct = ((Math.min(seg.end_ms, viewEndMs) - viewStartMs) / viewDurationMs) * 100;
+                    const w = rightPct - leftPct;
+                    if (w <= 0 || seg.end_ms < viewStartMs || seg.start_ms > viewEndMs) return null;
                     return (
                       <div key={i} style={{
-                        width: `${w}%`, backgroundColor: SEG_COLORS[seg.cluster_id % SEG_COLORS.length],
+                        position: "absolute", left: `${leftPct}%`, width: `${w}%`, top: 0, bottom: 0,
+                        backgroundColor: SEG_COLORS[seg.cluster_id % SEG_COLORS.length],
                         opacity: 0.6, borderRight: "1px solid white",
                         display: "flex", alignItems: "center", justifyContent: "center",
                       }}>
@@ -1225,7 +1281,7 @@ function FileDetailPanel({ ev, allEvents, onClose, onAskCopilot, classes }) {
             onChange={(e) => setDragPopupName(e.target.value)}
             onKeyDown={(e) => {
               if (e.key === "Enter")  handleCreateLabel(dragPopupName);
-              if (e.key === "Escape") setDragPopup(null);
+              if (e.key === "Escape") { setDragPopup(null); setDragStart(null); setDragEnd(null); }
             }}
             placeholder="Label name…"
             style={{
