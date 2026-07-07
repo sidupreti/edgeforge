@@ -113,6 +113,9 @@ export default function TrainScreen({
   const [suggestedN, setSuggestedN] = useState(6);
   const [allFeatures, setAllFeatures] = useState([]);  // [{name, importance}]
   const [axisFilter, setAxisFilter] = useState("");
+  const [clfFeatures, setClfFeatures] = useState([]); // selected classifier feature names (empty=all)
+  const [clfTrimOpen, setClfTrimOpen] = useState(false);
+  const [clfFilter, setClfFilter] = useState("");
   const [training, setTraining] = useState(false);
   const [error, setError] = useState(null);
 
@@ -145,6 +148,7 @@ export default function TrainScreen({
         body: JSON.stringify({
           project_id: projectId, epochs, learning_rate: learningRate,
           neurons_1: neurons1, neurons_2: neurons2,
+          selected_features: clfFeatures.length > 0 ? clfFeatures : [],
         }),
       });
       const data = await res.json();
@@ -180,11 +184,11 @@ export default function TrainScreen({
     if (data?.suggested) setAnomalyAxes(data.suggested);
   }
 
-  // Load feature list on first switch to anomaly mode
+  // Load feature list when needed (anomaly or classifier trim)
   useEffect(() => {
-    if (blockType === "anomaly" && allFeatures.length === 0 && projectId) fetchFeatureList();
+    if (allFeatures.length === 0 && projectId && (blockType === "anomaly" || clfTrimOpen)) fetchFeatureList();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [blockType, projectId]);
+  }, [blockType, projectId, clfTrimOpen]);
 
   async function handleTrainAnomaly() {
     setTraining(true); setError(null); setAnomResult(null);
@@ -256,6 +260,7 @@ export default function TrainScreen({
       {!result && (
         <div className="flex flex-col items-center gap-6 py-4">
           {blockType === "classification" ? (
+            <>
             <div className="grid grid-cols-2 gap-4 w-full max-w-lg">
               <div>
                 <label className="text-xs text-gray-400 uppercase tracking-widest block mb-1.5">Training cycles</label>
@@ -278,6 +283,98 @@ export default function TrainScreen({
                   className="w-full border border-gray-200 rounded px-3 py-2 text-xs font-mono outline-none focus:border-accent" />
               </div>
             </div>
+
+            {/* Estimated model size (live) */}
+            {(() => {
+              const nf = clfFeatures.length > 0 ? clfFeatures.length : allFeatures.length || 99;
+              const nc = allClassNames.length || 3;
+              const params = nf * neurons1 + neurons1 * neurons2 + neurons2 * nc;
+              const kb = (params * 4 / 1024).toFixed(1);
+              return (
+                <p className="text-[10px] text-gray-400 tabular-nums">
+                  Est. model: ~{kb} KB ({nf} features × {neurons1} → {neurons2} → {nc})
+                </p>
+              );
+            })()}
+
+            {/* Optional feature trimmer (collapsed by default) */}
+            <div className="w-full max-w-lg">
+              <button onClick={() => { setClfTrimOpen(v => !v); }}
+                className="text-[10px] text-gray-400 hover:text-gray-600 flex items-center gap-1 transition-colors">
+                <svg className={`w-2.5 h-2.5 transition-transform ${clfTrimOpen ? "rotate-90" : ""}`} fill="none" viewBox="0 0 8 8" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M2 1.5l3 2.5-3 2.5" />
+                </svg>
+                Advanced: reduce model footprint
+              </button>
+              {clfTrimOpen && allFeatures.length > 0 && (
+                <div className="mt-2 border border-gray-200 rounded-xl p-3 space-y-2">
+                  <p className="text-[9px] text-gray-400 italic leading-relaxed">
+                    The classifier normally uses all features. Trim only to reduce on-device size — this may lower accuracy.
+                  </p>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-[10px] text-gray-500 tabular-nums">
+                      {clfFeatures.length > 0 ? clfFeatures.length : "all " + allFeatures.length} features
+                    </span>
+                    <button onClick={() => {
+                      const data = allFeatures.slice().sort((a,b) => b.importance - a.importance);
+                      setClfFeatures(data.slice(0, Math.min(suggestedN, data.length)).map(f => f.name));
+                    }} className="text-[10px] font-semibold text-accent border border-accent/30 rounded px-2 py-0.5 hover:bg-accent/5 transition-colors">
+                      Top-{suggestedN}
+                    </button>
+                    <button onClick={() => setClfFeatures(allFeatures.map(f => f.name))}
+                      className="text-[10px] text-gray-400 border border-gray-200 rounded px-2 py-0.5 hover:text-gray-600">All</button>
+                    <button onClick={() => setClfFeatures([])}
+                      className="text-[10px] text-gray-400 border border-gray-200 rounded px-2 py-0.5 hover:text-gray-600">Reset</button>
+                    <input type="text" placeholder="Filter…" value={clfFilter} onChange={(e) => setClfFilter(e.target.value)}
+                      className="text-[10px] border border-gray-200 rounded px-2 py-0.5 outline-none focus:border-accent w-24 ml-auto" />
+                  </div>
+                  <div className="max-h-40 overflow-y-auto border border-gray-100 rounded">
+                    {(() => {
+                      const filterLc = clfFilter.toLowerCase();
+                      const groups = {};
+                      allFeatures.forEach((f) => { const ch = f.name.split("-")[0]; if (!groups[ch]) groups[ch] = []; groups[ch].push(f); });
+                      const maxImp = Math.max(...allFeatures.map(f => f.importance), 1e-9);
+                      const active = clfFeatures.length > 0 ? new Set(clfFeatures) : null;
+                      return Object.entries(groups).map(([ch, feats]) => {
+                        const visible = feats.filter(f => !filterLc || f.name.toLowerCase().includes(filterLc));
+                        if (visible.length === 0) return null;
+                        const selCount = active ? visible.filter(f => active.has(f.name)).length : visible.length;
+                        const allSel = selCount === visible.length;
+                        const someSel = selCount > 0 && !allSel;
+                        function toggleCh() {
+                          if (!active) { setClfFeatures(allFeatures.filter(f => !visible.some(v => v.name === f.name)).map(f => f.name)); return; }
+                          if (allSel) setClfFeatures(prev => prev.filter(n => !visible.some(f => f.name === n)));
+                          else setClfFeatures(prev => [...new Set([...prev, ...visible.map(f => f.name)])]);
+                        }
+                        return (
+                          <div key={ch}>
+                            <div className="flex items-center gap-2 px-2 py-1 bg-gray-50 sticky top-0 cursor-pointer" onClick={toggleCh}>
+                              <input type="checkbox" checked={allSel} ref={el => { if (el) el.indeterminate = someSel; }}
+                                onChange={toggleCh} className="accent-accent w-3 h-3" />
+                              <span className="text-[10px] font-semibold text-gray-600 uppercase tracking-wider">{ch}</span>
+                              <span className="text-[9px] text-gray-400 ml-auto">{selCount}/{visible.length}</span>
+                            </div>
+                            {visible.map((f) => (
+                              <label key={f.name} className="flex items-center gap-2 px-3 py-0.5 cursor-pointer hover:bg-gray-50">
+                                <input type="checkbox" checked={active ? active.has(f.name) : true}
+                                  onChange={() => {
+                                    if (!active) { setClfFeatures(allFeatures.filter(af => af.name !== f.name).map(af => af.name)); return; }
+                                    setClfFeatures(prev => prev.includes(f.name) ? prev.filter(n => n !== f.name) : [...prev, f.name]);
+                                  }}
+                                  className="accent-accent w-3 h-3" />
+                                <span className="text-[9px] font-mono text-gray-600 flex-1 truncate">{f.name}</span>
+                                <span className="text-[9px] text-gray-300 tabular-nums w-8 text-right">{(f.importance / maxImp * 100).toFixed(0)}</span>
+                              </label>
+                            ))}
+                          </div>
+                        );
+                      });
+                    })()}
+                  </div>
+                </div>
+              )}
+            </div>
+            </>
           ) : (
             <div className="w-full max-w-lg space-y-4">
               <div>
