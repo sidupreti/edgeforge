@@ -46,6 +46,7 @@ const INITIAL_CONFIG = {
   targetMcu:              "ESP32-S3",
   applicationDescription: "",
   hardwarePreprocessing:  { type: "none" },
+  dataMode:               "",   // "" = unset, "samples" = pre-labeled, "continuous" = continuous recording
 };
 
 const INITIAL_PIPELINE_CONFIG = {
@@ -278,6 +279,7 @@ function AppContent() {
       return (
         <CollectScreen
           config={config}
+          setConfig={setConfig}
           projectId={projectId}
           classes={classes}
           setClasses={setClasses}

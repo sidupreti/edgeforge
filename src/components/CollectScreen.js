@@ -1452,6 +1452,7 @@ function FileUploadMode({
   classes, setClasses, activeClassId, events, setEvents, onAnalysisReady,
   projectId, analyzeResult, separabilityNote,
   copilot, setCopilot, setDetectedSampleRate, onAskCopilot,
+  dataMode = "continuous",
 }) {
   // fileEntries: {file, name, parsed, classId, detected, error, note, reading}
   const [fileEntries,    setFileEntries]    = useState([]);
@@ -1790,7 +1791,8 @@ function FileUploadMode({
     <div className="flex-1 flex flex-col min-h-0 gap-3" style={{ position: "relative" }}>
 
       {/* ── File detail overlay — shown when an event row is clicked ──────── */}
-      {selectedEvent && (
+      {/* In "samples" mode: no detail panel (pre-labeled files don't need labeling) */}
+      {selectedEvent && dataMode === "continuous" && (
         <FileDetailPanel
           ev={selectedEvent}
           allEvents={events}
@@ -2264,8 +2266,9 @@ function FileUploadMode({
 
 // ── Main component ────────────────────────────────────────────────────────────
 
-export default function CollectScreen({ config, projectId, classes, setClasses, activeClassId, setActiveClassId, events, setEvents, analyzeResult, onAnalysisReady, chatHistory, setChatHistory, onApplyAction }) {
+export default function CollectScreen({ config, setConfig, projectId, classes, setClasses, activeClassId, setActiveClassId, events, setEvents, analyzeResult, onAnalysisReady, chatHistory, setChatHistory, onApplyAction }) {
   const isFileUpload = (config?.connectionType ?? "").toLowerCase().includes("file");
+  const dataMode = config?.dataMode || "";
 
   // State (classes/activeClassId are now props from App.js for persistence)
   const [newClassName,    setNewClassName]    = useState("");
@@ -2477,12 +2480,55 @@ export default function CollectScreen({ config, projectId, classes, setClasses, 
   })();
   separabilityNoteRef.current = separabilityNote;
 
+  // ── Mode picker helper ──────────────────────────────────────────────────────
+  function setDataMode(mode) {
+    setConfig((c) => ({ ...c, dataMode: mode }));
+    if (mode !== dataMode && events.length > 0) {
+      setEvents([]);  // reset file list on mode change
+    }
+  }
+
   // ── Render ──────────────────────────────────────────────────────────────────
+
+  // Mode picker (shown when dataMode is unset)
+  if (!dataMode) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full gap-6 max-w-xl mx-auto">
+        <div className="text-center">
+          <h2 className="text-lg font-bold text-gray-800 mb-1">How is your data organized?</h2>
+          <p className="text-xs text-gray-400">This determines how the Collect screen works. You can change it later.</p>
+        </div>
+        <div className="grid grid-cols-2 gap-4 w-full">
+          {[
+            { id: "samples", title: "Pre-labeled samples", sub: "Separate files, each already one example of a class", icon: "📁" },
+            { id: "continuous", title: "Continuous recording", sub: "One long capture — segment & label it here (optional video)", icon: "📼" },
+          ].map(({ id, title, sub, icon }) => (
+            <button key={id} onClick={() => setDataMode(id)}
+              className="flex flex-col items-start gap-2 p-5 rounded-xl border-2 border-gray-200 hover:border-accent transition-colors text-left">
+              <span className="text-2xl">{icon}</span>
+              <span className="text-sm font-bold text-gray-800">{title}</span>
+              <span className="text-xs text-gray-400 leading-relaxed">{sub}</span>
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex gap-6 h-full">
 
       {/* ── LEFT PANEL ──────────────────────────────────────────────────────── */}
-      {isFileUpload ? (
+      {dataMode === "continuous" && !isFileUpload ? (
+        <LiveCaptureMode
+          config={config}
+          events={events}
+          setEvents={setEvents}
+          activeClassId={activeClassId}
+          classes={classes}
+          analyzeResult={analyzeResult}
+        />
+      ) : (
         <FileUploadMode
           classes={classes}
           setClasses={setClasses}
@@ -2497,20 +2543,23 @@ export default function CollectScreen({ config, projectId, classes, setClasses, 
           setCopilot={setCopilot}
           setDetectedSampleRate={setDetectedSampleRate}
           onAskCopilot={sendToCopilot}
-        />
-      ) : (
-        <LiveCaptureMode
-          config={config}
-          events={events}
-          setEvents={setEvents}
-          activeClassId={activeClassId}
-          classes={classes}
-          analyzeResult={analyzeResult}
+          dataMode={dataMode}
         />
       )}
 
       {/* ── RIGHT PANEL ─────────────────────────────────────────────────────── */}
       <div className="w-56 flex-shrink-0 flex flex-col gap-4 min-h-0 overflow-hidden">
+
+        {/* Mode badge + change link */}
+        <div className="flex items-center justify-between flex-shrink-0">
+          <span className="text-[10px] text-gray-400 uppercase tracking-widest">
+            {dataMode === "continuous" ? "Continuous" : "Pre-labeled"}
+          </span>
+          <button onClick={() => setDataMode("")}
+            className="text-[10px] text-gray-400 hover:text-accent transition-colors">
+            Change mode
+          </button>
+        </div>
 
         {/* ── Classes panel — always visible at top, natural height ─────────── */}
         <div className="flex-shrink-0 border border-gray-200 rounded-lg overflow-hidden">
