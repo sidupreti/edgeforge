@@ -592,6 +592,7 @@ function FileDetailPanel({ ev, allEvents, onClose, onAskCopilot, classes }) {
       });
       if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
       const created = await r.json();
+      console.log("[handleCreateLabel] POST success:", r.status, created); // TEMP — remove after verifying (CollectScreen.js:594)
       setLabels((prev) => [...prev, created].sort((a, b) => a.start_ms - b.start_ms));
     } catch (err) { alert("Failed to create label: " + err.message); }
   }
@@ -1279,6 +1280,8 @@ function FileDetailPanel({ ev, allEvents, onClose, onAskCopilot, classes }) {
             boxShadow: "0 8px 28px rgba(0,0,0,0.13)", padding: "12px 14px", width: 208,
           }}
           onClick={(e) => e.stopPropagation()}
+          onMouseDown={(e) => e.stopPropagation()}
+          onMouseUp={(e) => e.stopPropagation()}
         >
           <p style={{ fontFamily: "'DM Mono', monospace", fontSize: 9, color: "#b0afa8", marginBottom: 8, lineHeight: 1.4 }}>
             {(dragPopup.s_ms / 1000).toFixed(2)}s → {((dragPopup.s_ms + dragPopup.dur_ms) / 1000).toFixed(2)}s
