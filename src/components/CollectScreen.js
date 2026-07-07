@@ -1,6 +1,7 @@
 import React, { useRef, useEffect, useState, useCallback } from "react";
 import API_BASE_URL from "../config";
 import CopilotChat from "./CopilotChat";
+import LiveCaptureMode from "./LiveCaptureMode";
 
 const COPILOT_THRESHOLD = 5;    // events before first analysis
 const COPILOT_DEBOUNCE  = 1500; // ms to wait after last event before calling API
@@ -12,10 +13,7 @@ const _CH_PALETTE  = ["#1D9E75", "#3B82F6", "#F59E0B", "#EF4444", "#8B5CF6", "#E
 function chColor(name, idx) { return _CH_PALETTE[idx % _CH_PALETTE.length]; }
 // Legacy compat aliases
 const AXIS_COLORS  = { ax: "#1D9E75", ay: "#3B82F6", az: "#F59E0B" };
-const AXIS_LABELS  = { ax: "a_x",     ay: "a_y",     az: "a_z"     };
-const SAMPLE_RATE  = 100;   // Hz — governs timing labels
-const BUFFER_SIZE  = 500;   // rolling window (frames)
-const CAPTURE_WIN  = 80;    // frames captured per event ≈ 800 ms
+const SAMPLE_RATE  = 100;   // Hz — default rate fallback
 const TARGET_COUNT = 30;    // events per class before bar fills
 
 const CLASS_PALETTE = [
@@ -24,13 +22,7 @@ const CLASS_PALETTE = [
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
-function getActiveAxes(sensorType = "") {
-  const s = sensorType.toLowerCase();
-  if (s.includes("accelerometer") || s.includes("imu")) return ["ax", "ay", "az"];
-  if (s.includes("microphone") || s.includes("pdm"))    return ["ax"];
-  if (s.includes("proximity")  || s.includes("tof"))    return ["ax"];
-  return ["ax", "ay"];
-}
+// getActiveAxes moved to LiveCaptureMode.js
 
 // ── Mini waveform thumbnail (SVG) ─────────────────────────────────────────────
 
@@ -2273,27 +2265,12 @@ function FileUploadMode({
 // ── Main component ────────────────────────────────────────────────────────────
 
 export default function CollectScreen({ config, projectId, classes, setClasses, activeClassId, setActiveClassId, events, setEvents, analyzeResult, onAnalysisReady, chatHistory, setChatHistory, onApplyAction }) {
-  const activeAxes   = getActiveAxes(config?.sensorType);
   const isFileUpload = (config?.connectionType ?? "").toLowerCase().includes("file");
 
-  // Canvas
-  const canvasRef = useRef(null);
-  const animRef   = useRef(null);
-
-  // Refs kept in sync with state — read inside animation loop without deps
-  const isRecordingRef   = useRef(true);
-  const activeClassIdRef = useRef("cls-event");
-  const classesRef       = useRef(null);
-  const addEventRef      = useRef(null);   // always points to latest callback
-
   // State (classes/activeClassId are now props from App.js for persistence)
-  const [isRecording,     setIsRecording]     = useState(true);
   const [newClassName,    setNewClassName]    = useState("");
   const [showAddClass,    setShowAddClass]    = useState(false);
   const [deletingClassId, setDeletingClassId] = useState(null);
-  const [clearAllConfirm, setClearAllConfirm] = useState(false);
-  const [timeSinceLast,   setTimeSinceLast]   = useState(null);
-  const lastEventTimeRef = useRef(null);
 
   const [copilot, setCopilot] = useState({ status: "idle", data: null, error: null });
   // Tracks the sample rate computed from actual uploaded file timestamps.
@@ -2396,45 +2373,6 @@ export default function CollectScreen({ config, projectId, classes, setClasses, 
     }
   }
 
-  // Keep refs in sync each render
-  isRecordingRef.current   = isRecording;
-  activeClassIdRef.current = activeClassId;
-  classesRef.current       = classes;
-
-  // The addEvent callback — rebuilt each render but exposed via stable ref
-  addEventRef.current = (snapshot, durationMs) => {
-    const classId  = activeClassIdRef.current;
-    const cls      = classesRef.current.find((c) => c.id === classId);
-    const firstAx  = activeAxes[0] ?? "ax";
-    setEvents((prev) => [
-      {
-        id:          `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
-        classId,
-        className:   cls?.name  ?? classId,
-        classColor:  cls?.color ?? "#1D9E75",
-        waveform:    snapshot[firstAx] ?? [],
-        waveColor:   AXIS_COLORS[firstAx] ?? "#1D9E75",
-        duration:    durationMs,
-        timestamp:   new Date().toLocaleTimeString(),
-        snapshot,                                       // full per-axis arrays for API
-      },
-      ...prev,
-    ]);
-    lastEventTimeRef.current = Date.now();
-    setTimeSinceLast(0);
-  };
-
-  // Tick the "time since last event" counter
-  useEffect(() => {
-    const iv = setInterval(() => {
-      if (lastEventTimeRef.current !== null) {
-        setTimeSinceLast(
-          Math.floor((Date.now() - lastEventTimeRef.current) / 1000)
-        );
-      }
-    }, 1000);
-    return () => clearInterval(iv);
-  }, []);
 
   // ── Copilot analysis — debounced, fires when ≥ COPILOT_THRESHOLD events ─────
   useEffect(() => {
@@ -2495,187 +2433,6 @@ export default function CollectScreen({ config, projectId, classes, setClasses, 
     };
   }, [events, detectedSampleRate]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Canvas animation ────────────────────────────────────────────────────────
-  useEffect(() => {
-    if (isFileUpload) return;
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-
-    // Set pixel resolution after layout
-    const init = () => {
-      canvas.width  = canvas.offsetWidth  || 700;
-      canvas.height = canvas.offsetHeight || 180;
-      startLoop(canvas);
-    };
-    const raf0 = requestAnimationFrame(init);
-    return () => {
-      cancelAnimationFrame(raf0);
-      cancelAnimationFrame(animRef.current);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  function startLoop(canvas) {
-    const ctx = canvas.getContext("2d");
-    const W   = canvas.width;
-    const H   = canvas.height;
-
-    // Simulation state — plain variables, not React state
-    const buffers = { ax: [], ay: [], az: [] };
-    let frame          = 0;
-    let burstActive    = false;
-    let burstStrength  = 0;
-    let burstFrames    = 0;
-    let nextBurstAt    = performance.now() + 2800 + Math.random() * 400; // 2.8–3.2 s, wall-clock
-    let capturing      = false;
-    let captureFrames  = 0;
-    const capBuf       = { ax: [], ay: [], az: [] };
-
-    // Generate one sample for a given axis
-    function sample(f, axis) {
-      const t = f / SAMPLE_RATE;
-      let base;
-      switch (axis) {
-        case "ax": base =  0.35 * Math.sin(2 * Math.PI * 2.1 * t);               break;
-        case "ay": base =  0.28 * Math.sin(2 * Math.PI * 3.3 * t + 1.0);         break;
-        case "az": base =  0.22 * Math.sin(2 * Math.PI * 1.7 * t + 2.1) + 0.08; break;
-        default:   base =  0.30 * Math.sin(2 * Math.PI * 2.0 * t);
-      }
-      const noise  = (Math.random() - 0.5) * 0.04;
-      const bScale = axis === "ax" ? 1.0 : axis === "ay" ? 0.72 : 0.50;
-      const burst  = burstActive
-        ? burstStrength * bScale * (Math.random() - 0.5) * 1.8
-        : 0;
-      return base + noise + burst;
-    }
-
-    function tick() {
-      frame++;
-      const now = performance.now();
-
-      // ── Burst lifecycle ──
-      if (burstActive) {
-        burstFrames--;
-        burstStrength *= 0.88;
-        if (burstFrames <= 0) {
-          burstActive   = false;
-          burstStrength = 0;
-          nextBurstAt   = now + 2800 + Math.random() * 400;
-        }
-      } else {
-        if (now >= nextBurstAt) {
-          burstActive   = true;
-          burstStrength = 0.80 + Math.random() * 0.55;
-          burstFrames   = 18 + Math.floor(Math.random() * 14);
-
-          if (isRecordingRef.current) {
-            capturing     = true;
-            captureFrames = CAPTURE_WIN;
-            capBuf.ax     = [];
-            capBuf.ay     = [];
-            capBuf.az     = [];
-          }
-        }
-      }
-
-      // ── Sample all axes ──
-      ["ax", "ay", "az"].forEach((axis) => {
-        const v = sample(frame, axis);
-        buffers[axis].push(v);
-        if (buffers[axis].length > BUFFER_SIZE) buffers[axis].shift();
-        if (capturing) capBuf[axis].push(v);
-      });
-
-      // ── End capture ──
-      if (capturing) {
-        captureFrames--;
-        if (captureFrames <= 0) {
-          capturing = false;
-          const snapshot   = { ax: [...capBuf.ax], ay: [...capBuf.ay], az: [...capBuf.az] };
-          const durationMs = Math.round((CAPTURE_WIN / SAMPLE_RATE) * 1000);
-          addEventRef.current(snapshot, durationMs);
-        }
-      }
-
-      // ── Draw ──────────────────────────────────────────────────────────────
-      ctx.clearRect(0, 0, W, H);
-
-      // Background
-      ctx.fillStyle = "#fbfaf6";
-      ctx.fillRect(0, 0, W, H);
-
-      // Horizontal grid
-      ctx.strokeStyle = "rgba(10,10,10,0.06)";
-      ctx.lineWidth   = 1;
-      ctx.setLineDash([]);
-      for (let g = 0; g <= 4; g++) {
-        const y = Math.round((g / 4) * H) + 0.5;
-        ctx.beginPath();
-        ctx.moveTo(0, y);
-        ctx.lineTo(W, y);
-        ctx.stroke();
-      }
-
-      // Centre line (dashed)
-      ctx.strokeStyle = "rgba(10,10,10,0.12)";
-      ctx.setLineDash([3, 6]);
-      ctx.beginPath();
-      ctx.moveTo(0, H / 2);
-      ctx.lineTo(W, H / 2);
-      ctx.stroke();
-      ctx.setLineDash([]);
-
-      // Capture highlight band
-      if (capturing) {
-        const progress = 1 - captureFrames / CAPTURE_WIN;
-        const bandW    = progress * W;
-        ctx.fillStyle  = "rgba(10,10,10,0.04)";
-        ctx.fillRect(W - bandW, 0, bandW, H);
-        // Leading edge
-        ctx.strokeStyle = "rgba(10,10,10,0.25)";
-        ctx.lineWidth   = 1;
-        ctx.beginPath();
-        ctx.moveTo(W - bandW, 0);
-        ctx.lineTo(W - bandW, H);
-        ctx.stroke();
-      }
-
-      // Signals
-      activeAxes.forEach((axis) => {
-        const buf = buffers[axis];
-        if (buf.length < 2) return;
-
-        const color = AXIS_COLORS[axis];
-        ctx.strokeStyle = color;
-        ctx.lineWidth   = 1.5;
-
-        if (burstActive && burstStrength > 0.35) {
-          ctx.shadowColor = color;
-          ctx.shadowBlur  = 5;
-        }
-
-        ctx.beginPath();
-        buf.forEach((v, i) => {
-          const x = (i / (BUFFER_SIZE - 1)) * W;
-          const y = H / 2 - v * (H * 0.36);
-          i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
-        });
-        ctx.stroke();
-        ctx.shadowBlur = 0;
-      });
-
-      // Burst flash overlay
-      if (burstActive && burstStrength > 0.25) {
-        ctx.fillStyle = `rgba(10,10,10,${(burstStrength * 0.04).toFixed(3)})`;
-        ctx.fillRect(0, 0, W, H);
-      }
-
-      animRef.current = requestAnimationFrame(tick);
-    }
-
-    animRef.current = requestAnimationFrame(tick);
-  }
-
   // ── Class management ────────────────────────────────────────────────────────
 
   function addNewClass() {
@@ -2698,13 +2455,6 @@ export default function CollectScreen({ config, projectId, classes, setClasses, 
     if (activeClassId === classId) setActiveClassId(remaining[0]?.id ?? null);
     setDeletingClassId(null);
   }
-
-  function deleteEvent(id) {
-    setEvents((prev) => prev.filter((e) => e.id !== id));
-  }
-
-  const activeClass  = classes.find((c) => c.id === activeClassId);
-  const totalEvents  = events.length;
 
   // ── Separability note (derived client-side from class distribution) ──────────
   const separabilityNote = (() => {
@@ -2749,163 +2499,14 @@ export default function CollectScreen({ config, projectId, classes, setClasses, 
           onAskCopilot={sendToCopilot}
         />
       ) : (
-      <div className="flex-1 flex flex-col min-h-0 gap-3">
-
-        {/* Signal canvas card */}
-        <div className="bg-gray-900 rounded-lg border border-gray-700 flex-shrink-0 overflow-hidden">
-
-          {/* Canvas header bar */}
-          <div className="flex items-center justify-between px-4 py-2 border-b border-gray-700/60">
-            {/* Axis legend */}
-            <div className="flex items-center gap-5">
-              {activeAxes.map((axis) => (
-                <div key={axis} className="flex items-center gap-1.5">
-                  <span
-                    className="inline-block w-5 h-0.5 rounded-full"
-                    style={{ backgroundColor: AXIS_COLORS[axis] }}
-                  />
-                  <span className="text-xs" style={{ color: AXIS_COLORS[axis] }}>
-                    {AXIS_LABELS[axis]}
-                  </span>
-                </div>
-              ))}
-            </div>
-
-            <div className="flex items-center gap-4">
-              <span className="text-xs text-gray-500 tabular-nums">
-                {SAMPLE_RATE} Hz
-              </span>
-              {/* REC badge */}
-              {isRecording && (
-                <div className="flex items-center gap-1.5 bg-red-500/10 border border-red-500/30 rounded px-2 py-0.5">
-                  <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-pulse" />
-                  <span className="text-xs font-bold text-red-400 tracking-widest">
-                    REC
-                  </span>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Canvas */}
-          <canvas
-            ref={canvasRef}
-            className="w-full block"
-            style={{ height: "180px" }}
-          />
-        </div>
-
-        {/* Status bar */}
-        <div className="flex items-center gap-5 flex-shrink-0 text-xs">
-          <div className="flex items-center gap-1.5">
-            <span className="text-gray-400">events</span>
-            <span className="text-gray-200 font-bold tabular-nums">{totalEvents}</span>
-            {totalEvents > 0 && (
-              clearAllConfirm ? (
-                <span className="flex items-center gap-1.5 ml-1">
-                  <span className="text-gray-400">Clear all?</span>
-                  <button onClick={() => { setEvents([]); setClearAllConfirm(false); }}
-                    className="text-red-400 hover:text-red-600 font-semibold">Yes</button>
-                  <button onClick={() => setClearAllConfirm(false)}
-                    className="text-gray-400 hover:text-gray-600">No</button>
-                </span>
-              ) : (
-                <button onClick={() => setClearAllConfirm(true)}
-                  className="text-gray-500 hover:text-red-400 transition-colors ml-1">
-                  Clear all
-                </button>
-              )
-            )}
-          </div>
-          <div className="w-px h-3 bg-gray-200" />
-          <div className="flex items-center gap-1.5">
-            <span className="text-gray-400">class</span>
-            <span
-              className="font-semibold"
-              style={{ color: activeClass?.color ?? "#1D9E75" }}
-            >
-              {activeClass?.name ?? "—"}
-            </span>
-          </div>
-          <div className="w-px h-3 bg-gray-200" />
-          <div className="flex items-center gap-1.5">
-            <span className="text-gray-400">last event</span>
-            <span className="text-gray-500 tabular-nums">
-              {timeSinceLast === null
-                ? "—"
-                : timeSinceLast === 0
-                ? "just now"
-                : `${timeSinceLast}s ago`}
-            </span>
-          </div>
-
-          {/* Record toggle */}
-          <button
-            onClick={() => setIsRecording((r) => !r)}
-            className={`ml-auto flex items-center gap-1.5 px-3 py-1 rounded border text-xs transition-colors ${
-              isRecording
-                ? "border-red-400/40 text-red-400 hover:bg-red-50"
-                : "border-accent/40 text-accent hover:bg-accent/5"
-            }`}
-          >
-            {isRecording ? "⏹ Stop" : "⏺ Record"}
-          </button>
-        </div>
-
-        {/* AI pipeline design ready banner */}
-        {analyzeResult && (
-          <div className="flex-shrink-0 flex items-center gap-2.5 px-3 py-2 rounded-lg border border-sf-gray-100 text-xs"
-               style={{ background: "#f8f7f3" }}>
-            <span className="w-1.5 h-1.5 rounded-full bg-sf-black animate-pulse flex-shrink-0" />
-            <span className="text-sf-black font-semibold">Signal analyzed</span>
-            <span className="text-gray-500">— AI pipeline design ready on the next screen →</span>
-            <span className="text-[9px] font-semibold uppercase tracking-widest text-gray-400 bg-gray-200/60 px-1.5 py-0.5 rounded">Beta</span>
-          </div>
-        )}
-
-        {/* Event list */}
-        <div className="flex-1 overflow-y-auto min-h-0 space-y-1.5 pr-0.5">
-          {events.length === 0 ? (
-            <div className="flex flex-col items-center justify-center h-24 border border-dashed border-gray-200 rounded gap-1">
-              <span className="text-gray-300 text-xs">Waiting for impact bursts…</span>
-              <span className="text-gray-200 text-xs">Events will appear here automatically</span>
-            </div>
-          ) : (
-            events.map((ev) => (
-              <div
-                key={ev.id}
-                className="flex items-center gap-3 px-3 py-2 bg-white border border-gray-100 rounded hover:border-gray-200 group transition-colors"
-              >
-                <WaveformThumb data={ev.waveform} color={ev.waveColor} />
-
-                <div className="flex-1 min-w-0 flex items-center gap-2 flex-wrap">
-                  <span
-                    className="text-xs font-semibold px-1.5 py-0.5 rounded"
-                    style={{
-                      color:           ev.classColor,
-                      backgroundColor: `${ev.classColor}1a`,
-                    }}
-                  >
-                    {ev.className}
-                  </span>
-                  <span className="text-xs text-gray-400 tabular-nums">
-                    {ev.duration} ms
-                  </span>
-                  <span className="text-xs text-gray-300">{ev.timestamp}</span>
-                </div>
-
-                <button
-                  onClick={() => deleteEvent(ev.id)}
-                  className="opacity-0 group-hover:opacity-100 text-gray-300 hover:text-red-400 transition-all text-base leading-none px-1"
-                  title="Delete"
-                >
-                  ×
-                </button>
-              </div>
-            ))
-          )}
-        </div>
-      </div>
+        <LiveCaptureMode
+          config={config}
+          events={events}
+          setEvents={setEvents}
+          activeClassId={activeClassId}
+          classes={classes}
+          analyzeResult={analyzeResult}
+        />
       )}
 
       {/* ── RIGHT PANEL ─────────────────────────────────────────────────────── */}
