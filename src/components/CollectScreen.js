@@ -803,6 +803,7 @@ function FileDetailPanel({ ev, allEvents, onClose, onAskCopilot, classes }) {
             </div>
 
             {hasVideo ? (
+              <>
               <div style={{ position: "relative" }}>
                 <video
                   ref={videoRef}
@@ -838,6 +839,11 @@ function FileDetailPanel({ ev, allEvents, onClose, onAskCopilot, classes }) {
                   {(currentMs / 1000).toFixed(2)}s / {(ev.duration / 1000).toFixed(2)}s
                 </span>
               </div>
+              {/* Video scrubber — drag to seek through the video */}
+              <input type="range" min={0} max={Math.max(1, ev.duration)} step={10} value={currentMs}
+                onChange={(e) => seekTo(Number(e.target.value))}
+                style={{ width: "100%", height: 6, accentColor: "#ef4444", marginTop: 4 }} />
+              </>
             ) : (
               <label style={{
                 display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
