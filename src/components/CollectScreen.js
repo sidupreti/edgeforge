@@ -1065,8 +1065,10 @@ function FileDetailPanel({ ev, allEvents, onClose, onAskCopilot, classes }) {
                     <div key={rowIdx} style={{ position: "relative", height: ROW_H, marginBottom: rowIdx < labelRows.length - 1 ? GAP : 0 }}>
                       {row.map((lbl) => {
                         const color  = _labelColor(lbl.label_name);
-                        const leftPct = (lbl.start_ms / ev.duration) * 100;
-                        const widPct  = Math.max(0.2, (lbl.duration_ms / ev.duration) * 100);
+                        const leftPct = ((lbl.start_ms - viewStartMs) / viewDurationMs) * 100;
+                        const widPct  = Math.max(0.2, (lbl.duration_ms / viewDurationMs) * 100);
+                        // Skip labels entirely outside viewport
+                        if (lbl.start_ms + lbl.duration_ms < viewStartMs || lbl.start_ms > viewEndMs) return null;
                         const isResizingThis = resizing?.id === lbl.id;
                         return (
                           <div
@@ -1122,8 +1124,9 @@ function FileDetailPanel({ ev, allEvents, onClose, onAskCopilot, classes }) {
                   {proposals.length > 0 && (
                     <div style={{ position: "relative", height: ROW_H, marginTop: labelRows.length > 0 ? GAP + 1 : 0, borderTop: labelRows.length > 0 ? "1px dashed #ebeae5" : "none" }}>
                       {proposals.map((p, idx) => {
-                        const leftPct = (p.start_ms / ev.duration) * 100;
-                        const widPct  = Math.max(0.2, (p.duration_ms / ev.duration) * 100);
+                        if (p.start_ms + p.duration_ms < viewStartMs || p.start_ms > viewEndMs) return null;
+                        const leftPct = ((p.start_ms - viewStartMs) / viewDurationMs) * 100;
+                        const widPct  = Math.max(0.2, (p.duration_ms / viewDurationMs) * 100);
                         const wideEnough = widPct * (sigContainerRef.current?.clientWidth ?? 200) / 100 > 48;
                         return (
                           <div
