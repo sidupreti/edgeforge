@@ -1755,7 +1755,7 @@ function FileUploadMode({
               Upload CSV files for each class using the buttons in the Classes panel →
             </p>
             <p className="text-xs text-gray-400 mt-0.5">
-              CSV with header row, or headerless <code className="text-emerald-300">timestamp,v1,v2,...</code>
+              CSV with header row, or headerless <code className="text-gray-300">timestamp,v1,v2,...</code>
             </p>
           </div>
           <div className="flex items-center gap-3">
@@ -1769,7 +1769,7 @@ function FileUploadMode({
               href="/sample_data.csv"
               download="sample_data.csv"
               onClick={(e) => e.stopPropagation()}
-              className="text-xs text-emerald-300 hover:text-emerald-200 underline transition-colors"
+              className="text-xs text-gray-300 hover:text-white underline transition-colors"
             >
               Download sample data →
             </a>
