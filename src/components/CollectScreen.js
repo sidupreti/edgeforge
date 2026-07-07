@@ -332,13 +332,62 @@ function FileDetailPanel({ ev, allEvents, onClose, onAskCopilot, classes }) {
   for (const axis of axes) stats[axis] = computeAxisStats(snap[axis]);
 
   // Compute rate from this file's own sample count ÷ duration
-  const sampleCount = snap.ax?.length ?? 0;
+  const firstCh = axes[0];
+  const sampleCount = firstCh ? (snap[firstCh]?.length ?? 0) : 0;
   const displayRate = sampleCount > 0 && ev.duration > 0
     ? Math.round((sampleCount / (ev.duration / 1000)) * 10) / 10
     : ev.sampleRateHz;
 
   // Quality flags — read from the ingest quality gate (one source of truth)
   const flags = (ev.qualityFlags || []).map((f) => f.detail || f.flag_type || "unknown issue");
+
+  // ── Auto-segmentation state ───────────────────────────────────────────────
+  const [segments, setSegments] = useState([]);
+  const [segSensitivity, setSegSensitivity] = useState(3.0);
+  const [segLoading, setSegLoading] = useState(false);
+  const [segLabels, setSegLabels] = useState({}); // {cluster_id: label_name}
+  const SEG_COLORS = ["#1D9E75", "#3B82F6", "#F59E0B", "#EF4444", "#8B5CF6", "#EC4899", "#06B6D4", "#84CC16"];
+
+  async function handleAutoSegment() {
+    if (!ev.datasetId) return;
+    setSegLoading(true);
+    try {
+      const res = await fetch(`${API_BASE_URL}/datasets/${ev.datasetId}/segment`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ dataset_id: ev.datasetId, sensitivity: segSensitivity }),
+      });
+      const data = await res.json();
+      if (res.ok && data.segments) {
+        setSegments(data.segments);
+        setSegLabels({});
+      }
+    } catch { /* ignore */ }
+    finally { setSegLoading(false); }
+  }
+
+  function labelCluster(clusterId, labelName) {
+    setSegLabels((prev) => ({ ...prev, [clusterId]: labelName }));
+  }
+
+  async function applySegmentLabels() {
+    if (!ev.datasetId || segments.length === 0) return;
+    for (const seg of segments) {
+      const label = segLabels[seg.cluster_id];
+      if (!label) continue;
+      try {
+        await fetch(`${API_BASE_URL}/datasets/${ev.datasetId}/labels`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            label_name: label,
+            start_ms: seg.start_ms,
+            duration_ms: seg.end_ms - seg.start_ms,
+          }),
+        });
+      } catch { /* ignore individual failures */ }
+    }
+  }
 
   const copilotMsg = [
     `Analyze signal "${ev.filename ?? "unknown"}"`,
@@ -845,6 +894,69 @@ function FileDetailPanel({ ev, allEvents, onClose, onAskCopilot, classes }) {
             );
           })()}
         </div>
+
+        {/* ── Auto-segmentation ───────────────────────────────────────────────── */}
+        {ev.datasetId && (
+          <div style={{ marginBottom: 12 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
+              <button onClick={handleAutoSegment} disabled={segLoading}
+                style={{ fontSize: 10, color: "#8B5CF6", border: "1px solid rgba(139,92,246,0.3)", borderRadius: 4, padding: "2px 8px", background: "none", cursor: "pointer" }}>
+                {segLoading ? "Segmenting…" : "Auto-segment"}
+              </button>
+              <span style={{ fontSize: 9, color: "#b0afa8" }}>Sensitivity</span>
+              <input type="range" min={0.5} max={10} step={0.5} value={segSensitivity}
+                onChange={(e) => setSegSensitivity(Number(e.target.value))}
+                style={{ width: 80, accentColor: "#8B5CF6" }} />
+              <span style={{ fontSize: 9, color: "#b0afa8", fontFamily: "'DM Mono', monospace" }}>{segSensitivity}</span>
+              {segments.length > 0 && (
+                <span style={{ fontSize: 9, color: "#6b6a63" }}>{segments.length} segments</span>
+              )}
+            </div>
+            {/* Segment color bar */}
+            {segments.length > 0 && ev.duration > 0 && (
+              <>
+                <div style={{ display: "flex", height: 16, borderRadius: 4, overflow: "hidden", marginBottom: 4 }}>
+                  {segments.map((seg, i) => {
+                    const w = ((seg.end_ms - seg.start_ms) / ev.duration) * 100;
+                    return (
+                      <div key={i} style={{
+                        width: `${w}%`, backgroundColor: SEG_COLORS[seg.cluster_id % SEG_COLORS.length],
+                        opacity: 0.6, borderRight: "1px solid white",
+                        display: "flex", alignItems: "center", justifyContent: "center",
+                      }}>
+                        <span style={{ fontSize: 8, color: "white", fontWeight: 700 }}>
+                          {segLabels[seg.cluster_id] || ""}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+                {/* Cluster legend + label inputs */}
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 6 }}>
+                  {[...new Set(segments.map(s => s.cluster_id))].sort().map((cid) => (
+                    <div key={cid} style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                      <span style={{ width: 10, height: 10, borderRadius: 2, backgroundColor: SEG_COLORS[cid % SEG_COLORS.length], flexShrink: 0 }} />
+                      <select value={segLabels[cid] || ""} onChange={(e) => labelCluster(cid, e.target.value)}
+                        style={{ fontSize: 10, border: "1px solid #e0e0e0", borderRadius: 3, padding: "1px 4px" }}>
+                        <option value="">—</option>
+                        {classes.map((c) => <option key={c.id} value={c.name}>{c.name}</option>)}
+                      </select>
+                    </div>
+                  ))}
+                </div>
+                <button onClick={applySegmentLabels}
+                  disabled={Object.values(segLabels).filter(Boolean).length === 0}
+                  style={{
+                    fontSize: 10, color: Object.values(segLabels).filter(Boolean).length > 0 ? "#8B5CF6" : "#ccc",
+                    border: "1px solid rgba(139,92,246,0.3)", borderRadius: 4, padding: "3px 10px",
+                    background: "none", cursor: Object.values(segLabels).filter(Boolean).length > 0 ? "pointer" : "not-allowed",
+                  }}>
+                  Apply labels →
+                </button>
+              </>
+            )}
+          </div>
+        )}
 
         {/* ── Label track — HTML chips with row-stacking ──────────────────────── */}
         {ev.datasetId && ev.duration > 0 && (() => {
