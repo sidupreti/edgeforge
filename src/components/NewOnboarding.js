@@ -20,6 +20,7 @@ const MCU_CHIPS = [
   { label: "Arduino BLE", value: "Arduino Nano 33 BLE" },
   { label: "RP2040",      value: "RP2040 (Raspberry Pi Pico)" },
   { label: "ATSAMD51",    value: "ATSAMD51 (Adafruit M4)" },
+  { label: "Custom",      value: "__custom__" },
 ];
 
 function slugify(name) {
@@ -256,22 +257,18 @@ function CsvDropZone({ onDetected }) {
 // ── Main component ────────────────────────────────────────────────────────────
 
 export default function NewOnboarding({ onComplete }) {
-  const [appDesc,      setAppDesc]      = useState("");
-  const [sensor,       setSensor]       = useState("");
+  const [projectName,  setProjectName]  = useState("");
   const [mcu,          setMcu]          = useState("ESP32-S3");
-  const [detectedCsv,  setDetectedCsv]  = useState(null); // { colCount, columnNames, sampleRateHz }
+  const [customMcu,    setCustomMcu]    = useState("");
   const [classes,      setClasses]      = useState("");
+  const [dataMode,     setDataMode]     = useState("");  // "samples" | "continuous"
   const [error,        setError]        = useState("");
-
-  function handleCsvDetected(meta) {
-    setDetectedCsv(meta);
-  }
 
   function handleSubmit(e) {
     e.preventDefault();
-    if (!appDesc.trim()) { setError("Please describe your application."); return; }
-    if (!sensor)         { setError("Please select a sensor type."); return; }
+    if (!projectName.trim()) { setError("Please name your project."); return; }
     if (!classes.trim()) { setError("Please name at least one class."); return; }
+    if (!dataMode)       { setError("Please select how your data is organized."); return; }
     setError("");
 
     const classNames = classes
@@ -285,18 +282,21 @@ export default function NewOnboarding({ onComplete }) {
       id:    `cls-${name.replace(/\s+/g, "-")}-${i}`,
       name,
       color: CLASS_PALETTE[i % CLASS_PALETTE.length],
+      description: "",
     }));
 
+    const resolvedMcu = mcu === "__custom__" ? (customMcu.trim() || "Custom MCU") : mcu;
+
     const finalConfig = {
-      projectName:            slugify(appDesc.trim().split(/\s+/).slice(0, 4).join("-")),
-      sensorType:             sensor,
+      projectName:            slugify(projectName.trim()),
+      sensorType:             "Custom / Analog",
       connectionType:         "File Upload (CSV / WAV)",
       triggerType:            "Threshold",
       triggerConfig:          {},
-      targetMcu:              mcu,
-      applicationDescription: appDesc.trim(),
+      targetMcu:              resolvedMcu,
+      applicationDescription: projectName.trim(),
       hardwarePreprocessing:  { type: "none" },
-      detectedCsvFormat:      detectedCsv ?? null,
+      dataMode,
     };
 
     onComplete(finalConfig, finalClasses);
@@ -333,43 +333,38 @@ export default function NewOnboarding({ onComplete }) {
         {/* ── Chat bubbles ───────────────────────────────────────────────── */}
         <form onSubmit={handleSubmit} className="space-y-8">
 
-          {/* Q1 — App description */}
-          <QuestionBlock index={0} question="What are you trying to classify? Describe your application briefly.">
-            <textarea
-              value={appDesc}
-              onChange={(e) => setAppDesc(e.target.value)}
-              placeholder="e.g. Detect vibration anomalies on a CNC spindle bearing"
-              rows={2}
-              className="w-full rounded-xl px-4 py-3 text-sm leading-relaxed resize-none transition-colors
+          {/* Q1 — Project name */}
+          <QuestionBlock index={0} question="Name your project.">
+            <input
+              type="text"
+              value={projectName}
+              onChange={(e) => setProjectName(e.target.value)}
+              placeholder="e.g. CNC Vibration Monitor"
+              className="w-full rounded-xl px-4 py-3 text-sm transition-colors
                          focus:outline-none focus:ring-2 focus:ring-accent/40"
-              style={{
-                background: "#ffffff",
-                border: "1px solid #d8d7d0",
-                color: "#0a0a0a",
-              }}
+              style={{ background: "#ffffff", border: "1px solid #d8d7d0", color: "#0a0a0a" }}
             />
           </QuestionBlock>
 
-          {/* Q2 — Sensor */}
-          <QuestionBlock index={1} question="Which sensor are you using?">
-            <ChipSelect options={SENSOR_CHIPS} value={sensor} onChange={setSensor} />
-          </QuestionBlock>
-
-          {/* Q3 — MCU */}
-          <QuestionBlock index={2} question="What's your target MCU?">
+          {/* Q2 — MCU */}
+          <QuestionBlock index={1} question="What's your target MCU?">
             <ChipSelect options={MCU_CHIPS} value={mcu} onChange={setMcu} />
+            {mcu === "__custom__" && (
+              <input
+                type="text"
+                value={customMcu}
+                onChange={(e) => setCustomMcu(e.target.value)}
+                placeholder="Enter your MCU name…"
+                className="w-full rounded-xl px-4 py-3 text-sm mt-2 transition-colors
+                           focus:outline-none focus:ring-2 focus:ring-accent/40"
+                style={{ background: "#ffffff", border: "1px solid #d8d7d0", color: "#0a0a0a" }}
+                autoFocus
+              />
+            )}
           </QuestionBlock>
 
-          {/* Q4 — CSV sample upload (new) */}
-          <QuestionBlock
-            index={3}
-            question="Do you have a sample data file? Drop one here and I'll auto-detect the format — or skip if you don't have one yet."
-          >
-            <CsvDropZone onDetected={handleCsvDetected} />
-          </QuestionBlock>
-
-          {/* Q5 — Classes (always visible, but visually highlighted once csv step resolved) */}
-          <QuestionBlock index={4} question="Name your classification classes, separated by commas.">
+          {/* Q3 — Classes */}
+          <QuestionBlock index={2} question="Name your classification classes, separated by commas.">
             <input
               type="text"
               value={classes}
@@ -401,6 +396,26 @@ export default function NewOnboarding({ onComplete }) {
                 })}
               </div>
             )}
+          </QuestionBlock>
+
+          {/* Q4 — Data organization mode */}
+          <QuestionBlock index={3} question="How is your data organized?">
+            <div className="grid grid-cols-2 gap-3">
+              {[
+                { id: "samples", title: "Pre-labeled samples", sub: "Separate files, each one example of a class" },
+                { id: "continuous", title: "Continuous recording", sub: "One long capture — segment & label it" },
+              ].map(({ id, title, sub }) => (
+                <button key={id} type="button" onClick={() => setDataMode(id)}
+                  className="flex flex-col items-start gap-1.5 p-4 rounded-xl border-2 transition-colors text-left"
+                  style={{
+                    borderColor: dataMode === id ? "#1D9E75" : "#d8d7d0",
+                    background: dataMode === id ? "rgba(29,158,117,0.05)" : "#ffffff",
+                  }}>
+                  <span className="text-sm font-semibold" style={{ color: dataMode === id ? "#1D9E75" : "#0a0a0a" }}>{title}</span>
+                  <span className="text-xs text-gray-400 leading-relaxed">{sub}</span>
+                </button>
+              ))}
+            </div>
           </QuestionBlock>
 
           {/* ── Error ────────────────────────────────────────────────────── */}

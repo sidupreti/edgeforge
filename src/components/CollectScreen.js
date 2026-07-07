@@ -2496,36 +2496,14 @@ export default function CollectScreen({ config, setConfig, projectId, classes, s
 
   // ── Render ──────────────────────────────────────────────────────────────────
 
-  // Mode picker (shown when dataMode is unset)
-  if (!dataMode) {
-    return (
-      <div className="flex flex-col items-center justify-center h-full gap-6 max-w-xl mx-auto">
-        <div className="text-center">
-          <h2 className="text-lg font-bold text-gray-800 mb-1">How is your data organized?</h2>
-          <p className="text-xs text-gray-400">This determines how the Collect screen works. You can change it later.</p>
-        </div>
-        <div className="grid grid-cols-2 gap-4 w-full">
-          {[
-            { id: "samples", title: "Pre-labeled samples", sub: "Separate files, each already one example of a class", icon: "📁" },
-            { id: "continuous", title: "Continuous recording", sub: "One long capture — segment & label it here (optional video)", icon: "📼" },
-          ].map(({ id, title, sub, icon }) => (
-            <button key={id} onClick={() => setDataMode(id)}
-              className="flex flex-col items-start gap-2 p-5 rounded-xl border-2 border-gray-200 hover:border-accent transition-colors text-left">
-              <span className="text-2xl">{icon}</span>
-              <span className="text-sm font-bold text-gray-800">{title}</span>
-              <span className="text-xs text-gray-400 leading-relaxed">{sub}</span>
-            </button>
-          ))}
-        </div>
-      </div>
-    );
-  }
+  // If dataMode not set (legacy project or skipped), default to samples
+  const effectiveDataMode = dataMode || "samples";
 
   return (
     <div className="flex gap-6 h-full">
 
       {/* ── LEFT PANEL ──────────────────────────────────────────────────────── */}
-      {dataMode === "continuous" && !isFileUpload ? (
+      {effectiveDataMode === "continuous" && !isFileUpload ? (
         <LiveCaptureMode
           config={config}
           events={events}
@@ -2549,7 +2527,7 @@ export default function CollectScreen({ config, setConfig, projectId, classes, s
           setCopilot={setCopilot}
           setDetectedSampleRate={setDetectedSampleRate}
           onAskCopilot={sendToCopilot}
-          dataMode={dataMode}
+          dataMode={effectiveDataMode}
         />
       )}
 
@@ -2559,7 +2537,7 @@ export default function CollectScreen({ config, setConfig, projectId, classes, s
         {/* Mode badge + change link */}
         <div className="flex items-center justify-between flex-shrink-0">
           <span className="text-[10px] text-gray-400 uppercase tracking-widest">
-            {dataMode === "continuous" ? "Continuous" : "Pre-labeled"}
+            {effectiveDataMode === "continuous" ? "Continuous" : "Pre-labeled"}
           </span>
           <button onClick={() => setDataMode("")}
             className="text-[10px] text-gray-400 hover:text-accent transition-colors">
