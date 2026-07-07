@@ -4,14 +4,6 @@ const CLASS_PALETTE = [
   "#1D9E75", "#3B82F6", "#F59E0B", "#EF4444", "#8B5CF6", "#EC4899",
 ];
 
-const SENSOR_CHIPS = [
-  { label: "Accelerometer", value: "Accelerometer (IMU)" },
-  { label: "Microphone",    value: "Microphone (PDM)" },
-  { label: "Temperature",   value: "Temperature / Humidity" },
-  { label: "Pressure",      value: "Pressure (Barometric)" },
-  { label: "Proximity",     value: "Proximity (ToF)" },
-  { label: "Custom",        value: "Custom / Analog" },
-];
 
 const MCU_CHIPS = [
   { label: "ESP32-S3",    value: "ESP32-S3" },
@@ -137,7 +129,8 @@ function QuestionBlock({ index, question, children }) {
   );
 }
 
-// ── CSV Drop Zone ─────────────────────────────────────────────────────────────
+// ── CSV Drop Zone (currently unused — kept for future re-enable) ─────────────
+// eslint-disable-next-line no-unused-vars
 function CsvDropZone({ onDetected }) {
   const fileRef    = useRef(null);
   const [drag,     setDrag]    = useState(false);
