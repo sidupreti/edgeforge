@@ -433,6 +433,7 @@ function FileDetailPanel({ ev, allEvents, onClose, onAskCopilot, classes }) {
   const [dragPopup,     setDragPopup]     = useState(null);  // { s_ms, dur_ms, clientX, clientY }
   const [dragPopupName, setDragPopupName] = useState("");
   const dragPopupInputRef = useRef(null);
+  const justCreatedPopupRef = useRef(false);  // prevents onClick from killing popup that mouseUp just created
 
   // ── VLM auto-label proposals ─────────────────────────────────────────────────
   const [proposals,        setProposals]        = useState([]);   // [{label_name, start_ms, duration_ms, frame_count}]
@@ -522,7 +523,11 @@ function FileDetailPanel({ ev, allEvents, onClose, onAskCopilot, classes }) {
         setDragEnd(endMs);  // finalize the end position
         setDragPopup({ s_ms, dur_ms, clientX: e.clientX, clientY: e.clientY });
         setDragPopupName("");
-        setTimeout(() => dragPopupInputRef.current?.focus(), 50);
+        justCreatedPopupRef.current = true;  // prevent the immediately-following onClick from killing it
+        setTimeout(() => {
+          dragPopupInputRef.current?.focus();
+          justCreatedPopupRef.current = false;  // allow future clicks to dismiss
+        }, 100);
         return;  // do NOT clear dragStart/dragEnd — the highlight stays
       }
       // No dataset → just clear
@@ -725,7 +730,7 @@ function FileDetailPanel({ ev, allEvents, onClose, onAskCopilot, classes }) {
       onMouseMove={handlePanelMouseMove}
       onMouseUp={handlePanelMouseUp}
       onMouseLeave={handlePanelMouseUp}
-      onClick={() => { setLabelMenu(null); setProposalMenu(null); if (dragPopup) { setDragPopup(null); setDragStart(null); setDragEnd(null); } }}
+      onClick={() => { setLabelMenu(null); setProposalMenu(null); if (dragPopup && !justCreatedPopupRef.current) { setDragPopup(null); setDragStart(null); setDragEnd(null); } }}
     >
       {/* Header */}
       <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 12px", borderBottom: "1px solid #ebeae5", flexShrink: 0 }}>
@@ -772,11 +777,12 @@ function FileDetailPanel({ ev, allEvents, onClose, onAskCopilot, classes }) {
           </div>
         )}
 
-        {/* ── Video lane ────────────────────────────────────────────────────── */}
+        {/* ── Video lane (compact) ─────────────────────────────────────────── */}
         {ev.datasetId && (
-          <div style={{ marginBottom: 12 }}>
+          <div style={{ marginBottom: 8, display: "flex", gap: 10, alignItems: "flex-start" }}>
+            <div style={{ flexShrink: 0, width: hasVideo ? 200 : "auto" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 4 }}>
-              <p style={{ fontFamily: "'DM Mono', monospace", fontSize: 9, color: "#b0afa8", textTransform: "uppercase", letterSpacing: "0.08em" }}>Video</p>
+              <p style={{ fontFamily: "'DM Mono', monospace", fontSize: 9, color: "#b0afa8", textTransform: "uppercase", letterSpacing: "0.08em", margin: 0 }}>Video</p>
               {hasVideo && (
                 <>
                   <button
@@ -808,7 +814,7 @@ function FileDetailPanel({ ev, allEvents, onClose, onAskCopilot, classes }) {
                 <video
                   ref={videoRef}
                   src={`${API_BASE_URL}/datasets/${ev.datasetId}/video`}
-                  style={{ width: "100%", borderRadius: 6, background: "#0a0a0a", display: "block", maxHeight: 220, objectFit: "contain" }}
+                  style={{ width: "100%", borderRadius: 6, background: "#0a0a0a", display: "block", maxHeight: 150, objectFit: "contain" }}
                   onTimeUpdate={() => {
                     if (videoRef.current) setCurrentMs(videoRef.current.currentTime * 1000);
                   }}
@@ -863,6 +869,7 @@ function FileDetailPanel({ ev, allEvents, onClose, onAskCopilot, classes }) {
                 </span>
               </label>
             )}
+            </div>
           </div>
         )}
 
@@ -918,7 +925,7 @@ function FileDetailPanel({ ev, allEvents, onClose, onAskCopilot, classes }) {
               data={chanData}
               color={chColor(axis, ai)}
               label={axis}
-              height={36}
+              height={60}
               startIdx={si}
               endIdx={ei}
             />
@@ -926,7 +933,7 @@ function FileDetailPanel({ ev, allEvents, onClose, onAskCopilot, classes }) {
 
           {/* Overlays: selection highlight + cursor line */}
           {((selX !== null && selW > 2) || ev.datasetId) && (() => {
-            const overlayH = 36 * axes.length + 3 * Math.max(0, axes.length - 1);
+            const overlayH = 60 * axes.length + 3 * Math.max(0, axes.length - 1);
             return (
               <div style={{ display: "flex", alignItems: "center", gap: 6, position: "relative", height: 0, top: -overlayH - 2 }}>
                 <span style={{ width: 14, flexShrink: 0 }} />
