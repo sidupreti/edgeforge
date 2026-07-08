@@ -104,10 +104,13 @@ export default function TrainScreen({
   savedAnomalyResult, onAnomalyResult,
 }) {
   const [blockType, setBlockType] = useState("classification");
+  const [modelType, setModelType] = useState("mlp");  // "mlp" | "rf" | "logistic"
   const [epochs, setEpochs] = useState(30);
   const [learningRate, setLR] = useState(0.0005);
   const [neurons1, setNeurons1] = useState(20);
   const [neurons2, setNeurons2] = useState(10);
+  const [nEstimators, setNEstimators] = useState(50);
+  const [maxDepth, setMaxDepth] = useState(8);
   const [nClusters, setNClusters] = useState(32);
   const [anomalyAxes, setAnomalyAxes] = useState([]);  // selected feature names for anomaly
   const [suggestedN, setSuggestedN] = useState(6);
@@ -146,8 +149,10 @@ export default function TrainScreen({
       const res = await fetch(`${API_BASE_URL}/features/train`, {
         method: "POST", headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          project_id: projectId, epochs, learning_rate: learningRate,
+          project_id: projectId, model_type: modelType,
+          epochs, learning_rate: learningRate,
           neurons_1: neurons1, neurons_2: neurons2,
+          n_estimators: nEstimators, max_depth: maxDepth,
           selected_features: clfFeatures.length > 0 ? clfFeatures : [],
         }),
       });
@@ -239,10 +244,16 @@ export default function TrainScreen({
       <div className="flex items-center justify-between mb-6">
         <div>
           <h2 className="text-lg font-bold text-gray-800">
-            {blockType === "anomaly" ? "Anomaly Detection" : "Neural Network Classifier"}
+            {blockType === "anomaly" ? "Anomaly Detection"
+              : modelType === "rf" ? "Random Forest Classifier"
+              : modelType === "logistic" ? "Logistic Regression"
+              : "Neural Network Classifier"}
           </h2>
           <p className="text-xs text-gray-400 mt-1">
-            {blockType === "anomaly" ? "K-means distance-based novelty scoring" : `Dense(${neurons1}, relu) → Dense(${neurons2}, relu) → Softmax`}
+            {blockType === "anomaly" ? "K-means distance-based novelty scoring"
+              : modelType === "rf" ? `${nEstimators} trees, max depth ${maxDepth}`
+              : modelType === "logistic" ? "Multinomial logistic regression"
+              : `Dense(${neurons1}, relu) → Dense(${neurons2}, relu) → Softmax`}
           </p>
         </div>
         <button onClick={() => onRetrain?.()} className="px-4 py-2 text-xs text-gray-500 border border-gray-200 rounded hover:bg-gray-50 transition-colors">← Pipeline</button>
@@ -261,27 +272,64 @@ export default function TrainScreen({
         <div className="flex flex-col items-center gap-6 py-4">
           {blockType === "classification" ? (
             <>
+            {/* Model type selector */}
+            <div className="flex gap-2 w-full max-w-lg">
+              {[
+                { id: "mlp", label: "Neural Network" },
+                { id: "rf", label: "Random Forest" },
+                { id: "logistic", label: "Logistic Regression" },
+              ].map(({ id, label }) => (
+                <button key={id} type="button" onClick={() => setModelType(id)}
+                  className={`px-3 py-1.5 text-xs font-semibold rounded-lg border transition-colors ${
+                    modelType === id ? "border-accent text-accent bg-accent/5" : "border-gray-200 text-gray-500 hover:border-gray-300"
+                  }`}>{label}</button>
+              ))}
+            </div>
+
             <div className="grid grid-cols-2 gap-4 w-full max-w-lg">
-              <div>
-                <label className="text-xs text-gray-400 uppercase tracking-widest block mb-1.5">Training cycles</label>
-                <input type="number" min={5} max={500} value={epochs} onChange={(e) => setEpochs(Number(e.target.value))}
-                  className="w-full border border-gray-200 rounded px-3 py-2 text-xs font-mono outline-none focus:border-accent" />
-              </div>
-              <div>
-                <label className="text-xs text-gray-400 uppercase tracking-widest block mb-1.5">Learning rate</label>
-                <input type="number" min={0.00001} max={0.1} step={0.0001} value={learningRate} onChange={(e) => setLR(Number(e.target.value))}
-                  className="w-full border border-gray-200 rounded px-3 py-2 text-xs font-mono outline-none focus:border-accent" />
-              </div>
-              <div>
-                <label className="text-xs text-gray-400 uppercase tracking-widest block mb-1.5">Dense layer 1 neurons</label>
-                <input type="number" min={1} max={256} value={neurons1} onChange={(e) => setNeurons1(Number(e.target.value))}
-                  className="w-full border border-gray-200 rounded px-3 py-2 text-xs font-mono outline-none focus:border-accent" />
-              </div>
-              <div>
-                <label className="text-xs text-gray-400 uppercase tracking-widest block mb-1.5">Dense layer 2 neurons</label>
-                <input type="number" min={1} max={256} value={neurons2} onChange={(e) => setNeurons2(Number(e.target.value))}
-                  className="w-full border border-gray-200 rounded px-3 py-2 text-xs font-mono outline-none focus:border-accent" />
-              </div>
+              {modelType === "mlp" && (
+                <>
+                  <div>
+                    <label className="text-xs text-gray-400 uppercase tracking-widest block mb-1.5">Training cycles</label>
+                    <input type="number" min={5} max={500} value={epochs} onChange={(e) => setEpochs(Number(e.target.value))}
+                      className="w-full border border-gray-200 rounded px-3 py-2 text-xs font-mono outline-none focus:border-accent" />
+                  </div>
+                  <div>
+                    <label className="text-xs text-gray-400 uppercase tracking-widest block mb-1.5">Learning rate</label>
+                    <input type="number" min={0.00001} max={0.1} step={0.0001} value={learningRate} onChange={(e) => setLR(Number(e.target.value))}
+                      className="w-full border border-gray-200 rounded px-3 py-2 text-xs font-mono outline-none focus:border-accent" />
+                  </div>
+                  <div>
+                    <label className="text-xs text-gray-400 uppercase tracking-widest block mb-1.5">Dense layer 1 neurons</label>
+                    <input type="number" min={1} max={256} value={neurons1} onChange={(e) => setNeurons1(Number(e.target.value))}
+                      className="w-full border border-gray-200 rounded px-3 py-2 text-xs font-mono outline-none focus:border-accent" />
+                  </div>
+                  <div>
+                    <label className="text-xs text-gray-400 uppercase tracking-widest block mb-1.5">Dense layer 2 neurons</label>
+                    <input type="number" min={1} max={256} value={neurons2} onChange={(e) => setNeurons2(Number(e.target.value))}
+                      className="w-full border border-gray-200 rounded px-3 py-2 text-xs font-mono outline-none focus:border-accent" />
+                  </div>
+                </>
+              )}
+              {modelType === "rf" && (
+                <>
+                  <div>
+                    <label className="text-xs text-gray-400 uppercase tracking-widest block mb-1.5">Number of trees</label>
+                    <input type="number" min={5} max={200} value={nEstimators} onChange={(e) => setNEstimators(Number(e.target.value))}
+                      className="w-full border border-gray-200 rounded px-3 py-2 text-xs font-mono outline-none focus:border-accent" />
+                  </div>
+                  <div>
+                    <label className="text-xs text-gray-400 uppercase tracking-widest block mb-1.5">Max depth</label>
+                    <input type="number" min={2} max={20} value={maxDepth} onChange={(e) => setMaxDepth(Number(e.target.value))}
+                      className="w-full border border-gray-200 rounded px-3 py-2 text-xs font-mono outline-none focus:border-accent" />
+                  </div>
+                </>
+              )}
+              {modelType === "logistic" && (
+                <div className="col-span-2">
+                  <p className="text-xs text-gray-400 italic">Multinomial logistic regression — no hyperparameters to tune.</p>
+                </div>
+              )}
             </div>
 
             {/* Estimated model size (live) */}
