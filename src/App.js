@@ -47,6 +47,7 @@ const INITIAL_CONFIG = {
   applicationDescription: "",
   hardwarePreprocessing:  { type: "none" },
   dataMode:               "",   // "" = unset, "samples" = pre-labeled, "continuous" = continuous recording
+  collectMethod:          "",   // "" = unset, "upload" = CSV upload, "serial" = live serial capture
 };
 
 const INITIAL_PIPELINE_CONFIG = {

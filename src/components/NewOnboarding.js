@@ -255,6 +255,7 @@ export default function NewOnboarding({ onComplete }) {
   const [customMcu,    setCustomMcu]    = useState("");
   const [classes,      setClasses]      = useState("");
   const [dataMode,     setDataMode]     = useState("");  // "samples" | "continuous"
+  const [collectMethod, setCollectMethod] = useState("upload"); // "upload" | "serial"
   const [error,        setError]        = useState("");
 
   function handleSubmit(e) {
@@ -290,6 +291,7 @@ export default function NewOnboarding({ onComplete }) {
       applicationDescription: projectName.trim(),
       hardwarePreprocessing:  { type: "none" },
       dataMode,
+      collectMethod,
     };
 
     onComplete(finalConfig, finalClasses);
@@ -405,6 +407,26 @@ export default function NewOnboarding({ onComplete }) {
                     background: dataMode === id ? "rgba(29,158,117,0.05)" : "#ffffff",
                   }}>
                   <span className="text-sm font-semibold" style={{ color: dataMode === id ? "#1D9E75" : "#0a0a0a" }}>{title}</span>
+                  <span className="text-xs text-gray-400 leading-relaxed">{sub}</span>
+                </button>
+              ))}
+            </div>
+          </QuestionBlock>
+
+          {/* Q5 — Collection method */}
+          <QuestionBlock index={4} question="How will you collect data?">
+            <div className="grid grid-cols-2 gap-3">
+              {[
+                { id: "upload", title: "Upload CSV", sub: "Upload recorded data files from your computer" },
+                { id: "serial", title: "Live capture", sub: "Connect a device via serial and record live" },
+              ].map(({ id, title, sub }) => (
+                <button key={id} type="button" onClick={() => setCollectMethod(id)}
+                  className="flex flex-col items-start gap-1.5 p-4 rounded-xl border-2 transition-colors text-left"
+                  style={{
+                    borderColor: collectMethod === id ? "#1D9E75" : "#d8d7d0",
+                    background: collectMethod === id ? "rgba(29,158,117,0.05)" : "#ffffff",
+                  }}>
+                  <span className="text-sm font-semibold" style={{ color: collectMethod === id ? "#1D9E75" : "#0a0a0a" }}>{title}</span>
                   <span className="text-xs text-gray-400 leading-relaxed">{sub}</span>
                 </button>
               ))}

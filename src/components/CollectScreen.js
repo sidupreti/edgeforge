@@ -2,6 +2,7 @@ import React, { useRef, useEffect, useState, useCallback } from "react";
 import API_BASE_URL from "../config";
 import CopilotChat from "./CopilotChat";
 import LiveCaptureMode from "./LiveCaptureMode";
+import SerialCaptureScreen from "./SerialCaptureScreen";
 
 const COPILOT_THRESHOLD = 5;    // events before first analysis
 const COPILOT_DEBOUNCE  = 1500; // ms to wait after last event before calling API
@@ -2275,6 +2276,7 @@ function FileUploadMode({
 export default function CollectScreen({ config, setConfig, projectId, classes, setClasses, activeClassId, setActiveClassId, events, setEvents, analyzeResult, onAnalysisReady, chatHistory, setChatHistory, onApplyAction }) {
   const isFileUpload = (config?.connectionType ?? "").toLowerCase().includes("file");
   const dataMode = config?.dataMode || "";
+  const collectMethod = config?.collectMethod || "upload";
 
   // State (classes/activeClassId are now props from App.js for persistence)
   const [newClassName,    setNewClassName]    = useState("");
@@ -2503,7 +2505,14 @@ export default function CollectScreen({ config, setConfig, projectId, classes, s
     <div className="flex gap-6 h-full">
 
       {/* ── LEFT PANEL ──────────────────────────────────────────────────────── */}
-      {effectiveDataMode === "continuous" && !isFileUpload ? (
+      {collectMethod === "serial" ? (
+        <SerialCaptureScreen
+          projectId={projectId}
+          classes={classes}
+          events={events}
+          setEvents={setEvents}
+        />
+      ) : effectiveDataMode === "continuous" && !isFileUpload ? (
         <LiveCaptureMode
           config={config}
           events={events}
