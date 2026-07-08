@@ -482,7 +482,7 @@ function FileDetailPanel({ ev, allEvents, onClose, onAskCopilot, classes }) {
   }
 
   function handlePanelMouseMove(e) {
-    if (dragStart !== null) setDragEnd(clientXToMs(e.clientX));
+    if (dragStart !== null && !dragPopup) setDragEnd(clientXToMs(e.clientX));
     if (resizing) {
       const curMs = clientXToMs(e.clientX);
       const dms   = curMs - resizing.anchorMs;
