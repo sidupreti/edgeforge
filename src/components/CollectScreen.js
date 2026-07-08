@@ -352,6 +352,8 @@ function FileDetailPanel({ ev, allEvents, onClose, onAskCopilot, classes }) {
   const [segSensitivity, setSegSensitivity] = useState(3.0);
   const [segLoading, setSegLoading] = useState(false);
   const [segLabels, setSegLabels] = useState({}); // {cluster_id: label_name}
+  const [perSegLabels, setPerSegLabels] = useState({}); // {seg_index: {label, source: "manual"|"propagated", confidence?}}
+  const [propagating, setPropagating] = useState(false);
   const SEG_COLORS = ["#1D9E75", "#3B82F6", "#F59E0B", "#EF4444", "#8B5CF6", "#EC4899", "#06B6D4", "#84CC16"];
 
   async function handleAutoSegment() {
@@ -367,6 +369,7 @@ function FileDetailPanel({ ev, allEvents, onClose, onAskCopilot, classes }) {
       if (res.ok && data.segments) {
         setSegments(data.segments);
         setSegLabels({});
+        setPerSegLabels({});
       }
     } catch { /* ignore */ }
     finally { setSegLoading(false); }
@@ -374,12 +377,55 @@ function FileDetailPanel({ ev, allEvents, onClose, onAskCopilot, classes }) {
 
   function labelCluster(clusterId, labelName) {
     setSegLabels((prev) => ({ ...prev, [clusterId]: labelName }));
+    // Also set per-segment labels for all segments in this cluster (manual)
+    segments.forEach((seg, i) => {
+      if (seg.cluster_id === clusterId) {
+        setPerSegLabels((prev) => ({ ...prev, [i]: { label: labelName, source: "manual" } }));
+      }
+    });
+  }
+
+  async function handlePropagate() {
+    if (segments.length < 2) return;
+    setPropagating(true);
+    try {
+      // Build segment list with embeddings + labels
+      const payload = segments.map((seg, i) => ({
+        embedding: seg.embedding || [],
+        label: perSegLabels[i]?.source === "manual" ? perSegLabels[i].label : null,
+      }));
+      const res = await fetch(`${API_BASE_URL}/datasets/propagate-labels`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ segments: payload }),
+      });
+      const data = await res.json();
+      if (res.ok && data.propagated) {
+        setPerSegLabels((prev) => {
+          const next = { ...prev };
+          for (const p of data.propagated) {
+            // Only fill if not already manually labeled
+            if (!next[p.segment_index] || next[p.segment_index].source !== "manual") {
+              next[p.segment_index] = {
+                label: p.predicted_label,
+                source: "propagated",
+                confidence: p.confidence,
+              };
+            }
+          }
+          return next;
+        });
+      }
+    } catch { /* ignore */ }
+    finally { setPropagating(false); }
   }
 
   async function applySegmentLabels() {
     if (!ev.datasetId || segments.length === 0) return;
-    for (const seg of segments) {
-      const label = segLabels[seg.cluster_id];
+    for (let si = 0; si < segments.length; si++) {
+      const seg = segments[si];
+      // Use per-segment label (from manual or propagation), fall back to cluster label
+      const label = perSegLabels[si]?.label || segLabels[seg.cluster_id];
       if (!label) continue;
       try {
         await fetch(`${API_BASE_URL}/datasets/${ev.datasetId}/labels`, {
@@ -984,11 +1030,14 @@ function FileDetailPanel({ ev, allEvents, onClose, onAskCopilot, classes }) {
                       <div key={i} style={{
                         position: "absolute", left: `${leftPct}%`, width: `${w}%`, top: 0, bottom: 0,
                         backgroundColor: SEG_COLORS[seg.cluster_id % SEG_COLORS.length],
-                        opacity: 0.6, borderRight: "1px solid white",
+                        opacity: perSegLabels[i]?.source === "propagated" ? 0.4 : 0.6,
+                        borderRight: "1px solid white",
                         display: "flex", alignItems: "center", justifyContent: "center",
+                        outline: perSegLabels[i]?.source === "propagated" ? "1px dashed rgba(255,255,255,0.5)" : "none",
                       }}>
                         <span style={{ fontSize: 8, color: "white", fontWeight: 700 }}>
-                          {segLabels[seg.cluster_id] || ""}
+                          {perSegLabels[i]?.label || segLabels[seg.cluster_id] || ""}
+                          {perSegLabels[i]?.source === "propagated" && perSegLabels[i]?.confidence < 0.8 && " ⚠"}
                         </span>
                       </div>
                     );
@@ -1016,6 +1065,22 @@ function FileDetailPanel({ ev, allEvents, onClose, onAskCopilot, classes }) {
                   }}>
                   Apply labels →
                 </button>
+                {/* Propagate button */}
+                {(() => {
+                  const nManual = Object.values(perSegLabels).filter(v => v.source === "manual" && v.label).length;
+                  const nUnlabeled = segments.length - Object.keys(perSegLabels).filter(k => perSegLabels[k]?.label).length;
+                  const canPropagate = nManual >= 1 && nUnlabeled > 0 && segments.some(s => s.embedding?.length > 0);
+                  return canPropagate ? (
+                    <button onClick={handlePropagate} disabled={propagating}
+                      style={{
+                        fontSize: 10, color: "#1D9E75",
+                        border: "1px solid rgba(29,158,117,0.3)", borderRadius: 4, padding: "3px 10px",
+                        background: "none", cursor: propagating ? "wait" : "pointer",
+                      }}>
+                      {propagating ? "Propagating…" : `Propagate labels (${nUnlabeled} unlabeled)`}
+                    </button>
+                  ) : null;
+                })()}
               </>
             )}
           </div>
