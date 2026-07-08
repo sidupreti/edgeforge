@@ -1048,11 +1048,17 @@ function FileDetailPanel({ ev, allEvents, onClose, onAskCopilot, classes }) {
                   {[...new Set(segments.map(s => s.cluster_id))].sort().map((cid) => (
                     <div key={cid} style={{ display: "flex", alignItems: "center", gap: 4 }}>
                       <span style={{ width: 10, height: 10, borderRadius: 2, backgroundColor: SEG_COLORS[cid % SEG_COLORS.length], flexShrink: 0 }} />
-                      <select value={segLabels[cid] || ""} onChange={(e) => labelCluster(cid, e.target.value)}
-                        style={{ fontSize: 10, border: "1px solid #e0e0e0", borderRadius: 3, padding: "1px 4px" }}>
-                        <option value="">—</option>
-                        {classes.map((c) => <option key={c.id} value={c.name}>{c.name}</option>)}
-                      </select>
+                      {classes.length > 0 ? (
+                        <select value={segLabels[cid] || ""} onChange={(e) => labelCluster(cid, e.target.value)}
+                          style={{ fontSize: 10, border: "1px solid #e0e0e0", borderRadius: 3, padding: "1px 4px" }}>
+                          <option value="">—</option>
+                          {classes.map((c) => <option key={c.id} value={c.name}>{c.name}</option>)}
+                        </select>
+                      ) : (
+                        <input type="text" placeholder="label…" value={segLabels[cid] || ""}
+                          onChange={(e) => labelCluster(cid, e.target.value)}
+                          style={{ fontSize: 10, border: "1px solid #e0e0e0", borderRadius: 3, padding: "1px 4px", width: 80 }} />
+                      )}
                     </div>
                   ))}
                 </div>
@@ -1752,15 +1758,18 @@ function FileUploadMode({
       // exist — files uploaded here are unassigned until the user places them
       // via a class-specific Upload button or renames them manually.
       const newEvents = data.events.map((ev) => {
-        const matchedCls =
+        // For continuous mode: recordings are classless (labeled via segments)
+        const isContinuous = dataMode === "continuous";
+        const matchedCls = isContinuous ? null : (
           classes.find((c) => c.name === ev.class_label) ??
-          classes.find((c) => c.name.toLowerCase() === (ev.class_label || "").toLowerCase());
+          classes.find((c) => c.name.toLowerCase() === (ev.class_label || "").toLowerCase())
+        );
         return {
           id:            ev.id,
           datasetId:     ev.dataset_id ?? null,
           hasVideo:      ev.has_video  ?? false,
           classId:       matchedCls?.id    ?? null,
-          className:     matchedCls?.name  ?? "Unassigned",
+          className:     isContinuous ? "Recording" : (matchedCls?.name ?? "Unassigned"),
           classColor:    matchedCls?.color ?? "#b0afa8",
           waveform:      ev.waveform_az ?? [],
           waveColor:     AXIS_COLORS.az,

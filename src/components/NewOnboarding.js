@@ -261,16 +261,14 @@ export default function NewOnboarding({ onComplete }) {
   function handleSubmit(e) {
     e.preventDefault();
     if (!projectName.trim()) { setError("Please name your project."); return; }
-    if (!classes.trim()) { setError("Please name at least one class."); return; }
     if (!dataMode)       { setError("Please select how your data is organized."); return; }
+    // Classes required for pre-labeled samples, optional for continuous
+    if (dataMode === "samples" && !classes.trim()) { setError("Please name at least one class."); return; }
     setError("");
 
-    const classNames = classes
-      .split(",")
-      .map((s) => s.trim().toLowerCase())
-      .filter(Boolean);
-
-    if (classNames.length === 0) { setError("Enter at least one class name."); return; }
+    const classNames = classes.trim()
+      ? classes.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean)
+      : [];
 
     const finalClasses = classNames.map((name, i) => ({
       id:    `cls-${name.replace(/\s+/g, "-")}-${i}`,
@@ -358,8 +356,12 @@ export default function NewOnboarding({ onComplete }) {
             )}
           </QuestionBlock>
 
-          {/* Q3 — Classes */}
-          <QuestionBlock index={2} question="Name your classification classes, separated by commas.">
+          {/* Q3 — Classes (required for samples, optional/deferred for continuous) */}
+          <QuestionBlock index={2} question={
+            dataMode === "continuous"
+              ? "Name your classes (optional — you can define them later when labeling segments)."
+              : "Name your classification classes, separated by commas."
+          }>
             <input
               type="text"
               value={classes}
