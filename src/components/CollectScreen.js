@@ -370,6 +370,8 @@ function FileDetailPanel({ ev, allEvents, onClose, onAskCopilot, classes }) {
         setSegments(data.segments);
         setSegLabels({});
         setPerSegLabels({});
+        // Reconcile existing typed labels onto the new segments
+        setTimeout(() => reconcileSpansToSegments(data.segments, labels), 50);
       }
     } catch { /* ignore */ }
     finally { setSegLoading(false); }
@@ -385,8 +387,41 @@ function FileDetailPanel({ ev, allEvents, onClose, onAskCopilot, classes }) {
     });
   }
 
+  // Map typed span labels onto overlapping segments (source="manual")
+  function reconcileSpansToSegments(segs = segments, spanLabels = labels) {
+    if (!segs.length || !spanLabels.length) return;
+    setPerSegLabels((prev) => {
+      const next = { ...prev };
+      for (let si = 0; si < segs.length; si++) {
+        // Skip segments already manually labeled via dropdown/text
+        if (next[si]?.source === "manual") continue;
+        // Find the best-overlapping typed span
+        let bestLabel = null;
+        let bestOverlap = 0;
+        for (const span of spanLabels) {
+          const spanEnd = span.start_ms + span.duration_ms;
+          const overlapStart = Math.max(segs[si].start_ms, span.start_ms);
+          const overlapEnd = Math.min(segs[si].end_ms, spanEnd);
+          const overlap = Math.max(0, overlapEnd - overlapStart);
+          if (overlap > bestOverlap) {
+            bestOverlap = overlap;
+            bestLabel = span.label_name;
+          }
+        }
+        // Mark as manual if the overlap covers >50% of the segment
+        const segDur = segs[si].end_ms - segs[si].start_ms;
+        if (bestLabel && bestOverlap > segDur * 0.5) {
+          next[si] = { label: bestLabel, source: "manual" };
+        }
+      }
+      return next;
+    });
+  }
+
   async function handlePropagate() {
     if (segments.length < 2) return;
+    // Reconcile typed span labels onto segments before propagating
+    reconcileSpansToSegments();
     setPropagating(true);
     try {
       // Build segment list with embeddings + labels
@@ -631,7 +666,10 @@ function FileDetailPanel({ ev, allEvents, onClose, onAskCopilot, classes }) {
       });
       if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
       const created = await r.json();
-      setLabels((prev) => [...prev, created].sort((a, b) => a.start_ms - b.start_ms));
+      const newLabels = [...labels, created].sort((a, b) => a.start_ms - b.start_ms);
+      setLabels(newLabels);
+      // Map onto overlapping segments for propagation
+      if (segments.length > 0) reconcileSpansToSegments(segments, newLabels);
     } catch (err) { alert("Failed to create label: " + err.message); }
   }
 
@@ -1120,7 +1158,18 @@ function FileDetailPanel({ ev, allEvents, onClose, onAskCopilot, classes }) {
                 </button>
                 {/* Propagate button */}
                 {(() => {
-                  const nManual = Object.values(perSegLabels).filter(v => v.source === "manual" && v.label).length;
+                  // Count manual labels from both segment labels AND typed span overlaps
+                  let nManual = Object.values(perSegLabels).filter(v => v.source === "manual" && v.label).length;
+                  // Also count segments that WOULD be marked manual by typed spans (in case reconciliation hasn't rendered yet)
+                  if (nManual === 0 && labels.length > 0) {
+                    for (const seg of segments) {
+                      for (const span of labels) {
+                        const overlapStart = Math.max(seg.start_ms, span.start_ms);
+                        const overlapEnd = Math.min(seg.end_ms, span.start_ms + span.duration_ms);
+                        if (overlapEnd - overlapStart > (seg.end_ms - seg.start_ms) * 0.5) { nManual++; break; }
+                      }
+                    }
+                  }
                   const nUnlabeled = segments.length - Object.keys(perSegLabels).filter(k => perSegLabels[k]?.label).length;
                   const canPropagate = nManual >= 1 && nUnlabeled > 0 && segments.some(s => s.embedding?.length > 0);
                   return canPropagate ? (
@@ -1370,10 +1419,10 @@ function FileDetailPanel({ ev, allEvents, onClose, onAskCopilot, classes }) {
                     });
                     if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
                     const created = await r.json();
-                    setLabels((prev) => [...prev, created].sort((a, b) => a.start_ms - b.start_ms));
-                    // Also add as manual label for propagation
-                    const rate = ev.sampleRateHz || 50;
-                    console.log(`[typed label] "${name}" ${startS}s–${endS}s → samples ${Math.round(startS * rate)}–${Math.round(endS * rate)}`);
+                    const newLabels = [...labels, created].sort((a, b) => a.start_ms - b.start_ms);
+                    setLabels(newLabels);
+                    // Map this typed span onto overlapping segments for propagation
+                    if (segments.length > 0) reconcileSpansToSegments(segments, newLabels);
                     nameEl.value = ""; startEl.value = ""; endEl.value = "";
                   } catch (err) { alert("Failed: " + err.message); }
                 }}
