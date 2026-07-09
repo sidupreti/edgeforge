@@ -631,7 +631,6 @@ function FileDetailPanel({ ev, allEvents, onClose, onAskCopilot, classes }) {
       });
       if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
       const created = await r.json();
-      console.log("[handleCreateLabel] POST success:", r.status, created); // TEMP — remove after verifying (CollectScreen.js:594)
       setLabels((prev) => [...prev, created].sort((a, b) => a.start_ms - b.start_ms));
     } catch (err) { alert("Failed to create label: " + err.message); }
   }
@@ -1000,6 +999,54 @@ function FileDetailPanel({ ev, allEvents, onClose, onAskCopilot, classes }) {
           })()}
         </div>
 
+        {/* ── Time axis ────────────────────────────────────────────────────────── */}
+        <div style={{ display: "flex", alignItems: "flex-start", gap: 6, marginBottom: 4, height: 18 }}>
+          <span style={{ width: 14, flexShrink: 0 }} />
+          <div style={{ flex: 1, position: "relative", height: 18 }}>
+            {(() => {
+              const durSec = viewDurationMs / 1000;
+              if (durSec <= 0) return null;
+              // Pick nice tick spacing
+              const targetTicks = 8;
+              const rawStep = durSec / targetTicks;
+              const mag = Math.pow(10, Math.floor(Math.log10(rawStep)));
+              const norm = rawStep / mag;
+              const step = mag * (norm <= 1.5 ? 1 : norm <= 3.5 ? 2 : norm <= 7.5 ? 5 : 10);
+              const startSec = viewStartMs / 1000;
+              const endSec = viewEndMs / 1000;
+              const first = Math.ceil(startSec / step) * step;
+              const ticks = [];
+              for (let t = first; t <= endSec; t += step) ticks.push(t);
+              return ticks.map((t) => {
+                const pct = ((t - startSec) / durSec) * 100;
+                return (
+                  <span key={t} style={{
+                    position: "absolute", left: `${pct}%`, transform: "translateX(-50%)",
+                    fontSize: 9, fontFamily: "'DM Mono', monospace", color: "#b0afa8",
+                    borderLeft: "1px solid #e0e0e0", paddingLeft: 2, top: 0,
+                  }}>
+                    {t % 1 === 0 ? `${t}s` : `${t.toFixed(1)}s`}
+                  </span>
+                );
+              });
+            })()}
+            {/* Playhead time readout */}
+            {(() => {
+              const pct = ((currentMs - viewStartMs) / viewDurationMs) * 100;
+              if (pct < -2 || pct > 102) return null;
+              return (
+                <span style={{
+                  position: "absolute", left: `${Math.max(0, Math.min(95, pct))}%`,
+                  top: 0, fontSize: 9, fontFamily: "'DM Mono', monospace",
+                  color: "#ef4444", fontWeight: 700, transform: "translateX(-50%)",
+                }}>
+                  {(currentMs / 1000).toFixed(1)}s
+                </span>
+              );
+            })()}
+          </div>
+        </div>
+
         {/* ── Auto-segmentation ───────────────────────────────────────────────── */}
         {ev.datasetId && (
           <div style={{ marginBottom: 12 }}>
@@ -1277,6 +1324,69 @@ function FileDetailPanel({ ev, allEvents, onClose, onAskCopilot, classes }) {
             </div>
           );
         })()}
+
+        {/* ── Direct timestamp label entry ─────────────────────────────────── */}
+        {ev.datasetId && (
+          <div style={{ marginBottom: 12 }}>
+            <p style={{ fontFamily: "'DM Mono', monospace", fontSize: 9, color: "#b0afa8", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 }}>
+              Add label by time range
+            </p>
+            <div style={{ display: "flex", gap: 6, alignItems: "flex-end", flexWrap: "wrap" }}>
+              <div>
+                <label style={{ fontSize: 9, color: "#b0afa8", display: "block", marginBottom: 2 }}>Label</label>
+                <input id="_tl_name" type="text" placeholder="class name…"
+                  style={{ width: 90, fontSize: 10, border: "1px solid #e0e0e0", borderRadius: 3, padding: "3px 6px", fontFamily: "'DM Mono', monospace" }} />
+              </div>
+              <div>
+                <label style={{ fontSize: 9, color: "#b0afa8", display: "block", marginBottom: 2 }}>Start (s)</label>
+                <input id="_tl_start" type="number" step="0.1" min="0"
+                  style={{ width: 65, fontSize: 10, border: "1px solid #e0e0e0", borderRadius: 3, padding: "3px 6px", fontFamily: "'DM Mono', monospace" }} />
+              </div>
+              <div>
+                <label style={{ fontSize: 9, color: "#b0afa8", display: "block", marginBottom: 2 }}>End (s)</label>
+                <input id="_tl_end" type="number" step="0.1" min="0"
+                  style={{ width: 65, fontSize: 10, border: "1px solid #e0e0e0", borderRadius: 3, padding: "3px 6px", fontFamily: "'DM Mono', monospace" }} />
+              </div>
+              <button
+                onClick={async () => {
+                  const nameEl = document.getElementById("_tl_name");
+                  const startEl = document.getElementById("_tl_start");
+                  const endEl = document.getElementById("_tl_end");
+                  const name = nameEl?.value?.trim();
+                  const startS = parseFloat(startEl?.value);
+                  const endS = parseFloat(endEl?.value);
+                  if (!name) { alert("Enter a label name."); return; }
+                  if (isNaN(startS) || isNaN(endS)) { alert("Enter valid start and end times in seconds."); return; }
+                  if (startS >= endS) { alert("Start must be before end."); return; }
+                  const maxS = ev.duration / 1000;
+                  if (startS < 0 || endS > maxS + 0.1) { alert(`Times must be within 0–${maxS.toFixed(1)}s.`); return; }
+                  const s_ms = startS * 1000;
+                  const dur_ms = (endS - startS) * 1000;
+                  try {
+                    const r = await fetch(`${API_BASE_URL}/datasets/${ev.datasetId}/labels`, {
+                      method: "POST",
+                      headers: { "Content-Type": "application/json" },
+                      body: JSON.stringify({ label_name: name, start_ms: s_ms, duration_ms: dur_ms }),
+                    });
+                    if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
+                    const created = await r.json();
+                    setLabels((prev) => [...prev, created].sort((a, b) => a.start_ms - b.start_ms));
+                    // Also add as manual label for propagation
+                    const rate = ev.sampleRateHz || 50;
+                    console.log(`[typed label] "${name}" ${startS}s–${endS}s → samples ${Math.round(startS * rate)}–${Math.round(endS * rate)}`);
+                    nameEl.value = ""; startEl.value = ""; endEl.value = "";
+                  } catch (err) { alert("Failed: " + err.message); }
+                }}
+                style={{
+                  fontSize: 10, color: "#1D9E75", border: "1px solid rgba(29,158,117,0.3)",
+                  borderRadius: 4, padding: "3px 10px", background: "none", cursor: "pointer",
+                  fontFamily: "'DM Mono', monospace", fontWeight: 600,
+                }}>
+                Add label
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Per-channel stats */}
         <p style={{ fontFamily: "'DM Mono', monospace", fontSize: 9, color: "#b0afa8", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 }}>Per-channel stats</p>
