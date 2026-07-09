@@ -387,31 +387,40 @@ function FileDetailPanel({ ev, allEvents, onClose, onAskCopilot, classes }) {
     });
   }
 
-  // Map typed span labels onto overlapping segments (source="manual")
+  // PURE function: compute overlap mapping of typed spans → segments. Returns a map {segIndex: label}.
+  function computeSpanOverlaps(segs, spanLabels) {
+    const result = {};
+    if (!segs?.length || !spanLabels?.length) return result;
+    for (let si = 0; si < segs.length; si++) {
+      let bestLabel = null;
+      let bestOverlap = 0;
+      for (const span of spanLabels) {
+        const spanEnd = span.start_ms + span.duration_ms;
+        const overlapStart = Math.max(segs[si].start_ms, span.start_ms);
+        const overlapEnd = Math.min(segs[si].end_ms, spanEnd);
+        const overlap = Math.max(0, overlapEnd - overlapStart);
+        if (overlap > bestOverlap) {
+          bestOverlap = overlap;
+          bestLabel = span.label_name;
+        }
+      }
+      const segDur = segs[si].end_ms - segs[si].start_ms;
+      if (bestLabel && bestOverlap > segDur * 0.5) {
+        result[si] = bestLabel;
+      }
+    }
+    return result;
+  }
+
+  // Update perSegLabels from typed spans (for visual display)
   function reconcileSpansToSegments(segs = segments, spanLabels = labels) {
-    if (!segs.length || !spanLabels.length) return;
+    const overlaps = computeSpanOverlaps(segs, spanLabels);
+    if (Object.keys(overlaps).length === 0) return;
     setPerSegLabels((prev) => {
       const next = { ...prev };
-      for (let si = 0; si < segs.length; si++) {
-        // Skip segments already manually labeled via dropdown/text
-        if (next[si]?.source === "manual") continue;
-        // Find the best-overlapping typed span
-        let bestLabel = null;
-        let bestOverlap = 0;
-        for (const span of spanLabels) {
-          const spanEnd = span.start_ms + span.duration_ms;
-          const overlapStart = Math.max(segs[si].start_ms, span.start_ms);
-          const overlapEnd = Math.min(segs[si].end_ms, spanEnd);
-          const overlap = Math.max(0, overlapEnd - overlapStart);
-          if (overlap > bestOverlap) {
-            bestOverlap = overlap;
-            bestLabel = span.label_name;
-          }
-        }
-        // Mark as manual if the overlap covers >50% of the segment
-        const segDur = segs[si].end_ms - segs[si].start_ms;
-        if (bestLabel && bestOverlap > segDur * 0.5) {
-          next[si] = { label: bestLabel, source: "manual" };
+      for (const [si, label] of Object.entries(overlaps)) {
+        if (!next[si] || next[si].source !== "manual") {
+          next[si] = { label, source: "manual" };
         }
       }
       return next;
@@ -420,15 +429,27 @@ function FileDetailPanel({ ev, allEvents, onClose, onAskCopilot, classes }) {
 
   async function handlePropagate() {
     if (segments.length < 2) return;
-    // Reconcile typed span labels onto segments before propagating
-    reconcileSpansToSegments();
     setPropagating(true);
     try {
-      // Build segment list with embeddings + labels
+      // SYNCHRONOUSLY compute the merged labels: perSegLabels + typed-span overlaps
+      const spanOverlaps = computeSpanOverlaps(segments, labels);
+      const mergedLabels = { ...perSegLabels };
+      for (const [si, label] of Object.entries(spanOverlaps)) {
+        if (!mergedLabels[si] || mergedLabels[si].source !== "manual") {
+          mergedLabels[si] = { label, source: "manual" };
+        }
+      }
+      // Also update display state
+      setPerSegLabels(mergedLabels);
+
       const payload = segments.map((seg, i) => ({
         embedding: seg.embedding || [],
-        label: perSegLabels[i]?.source === "manual" ? perSegLabels[i].label : null,
+        label: mergedLabels[i]?.source === "manual" ? mergedLabels[i].label : null,
       }));
+
+      const nLabeled = payload.filter(p => p.label).length;
+      console.log(`[propagate] ${nLabeled} labeled segments in payload:`,
+        [...new Set(payload.filter(p => p.label).map(p => p.label))].join(", "));
       const res = await fetch(`${API_BASE_URL}/datasets/propagate-labels`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -1188,8 +1209,8 @@ function FileDetailPanel({ ev, allEvents, onClose, onAskCopilot, classes }) {
           </div>
         )}
 
-        {/* ── Label track — HTML chips with row-stacking ──────────────────────── */}
-        {ev.datasetId && ev.duration > 0 && (() => {
+        {/* ── Label track — shown only when NO auto-segments (avoid dual display) ── */}
+        {ev.datasetId && ev.duration > 0 && segments.length === 0 && (() => {
           const labelRows = computeRows(labels);
           const ROW_H = 26;
           const GAP   = 3;
