@@ -354,6 +354,10 @@ function FileDetailPanel({ ev, allEvents, onClose, onAskCopilot, classes }) {
   const [segLabels, setSegLabels] = useState({}); // {cluster_id: label_name}
   const [perSegLabels, setPerSegLabels] = useState({}); // {seg_index: {label, source: "manual"|"propagated", confidence?}}
   const [propagating, setPropagating] = useState(false);
+  // Typed label entry state (controlled inputs, no document.getElementById)
+  const [tlName, setTlName] = useState("");
+  const [tlStart, setTlStart] = useState("");
+  const [tlEnd, setTlEnd] = useState("");
   const SEG_COLORS = ["#1D9E75", "#3B82F6", "#F59E0B", "#EF4444", "#8B5CF6", "#EC4899", "#06B6D4", "#84CC16"];
 
   async function handleAutoSegment() {
@@ -687,10 +691,11 @@ function FileDetailPanel({ ev, allEvents, onClose, onAskCopilot, classes }) {
       });
       if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
       const created = await r.json();
-      const newLabels = [...labels, created].sort((a, b) => a.start_ms - b.start_ms);
-      setLabels(newLabels);
-      // Map onto overlapping segments for propagation
-      if (segments.length > 0) reconcileSpansToSegments(segments, newLabels);
+      setLabels((prev) => {
+        const updated = [...prev, created].sort((a, b) => a.start_ms - b.start_ms);
+        if (segments.length > 0) reconcileSpansToSegments(segments, updated);
+        return updated;
+      });
     } catch (err) { alert("Failed to create label: " + err.message); }
   }
 
@@ -1404,27 +1409,27 @@ function FileDetailPanel({ ev, allEvents, onClose, onAskCopilot, classes }) {
             <div style={{ display: "flex", gap: 6, alignItems: "flex-end", flexWrap: "wrap" }}>
               <div>
                 <label style={{ fontSize: 9, color: "#b0afa8", display: "block", marginBottom: 2 }}>Label</label>
-                <input id="_tl_name" type="text" placeholder="class name…"
+                <input type="text" placeholder="class name…" value={tlName}
+                  onChange={(e) => setTlName(e.target.value)}
                   style={{ width: 90, fontSize: 10, border: "1px solid #e0e0e0", borderRadius: 3, padding: "3px 6px", fontFamily: "'DM Mono', monospace" }} />
               </div>
               <div>
                 <label style={{ fontSize: 9, color: "#b0afa8", display: "block", marginBottom: 2 }}>Start (s)</label>
-                <input id="_tl_start" type="number" step="0.1" min="0"
+                <input type="number" step="0.1" min="0" value={tlStart}
+                  onChange={(e) => setTlStart(e.target.value)}
                   style={{ width: 65, fontSize: 10, border: "1px solid #e0e0e0", borderRadius: 3, padding: "3px 6px", fontFamily: "'DM Mono', monospace" }} />
               </div>
               <div>
                 <label style={{ fontSize: 9, color: "#b0afa8", display: "block", marginBottom: 2 }}>End (s)</label>
-                <input id="_tl_end" type="number" step="0.1" min="0"
+                <input type="number" step="0.1" min="0" value={tlEnd}
+                  onChange={(e) => setTlEnd(e.target.value)}
                   style={{ width: 65, fontSize: 10, border: "1px solid #e0e0e0", borderRadius: 3, padding: "3px 6px", fontFamily: "'DM Mono', monospace" }} />
               </div>
               <button
                 onClick={async () => {
-                  const nameEl = document.getElementById("_tl_name");
-                  const startEl = document.getElementById("_tl_start");
-                  const endEl = document.getElementById("_tl_end");
-                  const name = nameEl?.value?.trim();
-                  const startS = parseFloat(startEl?.value);
-                  const endS = parseFloat(endEl?.value);
+                  const name = tlName.trim();
+                  const startS = parseFloat(tlStart);
+                  const endS = parseFloat(tlEnd);
                   if (!name) { alert("Enter a label name."); return; }
                   if (isNaN(startS) || isNaN(endS)) { alert("Enter valid start and end times in seconds."); return; }
                   if (startS >= endS) { alert("Start must be before end."); return; }
@@ -1440,11 +1445,14 @@ function FileDetailPanel({ ev, allEvents, onClose, onAskCopilot, classes }) {
                     });
                     if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
                     const created = await r.json();
-                    const newLabels = [...labels, created].sort((a, b) => a.start_ms - b.start_ms);
-                    setLabels(newLabels);
-                    // Map this typed span onto overlapping segments for propagation
-                    if (segments.length > 0) reconcileSpansToSegments(segments, newLabels);
-                    nameEl.value = ""; startEl.value = ""; endEl.value = "";
+                    // Use functional updater so we always read the LATEST labels
+                    setLabels((prev) => {
+                      const updated = [...prev, created].sort((a, b) => a.start_ms - b.start_ms);
+                      // Map onto overlapping segments for propagation
+                      if (segments.length > 0) reconcileSpansToSegments(segments, updated);
+                      return updated;
+                    });
+                    setTlName(""); setTlStart(""); setTlEnd("");
                   } catch (err) { alert("Failed: " + err.message); }
                 }}
                 style={{
