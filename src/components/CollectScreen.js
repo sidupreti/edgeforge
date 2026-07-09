@@ -392,25 +392,19 @@ function FileDetailPanel({ ev, allEvents, onClose, onAskCopilot, classes }) {
   }
 
   // PURE function: compute overlap mapping of typed spans → segments. Returns a map {segIndex: label}.
+  // Rule: a span maps to the segment containing its MIDPOINT. This works regardless of
+  // relative span/segment lengths (a short span inside a long segment still maps).
   function computeSpanOverlaps(segs, spanLabels) {
     const result = {};
     if (!segs?.length || !spanLabels?.length) return result;
-    for (let si = 0; si < segs.length; si++) {
-      let bestLabel = null;
-      let bestOverlap = 0;
-      for (const span of spanLabels) {
-        const spanEnd = span.start_ms + span.duration_ms;
-        const overlapStart = Math.max(segs[si].start_ms, span.start_ms);
-        const overlapEnd = Math.min(segs[si].end_ms, spanEnd);
-        const overlap = Math.max(0, overlapEnd - overlapStart);
-        if (overlap > bestOverlap) {
-          bestOverlap = overlap;
-          bestLabel = span.label_name;
+    for (const span of spanLabels) {
+      const spanMid = span.start_ms + span.duration_ms / 2;
+      for (let si = 0; si < segs.length; si++) {
+        if (spanMid >= segs[si].start_ms && spanMid < segs[si].end_ms) {
+          // Span midpoint falls in this segment — label it
+          if (!result[si]) result[si] = span.label_name;
+          break;
         }
-      }
-      const segDur = segs[si].end_ms - segs[si].start_ms;
-      if (bestLabel && bestOverlap > segDur * 0.5) {
-        result[si] = bestLabel;
       }
     }
     return result;
@@ -1188,12 +1182,9 @@ function FileDetailPanel({ ev, allEvents, onClose, onAskCopilot, classes }) {
                   let nManual = Object.values(perSegLabels).filter(v => v.source === "manual" && v.label).length;
                   // Also count segments that WOULD be marked manual by typed spans (in case reconciliation hasn't rendered yet)
                   if (nManual === 0 && labels.length > 0) {
-                    for (const seg of segments) {
-                      for (const span of labels) {
-                        const overlapStart = Math.max(seg.start_ms, span.start_ms);
-                        const overlapEnd = Math.min(seg.end_ms, span.start_ms + span.duration_ms);
-                        if (overlapEnd - overlapStart > (seg.end_ms - seg.start_ms) * 0.5) { nManual++; break; }
-                      }
+                    for (const span of labels) {
+                      const mid = span.start_ms + span.duration_ms / 2;
+                      if (segments.some(s => mid >= s.start_ms && mid < s.end_ms)) nManual++;
                     }
                   }
                   const nUnlabeled = segments.length - Object.keys(perSegLabels).filter(k => perSegLabels[k]?.label).length;
