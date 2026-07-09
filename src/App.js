@@ -308,7 +308,21 @@ function AppContent() {
             projectId={projectId}
             onBack={() => setPipelineSubPage("blocks")}
             savedResult={featureResult}
-            onResult={setFeatureResult}
+            onResult={(result) => {
+              setFeatureResult(result);
+              // Continuous mode: sync class list from feature generator's derived labels
+              if (result?.class_labels?.length > 0) {
+                const currentNames = new Set((classes || []).map(c => c.name));
+                if (result.class_labels.length !== currentNames.size || result.class_labels.some(n => !currentNames.has(n))) {
+                  setClasses(result.class_labels.map((name, i) => ({
+                    id: `cls-${name.replace(/\s+/g, "-")}-${i}`,
+                    name,
+                    color: CLASS_PALETTE[i % CLASS_PALETTE.length],
+                    description: "",
+                  })));
+                }
+              }
+            }}
           />
         );
       }

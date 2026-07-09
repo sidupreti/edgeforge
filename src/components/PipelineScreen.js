@@ -68,7 +68,10 @@ export default function PipelineScreen({
     ? "None"
     : `${filterCfg.filterType === "high" ? "High-pass" : "Low-pass"} ${filterCfg.cutoff} Hz`;
 
-  const classNames = (classes || []).map((c) => c.name);
+  // Prefer classes from App state; fall back to feature result's derived labels
+  const classNames = (classes || []).length > 0
+    ? (classes || []).map((c) => c.name)
+    : (featureResult?.class_labels || []);
 
   function handleSave() {
     setSaved(true);
