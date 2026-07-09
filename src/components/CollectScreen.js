@@ -286,40 +286,6 @@ function SignalPlotRow({ data, color, label, height = 36, startIdx = 0, endIdx }
   );
 }
 
-// ── Label color palette (consistent per name) ─────────────────────────────────
-const _LABEL_PALETTE = [
-  "#1D9E75", "#3B82F6", "#F59E0B", "#EF4444",
-  "#8B5CF6", "#EC4899", "#14B8A6", "#F97316",
-];
-function _labelColor(name) {
-  let h = 0;
-  for (let i = 0; i < name.length; i++) h = (h * 31 + name.charCodeAt(i)) & 0xffffffff;
-  return _LABEL_PALETTE[Math.abs(h) % _LABEL_PALETTE.length];
-}
-
-// Greedy row-assignment for overlapping labels (sorted by start_ms).
-// Returns array of rows, each row is an array of label objects.
-function computeRows(items) {
-  const sorted = [...items].sort((a, b) => a.start_ms - b.start_ms);
-  const rows = [];
-  const rowEnds = [];
-  for (const item of sorted) {
-    const start = item.start_ms;
-    const end   = item.start_ms + item.duration_ms;
-    let placed  = false;
-    for (let r = 0; r < rows.length; r++) {
-      if (start >= rowEnds[r] + 1) {
-        rows[r].push(item);
-        rowEnds[r] = end;
-        placed = true;
-        break;
-      }
-    }
-    if (!placed) { rows.push([item]); rowEnds.push(end); }
-  }
-  return rows;
-}
-
 // ── File detail overlay ───────────────────────────────────────────────────────
 
 function FileDetailPanel({ ev, allEvents, onClose, onAskCopilot, classes }) {
@@ -347,21 +313,203 @@ function FileDetailPanel({ ev, allEvents, onClose, onAskCopilot, classes }) {
   const viewEndMs = viewWindowSec > 0 ? Math.min(viewOffset + viewWindowSec * 1000, totalMs) : totalMs;
   const viewDurationMs = viewEndMs - viewStartMs;
 
-  // ── Auto-segmentation state ────────────────────────────────────────────────
+  // ── Segments: single source of truth ────────────────────────────────────────
+  // Each segment: { start_ms, end_ms, label, source, confidence, embedding, cluster_id }
   const [segments, setSegments] = useState([]);
-  const [segSensitivity, setSegSensitivity] = useState(3.0);
+  const [segSensitivity, setSegSensitivity] = useState(1.0);
   const [segLoading, setSegLoading] = useState(false);
-  const [segLabels, setSegLabels] = useState({}); // {cluster_id: label_name}
-  const [perSegLabels, setPerSegLabels] = useState({}); // {seg_index: {label, source: "manual"|"propagated", confidence?}}
   const [propagating, setPropagating] = useState(false);
-  // Typed label entry state (controlled inputs, no document.getElementById)
-  const [tlName, setTlName] = useState("");
-  const [tlStart, setTlStart] = useState("");
-  const [tlEnd, setTlEnd] = useState("");
+  const [selectedSeg, setSelectedSeg] = useState(null);
+  const [segSaveStatus, setSegSaveStatus] = useState("idle"); // idle | saving | saved | failed
+  const [segSaveError, setSegSaveError] = useState(null);
+  const segBarRef = useRef(null);
+  const segRowRefs = useRef({});
+  const saveTimerRef = useRef(null);
   const SEG_COLORS = ["#1D9E75", "#3B82F6", "#F59E0B", "#EF4444", "#8B5CF6", "#EC4899", "#06B6D4", "#84CC16"];
+  const UNLABELED_COLOR = "#c0bfb8";
 
+  // ── Fetch persisted segments on mount ──────────────────────────────────────
+  useEffect(() => {
+    if (!ev.datasetId) return;
+    fetch(`${API_BASE_URL}/datasets/${ev.datasetId}/segments`)
+      .then((r) => r.ok ? r.json() : { segments: [] })
+      .then((data) => { if (data.segments?.length > 0) setSegments(data.segments); })
+      .catch(() => {});
+  }, [ev.datasetId]);
+
+  // ── Debounced save to backend ──────────────────────────────────────────────
+  const segmentsRef = useRef(segments);
+  segmentsRef.current = segments;
+
+  const saveSegments = useCallback(() => {
+    if (!ev.datasetId) return;
+    const segs = segmentsRef.current;
+    if (segs.length === 0) return;
+    setSegSaveStatus("saving");
+    setSegSaveError(null);
+    fetch(`${API_BASE_URL}/datasets/${ev.datasetId}/segments`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ segments: segs }),
+    })
+      .then((r) => { if (!r.ok) throw new Error(`Server ${r.status}`); return r.json(); })
+      .then(() => { setSegSaveStatus("saved"); setTimeout(() => setSegSaveStatus((s) => s === "saved" ? "idle" : s), 2000); })
+      .catch((err) => { setSegSaveStatus("failed"); setSegSaveError(err.message); });
+  }, [ev.datasetId]);
+
+  function debouncedSave() {
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(saveSegments, 500);
+  }
+
+  // Trigger debounced save after any segment mutation (skip initial load)
+  const initialLoadRef = useRef(true);
+  useEffect(() => {
+    if (initialLoadRef.current) { initialLoadRef.current = false; return; }
+    if (segments.length > 0) debouncedSave();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [segments]);
+
+  // ── Label→color map ──────────────────────────────────────────────────────
+  const labelColorMap = React.useMemo(() => {
+    const map = {};
+    const allLabels = [];
+    for (const seg of segments) {
+      if (seg.label && !allLabels.includes(seg.label)) allLabels.push(seg.label);
+    }
+    allLabels.forEach((lbl, idx) => { map[lbl] = SEG_COLORS[idx % SEG_COLORS.length]; });
+    return map;
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [segments]);
+
+  function getSegColor(seg) {
+    return seg.label ? (labelColorMap[seg.label] || UNLABELED_COLOR) : UNLABELED_COLOR;
+  }
+
+  // ── Segment mutations ──────────────────────────────────────────────────────
+  function mergeWithNext(idx) {
+    if (idx >= segments.length - 1) return;
+    setSegments(prev => {
+      const next = [...prev];
+      next[idx] = { ...next[idx], end_ms: next[idx + 1].end_ms };
+      next.splice(idx + 1, 1);
+      return next;
+    });
+    setSelectedSeg(null);
+  }
+
+  function mergeWithPrev(idx) {
+    if (idx <= 0) return;
+    setSegments(prev => {
+      const next = [...prev];
+      next[idx - 1] = { ...next[idx - 1], end_ms: next[idx].end_ms };
+      next.splice(idx, 1);
+      return next;
+    });
+    setSelectedSeg(null);
+  }
+
+  function deleteSegment(idx) {
+    if (segments.length <= 1) return;
+    if (idx === 0) { mergeWithNext(idx); return; }
+    if (idx === segments.length - 1) { mergeWithPrev(idx); return; }
+    const leftSize = segments[idx - 1].end_ms - segments[idx - 1].start_ms;
+    const rightSize = segments[idx + 1].end_ms - segments[idx + 1].start_ms;
+    if (leftSize >= rightSize) mergeWithPrev(idx);
+    else mergeWithNext(idx);
+  }
+
+  function relabelSegment(idx, newLabel) {
+    setSegments(prev => prev.map((s, i) =>
+      i === idx ? { ...s, label: newLabel || null, source: newLabel ? "manual" : null, confidence: null } : s
+    ));
+  }
+
+  function resizeSegment(idx, field, valueSec) {
+    const newMs = Math.round(valueSec * 1000);
+    const MIN_SEG_MS = 500;
+    setSegments(prev => {
+      const seg = prev[idx];
+      if (!seg) return prev;
+      if (field === "start") {
+        const minMs = idx > 0 ? prev[idx - 1].start_ms + MIN_SEG_MS : 0;
+        const maxMs = seg.end_ms - MIN_SEG_MS;
+        const clamped = Math.max(minMs, Math.min(maxMs, newMs));
+        return prev.map((s, i) => {
+          if (i === idx) return { ...s, start_ms: clamped };
+          if (i === idx - 1) return { ...s, end_ms: clamped };
+          return s;
+        });
+      } else {
+        const minMs = seg.start_ms + MIN_SEG_MS;
+        const maxMs = idx < prev.length - 1 ? prev[idx + 1].end_ms - MIN_SEG_MS : totalMs;
+        const clamped = Math.max(minMs, Math.min(maxMs, newMs));
+        return prev.map((s, i) => {
+          if (i === idx) return { ...s, end_ms: clamped };
+          if (i === idx + 1) return { ...s, start_ms: clamped };
+          return s;
+        });
+      }
+    });
+  }
+
+  // ── Drag-to-resize segment edges on bar ─────────────────────────────────────
+  const [edgeDrag, setEdgeDrag] = useState(null); // { segIndex, edge, startX, origMs }
+
+  function handleSegEdgeDown(e, segIndex, edge) {
+    e.stopPropagation();
+    e.preventDefault();
+    const origMs = edge === "left" ? segments[segIndex].start_ms : segments[segIndex].end_ms;
+    setEdgeDrag({ segIndex, edge, startX: e.clientX, origMs });
+  }
+
+  useEffect(() => {
+    if (!edgeDrag) return;
+    const { segIndex, edge, startX, origMs } = edgeDrag;
+    function onMove(e) {
+      const bar = segBarRef.current;
+      if (!bar) return;
+      const rect = bar.getBoundingClientRect();
+      const pxPerMs = rect.width / viewDurationMs;
+      const dx = e.clientX - startX;
+      let newMs = Math.round(origMs + dx / pxPerMs);
+      const MIN_SEG_MS = 500;
+      setSegments(prev => {
+        const seg = prev[segIndex];
+        if (!seg) return prev;
+        if (edge === "left") {
+          const minMs = segIndex > 0 ? prev[segIndex - 1].start_ms + MIN_SEG_MS : 0;
+          const maxMs = seg.end_ms - MIN_SEG_MS;
+          newMs = Math.max(minMs, Math.min(maxMs, newMs));
+          return prev.map((s, i) => {
+            if (i === segIndex) return { ...s, start_ms: newMs };
+            if (i === segIndex - 1) return { ...s, end_ms: newMs };
+            return s;
+          });
+        } else {
+          const minMs = seg.start_ms + MIN_SEG_MS;
+          const maxMs = segIndex < prev.length - 1 ? prev[segIndex + 1].end_ms - MIN_SEG_MS : totalMs;
+          newMs = Math.max(minMs, Math.min(maxMs, newMs));
+          return prev.map((s, i) => {
+            if (i === segIndex) return { ...s, end_ms: newMs };
+            if (i === segIndex + 1) return { ...s, start_ms: newMs };
+            return s;
+          });
+        }
+      });
+    }
+    function onUp() { setEdgeDrag(null); }
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+    return () => { window.removeEventListener("mousemove", onMove); window.removeEventListener("mouseup", onUp); };
+  }, [edgeDrag, viewDurationMs, totalMs]);
+
+  // ── Auto-segment with label carryover ───────────────────────────────────────
   async function handleAutoSegment() {
     if (!ev.datasetId) return;
+    // Snapshot existing labeled segments for carryover
+    const oldLabeled = segments.filter(s => s.label && s.source === "manual");
+
     setSegLoading(true);
     try {
       const res = await fetch(`${API_BASE_URL}/datasets/${ev.datasetId}/segment`, {
@@ -371,83 +519,46 @@ function FileDetailPanel({ ev, allEvents, onClose, onAskCopilot, classes }) {
       });
       const data = await res.json();
       if (res.ok && data.segments) {
-        setSegments(data.segments);
-        setSegLabels({});
-        setPerSegLabels({});
-        // Reconcile existing typed labels onto the new segments
-        setTimeout(() => reconcileSpansToSegments(data.segments, labels), 50);
+        // Carry over labels: if a new segment's midpoint falls inside an old labeled
+        // segment's range, inherit that label with source:"manual"
+        const normalized = data.segments.map(s => {
+          const mid = (s.start_ms + s.end_ms) / 2;
+          const donor = oldLabeled.find(old => mid >= old.start_ms && mid < old.end_ms);
+          return {
+            ...s,
+            label: donor ? donor.label : null,
+            source: donor ? "manual" : null,
+            confidence: null,
+          };
+        });
+
+        // Warn only if some old labels couldn't be carried over
+        const carriedLabels = new Set(normalized.filter(s => s.label).map(s => s.label));
+        const lostLabels = oldLabeled.filter(old => !carriedLabels.has(old.label));
+        if (lostLabels.length > 0) {
+          const lostNames = [...new Set(lostLabels.map(l => l.label))].join(", ");
+          if (!window.confirm(`Labels [${lostNames}] could not be carried over to new segments. Continue?`)) {
+            setSegLoading(false);
+            return;
+          }
+        }
+
+        setSegments(normalized);
+        setSelectedSeg(null);
       }
     } catch { /* ignore */ }
     finally { setSegLoading(false); }
   }
 
-  function labelCluster(clusterId, labelName) {
-    setSegLabels((prev) => ({ ...prev, [clusterId]: labelName }));
-    // Also set per-segment labels for all segments in this cluster (manual)
-    segments.forEach((seg, i) => {
-      if (seg.cluster_id === clusterId) {
-        setPerSegLabels((prev) => ({ ...prev, [i]: { label: labelName, source: "manual" } }));
-      }
-    });
-  }
-
-  // PURE function: compute overlap mapping of typed spans → segments. Returns a map {segIndex: label}.
-  // Rule: a span maps to the segment containing its MIDPOINT. This works regardless of
-  // relative span/segment lengths (a short span inside a long segment still maps).
-  function computeSpanOverlaps(segs, spanLabels) {
-    const result = {};
-    if (!segs?.length || !spanLabels?.length) return result;
-    for (const span of spanLabels) {
-      const spanMid = span.start_ms + span.duration_ms / 2;
-      for (let si = 0; si < segs.length; si++) {
-        if (spanMid >= segs[si].start_ms && spanMid < segs[si].end_ms) {
-          // Span midpoint falls in this segment — label it
-          if (!result[si]) result[si] = span.label_name;
-          break;
-        }
-      }
-    }
-    return result;
-  }
-
-  // Update perSegLabels from typed spans (for visual display)
-  function reconcileSpansToSegments(segs = segments, spanLabels = labels) {
-    const overlaps = computeSpanOverlaps(segs, spanLabels);
-    if (Object.keys(overlaps).length === 0) return;
-    setPerSegLabels((prev) => {
-      const next = { ...prev };
-      for (const [si, label] of Object.entries(overlaps)) {
-        if (!next[si] || next[si].source !== "manual") {
-          next[si] = { label, source: "manual" };
-        }
-      }
-      return next;
-    });
-  }
-
+  // ── Propagate ─────────────────────────────────────────────────────────────
   async function handlePropagate() {
     if (segments.length < 2) return;
     setPropagating(true);
     try {
-      // SYNCHRONOUSLY compute the merged labels: perSegLabels + typed-span overlaps
-      const spanOverlaps = computeSpanOverlaps(segments, labels);
-      const mergedLabels = { ...perSegLabels };
-      for (const [si, label] of Object.entries(spanOverlaps)) {
-        if (!mergedLabels[si] || mergedLabels[si].source !== "manual") {
-          mergedLabels[si] = { label, source: "manual" };
-        }
-      }
-      // Also update display state
-      setPerSegLabels(mergedLabels);
-
-      const payload = segments.map((seg, i) => ({
+      const payload = segments.map(seg => ({
         embedding: seg.embedding || [],
-        label: mergedLabels[i]?.source === "manual" ? mergedLabels[i].label : null,
+        label: seg.source === "manual" ? seg.label : null,
       }));
-
-      const nLabeled = payload.filter(p => p.label).length;
-      console.log(`[propagate] ${nLabeled} labeled segments in payload:`,
-        [...new Set(payload.filter(p => p.label).map(p => p.label))].join(", "));
       const res = await fetch(`${API_BASE_URL}/datasets/propagate-labels`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -455,12 +566,12 @@ function FileDetailPanel({ ev, allEvents, onClose, onAskCopilot, classes }) {
       });
       const data = await res.json();
       if (res.ok && data.propagated) {
-        setPerSegLabels((prev) => {
-          const next = { ...prev };
+        setSegments(prev => {
+          const next = [...prev];
           for (const p of data.propagated) {
-            // Only fill if not already manually labeled
-            if (!next[p.segment_index] || next[p.segment_index].source !== "manual") {
+            if (next[p.segment_index] && next[p.segment_index].source !== "manual") {
               next[p.segment_index] = {
+                ...next[p.segment_index],
                 label: p.predicted_label,
                 source: "propagated",
                 confidence: p.confidence,
@@ -472,27 +583,6 @@ function FileDetailPanel({ ev, allEvents, onClose, onAskCopilot, classes }) {
       }
     } catch { /* ignore */ }
     finally { setPropagating(false); }
-  }
-
-  async function applySegmentLabels() {
-    if (!ev.datasetId || segments.length === 0) return;
-    for (let si = 0; si < segments.length; si++) {
-      const seg = segments[si];
-      // Use per-segment label (from manual or propagation), fall back to cluster label
-      const label = perSegLabels[si]?.label || segLabels[seg.cluster_id];
-      if (!label) continue;
-      try {
-        await fetch(`${API_BASE_URL}/datasets/${ev.datasetId}/labels`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            label_name: label,
-            start_ms: seg.start_ms,
-            duration_ms: seg.end_ms - seg.start_ms,
-          }),
-        });
-      } catch { /* ignore individual failures */ }
-    }
   }
 
   const copilotMsg = [
@@ -507,12 +597,9 @@ function FileDetailPanel({ ev, allEvents, onClose, onAskCopilot, classes }) {
 
   const FMT = (v) => v?.toFixed(3) ?? "—";
 
-  // ── Span-label state ────────────────────────────────────────────────────────
-  const [labels,    setLabels]    = useState([]);
+  // ── Drag state ──────────────────────────────────────────────────────────────
   const [dragStart, setDragStart] = useState(null);  // ms
   const [dragEnd,   setDragEnd]   = useState(null);  // ms
-  const [labelMenu, setLabelMenu] = useState(null);  // { id, clientX, clientY }
-  const [resizing,  setResizing]  = useState(null);  // { id, edge, origStart, origDur, anchorMs }
   const sigContainerRef = useRef(null);
 
   // ── Video / shared-timeline state ───────────────────────────────────────────
@@ -522,33 +609,16 @@ function FileDetailPanel({ ev, allEvents, onClose, onAskCopilot, classes }) {
   const [isPlaying,     setIsPlaying]     = useState(false);
   const videoRef = useRef(null);
 
-  // ── Drag popup (replaces window.prompt for label creation) ───────────────────
-  const [dragPopup,     setDragPopup]     = useState(null);  // { s_ms, dur_ms, clientX, clientY }
+  // ── Drag popup ─────────────────────────────────────────────────────────────
+  const [dragPopup,     setDragPopup]     = useState(null);
   const [dragPopupName, setDragPopupName] = useState("");
   const dragPopupInputRef = useRef(null);
-  const justCreatedPopupRef = useRef(false);  // prevents onClick from killing popup that mouseUp just created
-
-  // ── VLM auto-label proposals ─────────────────────────────────────────────────
-  const [proposals,        setProposals]        = useState([]);   // [{label_name, start_ms, duration_ms, frame_count}]
-  const [proposalMenu,     setProposalMenu]     = useState(null); // { idx, clientX, clientY }
-  const [proposalsLoading, setProposalsLoading] = useState(false);
-  const [autoLabelError,   setAutoLabelError]   = useState(null);
+  const justCreatedPopupRef = useRef(false);
 
   // SVG viewBox width shared with SignalPlotRow
   const VW = 400;
-  // Left inset = axis label span (14px) + gap (6px) = 20px
   const AXIS_INSET = 20;
 
-  // Fetch existing labels when panel opens (if file has a dataset_id)
-  useEffect(() => {
-    if (!ev.datasetId) return;
-    fetch(`${API_BASE_URL}/datasets/${ev.datasetId}/labels`)
-      .then((r) => r.ok ? r.json() : [])
-      .then(setLabels)
-      .catch(() => {});
-  }, [ev.datasetId]);
-
-  // Convert client X → ms (using the signal container div's bounding rect + viewport)
   function clientXToMs(clientX) {
     const rect = sigContainerRef.current?.getBoundingClientRect();
     if (!rect || viewDurationMs <= 0) return 0;
@@ -558,145 +628,73 @@ function FileDetailPanel({ ev, allEvents, onClose, onAskCopilot, classes }) {
     return viewStartMs + frac * viewDurationMs;
   }
 
-  // Convert ms → viewBox x (0-VW), relative to current viewport
   function msToVW(ms) {
     return viewDurationMs > 0 ? ((ms - viewStartMs) / viewDurationMs) * VW : 0;
   }
 
-  // Seek video and update cursor to a given ms position
   function seekTo(ms) {
     setCurrentMs(ms);
-    if (videoRef.current) {
-      videoRef.current.currentTime = ms / 1000;
-    }
+    if (videoRef.current) { videoRef.current.currentTime = ms / 1000; }
   }
 
-  // ── Drag-to-create ──────────────────────────────────────────────────────────
+  // ── Drag-to-label ─────────────────────────────────────────────────────────
   function handleSigMouseDown(e) {
     if (e.button !== 0) return;
-    setLabelMenu(null);
     const ms = clientXToMs(e.clientX);
     setDragStart(ms); setDragEnd(ms);
-    // Move cursor immediately on mousedown for responsive feel
     setCurrentMs(ms);
   }
 
   function handlePanelMouseMove(e) {
     if (dragStart !== null && !dragPopup) setDragEnd(clientXToMs(e.clientX));
-    if (resizing) {
-      const curMs = clientXToMs(e.clientX);
-      const dms   = curMs - resizing.anchorMs;
-      setLabels((prev) => prev.map((l) => {
-        if (l.id !== resizing.id) return l;
-        if (resizing.edge === "left") {
-          const newStart = Math.max(0, resizing.origStart + dms);
-          const newDur   = resizing.origDur - (newStart - resizing.origStart);
-          return newDur >= 5 ? { ...l, start_ms: newStart, duration_ms: newDur } : l;
-        } else {
-          return { ...l, duration_ms: Math.max(5, resizing.origDur + dms) };
-        }
-      }));
-    }
   }
 
-  async function handlePanelMouseUp(e) {
-    // Finish drag-to-create
+  function handlePanelMouseUp(e) {
     if (dragStart !== null) {
       const endMs  = clientXToMs(e.clientX);
       const s_ms   = Math.min(dragStart, endMs);
       const dur_ms = Math.abs(endMs - dragStart);
-      // Plain click (no drag) → seek video, clear selection
       if (dur_ms < 5) {
         setDragStart(null); setDragEnd(null);
         seekTo(endMs);
         return;
       }
-      // Real drag → show label popup, keep selection VISIBLE until dismissed
       if (dur_ms >= 5 && ev.datasetId) {
-        setDragEnd(endMs);  // finalize the end position
+        setDragEnd(endMs);
         setDragPopup({ s_ms, dur_ms, clientX: e.clientX, clientY: e.clientY });
         setDragPopupName("");
-        justCreatedPopupRef.current = true;  // prevent the immediately-following onClick from killing it
+        justCreatedPopupRef.current = true;
         setTimeout(() => {
           dragPopupInputRef.current?.focus();
-          justCreatedPopupRef.current = false;  // allow future clicks to dismiss
+          justCreatedPopupRef.current = false;
         }, 100);
-        return;  // do NOT clear dragStart/dragEnd — the highlight stays
+        return;
       }
-      // No dataset → just clear
       setDragStart(null); setDragEnd(null);
     }
-    // Finish resize
-    if (resizing) {
-      const lbl = labels.find((l) => l.id === resizing.id);
-      setResizing(null);
-      if (lbl) {
-        try {
-          const r = await fetch(`${API_BASE_URL}/labels/${lbl.id}`, {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ start_ms: lbl.start_ms, duration_ms: lbl.duration_ms }),
-          });
-          if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
-          const updated = await r.json();
-          setLabels((prev) => prev.map((l) => l.id === lbl.id ? updated : l));
-        } catch (err) { alert("Resize failed: " + err.message); }
-      }
-    }
   }
 
-  // ── Label context menu actions ──────────────────────────────────────────────
-  async function doRenameLabel(lbl) {
-    setLabelMenu(null);
-    const n = window.prompt("New label name:", lbl.label_name);
-    if (!n?.trim() || n.trim() === lbl.label_name) return;
-    try {
-      const r = await fetch(`${API_BASE_URL}/labels/${lbl.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ label_name: n.trim() }),
-      });
-      if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
-      const updated = await r.json();
-      setLabels((prev) => prev.map((l) => l.id === lbl.id ? updated : l));
-    } catch (err) { alert("Rename failed: " + err.message); }
-  }
-
-  async function doDeleteLabel(lbl) {
-    setLabelMenu(null);
-    if (!window.confirm(`Delete label "${lbl.label_name}"?`)) return;
-    try {
-      const r = await fetch(`${API_BASE_URL}/labels/${lbl.id}`, { method: "DELETE" });
-      if (!r.ok) throw new Error(r.statusText);
-      setLabels((prev) => prev.filter((l) => l.id !== lbl.id));
-    } catch (err) { alert("Delete failed: " + err.message); }
-  }
-
-  async function handleCreateLabel(name) {
-    if (!name?.trim() || !dragPopup || !ev.datasetId) return;
+  function handleCreateLabel(name) {
+    if (!name?.trim() || !dragPopup) return;
     const { s_ms, dur_ms } = dragPopup;
     setDragPopup(null);
-    setDragStart(null); setDragEnd(null);  // clear selection after label created
-    try {
-      const r = await fetch(`${API_BASE_URL}/datasets/${ev.datasetId}/labels`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ label_name: name.trim(), start_ms: s_ms, duration_ms: dur_ms }),
-      });
-      if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
-      const created = await r.json();
-      setLabels((prev) => {
-        const updated = [...prev, created].sort((a, b) => a.start_ms - b.start_ms);
-        if (segments.length > 0) reconcileSpansToSegments(segments, updated);
-        return updated;
-      });
-    } catch (err) { alert("Failed to create label: " + err.message); }
-  }
-
-  function handleEdgeDown(e, lbl, edge) {
-    e.stopPropagation();
-    setLabelMenu(null);
-    setResizing({ id: lbl.id, edge, origStart: lbl.start_ms, origDur: lbl.duration_ms, anchorMs: clientXToMs(e.clientX) });
+    setDragStart(null); setDragEnd(null);
+    const trimmed = name.trim();
+    // Find the segment whose range contains the drag midpoint and label it
+    if (segments.length > 0) {
+      const spanMid = s_ms + dur_ms / 2;
+      const segIdx = segments.findIndex(s => spanMid >= s.start_ms && spanMid < s.end_ms);
+      if (segIdx >= 0) {
+        relabelSegment(segIdx, trimmed);
+        return;
+      }
+    }
+    // No segments yet — create a single segment covering the drag range
+    setSegments(prev => [...prev, {
+      start_ms: s_ms, end_ms: s_ms + dur_ms,
+      label: trimmed, source: "manual", confidence: null,
+      embedding: [], cluster_id: null,
+    }].sort((a, b) => a.start_ms - b.start_ms));
   }
 
   // ── Video upload ─────────────────────────────────────────────────────────────
@@ -736,79 +734,7 @@ function FileDetailPanel({ ev, allEvents, onClose, onAskCopilot, classes }) {
     else            { vid.pause(); setIsPlaying(false); }
   }
 
-  // ── VLM auto-label ──────────────────────────────────────────────────────────
-  async function handleAutoLabel() {
-    if (!ev.datasetId || proposalsLoading) return;
-    setProposalsLoading(true);
-    setAutoLabelError(null);
-    setProposals([]);
-    try {
-      // Build class_descriptions map from classes that have a description set
-      const class_descriptions = {};
-      for (const cls of classes) {
-        if (cls.description?.trim()) {
-          class_descriptions[cls.name] = cls.description.trim();
-        }
-      }
-      const label_names = classes.map((c) => c.name);
-      const r = await fetch(`${API_BASE_URL}/datasets/${ev.datasetId}/auto-label`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          interval_s: 1.0,
-          min_span_ms: 0,
-          window_frames: 3,
-          label_names,
-          class_descriptions,
-        }),
-      });
-      const data = await r.json();
-      if (!r.ok) throw new Error(data.detail || r.statusText);
-      setProposals(data.proposals ?? []);
-      if (data.proposals?.length === 0) setAutoLabelError("No spans proposed — VLM returned only 'unknown' for all frames.");
-    } catch (err) {
-      setAutoLabelError("Auto-label failed: " + err.message);
-    } finally {
-      setProposalsLoading(false);
-    }
-  }
-
-  async function acceptProposal(idx) {
-    const p = proposals[idx];
-    if (!p || !ev.datasetId) return;
-    try {
-      const r = await fetch(`${API_BASE_URL}/datasets/${ev.datasetId}/labels`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ label_name: p.label_name, start_ms: p.start_ms, duration_ms: p.duration_ms }),
-      });
-      if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
-      const created = await r.json();
-      setLabels((prev) => [...prev, created].sort((a, b) => a.start_ms - b.start_ms));
-      setProposals((prev) => prev.filter((_, i) => i !== idx));
-    } catch (err) { alert("Failed to accept proposal: " + err.message); }
-  }
-
-  async function acceptAllProposals() {
-    if (!ev.datasetId || proposals.length === 0) return;
-    const created = [];
-    for (const p of proposals) {
-      try {
-        const r = await fetch(`${API_BASE_URL}/datasets/${ev.datasetId}/labels`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ label_name: p.label_name, start_ms: p.start_ms, duration_ms: p.duration_ms }),
-        });
-        if (r.ok) created.push(await r.json());
-      } catch (_) {}
-    }
-    setLabels((prev) => [...prev, ...created].sort((a, b) => a.start_ms - b.start_ms));
-    setProposals([]);
-  }
-
-  function discardProposal(idx) {
-    setProposals((prev) => prev.filter((_, i) => i !== idx));
-  }
+  // VLM auto-label deferred — will be rewired to write to segments in a future commit
 
   // Live selection rect bounds in VW coords
   const selX   = dragStart !== null && dragEnd !== null ? msToVW(Math.min(dragStart, dragEnd)) : null;
@@ -827,12 +753,15 @@ function FileDetailPanel({ ev, allEvents, onClose, onAskCopilot, classes }) {
       onMouseMove={handlePanelMouseMove}
       onMouseUp={handlePanelMouseUp}
       onMouseLeave={handlePanelMouseUp}
-      onClick={() => { setLabelMenu(null); setProposalMenu(null); if (dragPopup && !justCreatedPopupRef.current) { setDragPopup(null); setDragStart(null); setDragEnd(null); } }}
+      onClick={() => { if (dragPopup && !justCreatedPopupRef.current) { setDragPopup(null); setDragStart(null); setDragEnd(null); } }}
     >
       {/* Header */}
       <div style={{ display: "flex", alignItems: "center", gap: 8, padding: "9px 12px", borderBottom: "1px solid #ebeae5", flexShrink: 0 }}>
         <button
-          onClick={onClose}
+          onClick={() => {
+            if (segSaveStatus === "failed" && !window.confirm("Segment changes failed to save. Close anyway?")) return;
+            onClose();
+          }}
           style={{ background: "none", border: "none", cursor: "pointer", padding: "0 2px", color: "#b0afa8", fontSize: 16, lineHeight: 1, flexShrink: 0 }}
           title="Back to list"
         >←</button>
@@ -882,21 +811,6 @@ function FileDetailPanel({ ev, allEvents, onClose, onAskCopilot, classes }) {
               <p style={{ fontFamily: "'DM Mono', monospace", fontSize: 9, color: "#b0afa8", textTransform: "uppercase", letterSpacing: "0.08em", margin: 0 }}>Video</p>
               {hasVideo && (
                 <>
-                  <button
-                    onClick={handleAutoLabel}
-                    disabled={proposalsLoading}
-                    style={{
-                      display: "flex", alignItems: "center", gap: 4,
-                      background: "none", border: "1px solid #8B5CF6", borderRadius: 4,
-                      cursor: proposalsLoading ? "wait" : "pointer", fontSize: 9,
-                      color: "#8B5CF6", padding: "2px 7px", fontFamily: "'DM Mono', monospace",
-                      opacity: proposalsLoading ? 0.6 : 1,
-                    }}
-                    title="Run VLM frame-classification to propose label spans"
-                  >
-                    {proposalsLoading ? "Analyzing…" : "Auto-label"}
-                    <span style={{ fontSize: 7, fontWeight: 700, background: "#8B5CF620", padding: "1px 4px", borderRadius: 3 }}>BETA</span>
-                  </button>
                   <button
                     onClick={handleVideoRemove}
                     style={{ background: "none", border: "none", cursor: "pointer", fontSize: 9, color: "#b0afa8", padding: 0, fontFamily: "'DM Mono', monospace", marginLeft: "auto" }}
@@ -1122,338 +1036,177 @@ function FileDetailPanel({ ev, allEvents, onClose, onAskCopilot, classes }) {
                 <span style={{ fontSize: 9, color: "#6b6a63" }}>{segments.length} segments</span>
               )}
             </div>
-            {/* Segment color bar */}
+            {/* ═══ Segment bar (display + select) ═══ */}
             {segments.length > 0 && ev.duration > 0 && (
               <>
-                <div style={{ position: "relative", height: 16, borderRadius: 4, overflow: "hidden", marginBottom: 4, background: "#f0f0f0" }}>
+                <div ref={segBarRef} role="listbox" aria-label="Segment timeline"
+                  style={{ position: "relative", height: 24, borderRadius: 4, overflow: "visible", marginBottom: 4, background: "#f0f0f0" }}>
                   {segments.map((seg, i) => {
                     const leftPct = ((Math.max(seg.start_ms, viewStartMs) - viewStartMs) / viewDurationMs) * 100;
                     const rightPct = ((Math.min(seg.end_ms, viewEndMs) - viewStartMs) / viewDurationMs) * 100;
                     const w = rightPct - leftPct;
                     if (w <= 0 || seg.end_ms < viewStartMs || seg.start_ms > viewEndMs) return null;
+                    const color = getSegColor(seg);
+                    const isSelected = selectedSeg === i;
                     return (
-                      <div key={i} style={{
-                        position: "absolute", left: `${leftPct}%`, width: `${w}%`, top: 0, bottom: 0,
-                        backgroundColor: SEG_COLORS[seg.cluster_id % SEG_COLORS.length],
-                        opacity: perSegLabels[i]?.source === "propagated" ? 0.4 : 0.6,
-                        borderRight: "1px solid white",
-                        display: "flex", alignItems: "center", justifyContent: "center",
-                        outline: perSegLabels[i]?.source === "propagated" ? "1px dashed rgba(255,255,255,0.5)" : "none",
-                      }}>
-                        <span style={{ fontSize: 8, color: "white", fontWeight: 700 }}>
-                          {perSegLabels[i]?.label || segLabels[seg.cluster_id] || ""}
-                          {perSegLabels[i]?.source === "propagated" && perSegLabels[i]?.confidence < 0.8 && " ⚠"}
+                      <div key={i} role="option" aria-selected={isSelected}
+                        aria-label={`Segment ${i + 1}: ${seg.label || "unlabeled"}, ${(seg.start_ms / 1000).toFixed(1)}s to ${(seg.end_ms / 1000).toFixed(1)}s`}
+                        tabIndex={0}
+                        onClick={(e) => { e.stopPropagation(); const next = isSelected ? null : i; setSelectedSeg(next); if (next !== null && segRowRefs.current[next]) segRowRefs.current[next].scrollIntoView({ behavior: "smooth", block: "nearest" }); }}
+                        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); const next = isSelected ? null : i; setSelectedSeg(next); if (next !== null && segRowRefs.current[next]) segRowRefs.current[next].scrollIntoView({ behavior: "smooth", block: "nearest" }); } }}
+                        style={{
+                          position: "absolute", left: `${leftPct}%`, width: `${w}%`, top: 0, bottom: 0,
+                          backgroundColor: color, opacity: seg.source === "propagated" ? 0.55 : 0.8,
+                          borderRight: "1px solid white", display: "flex", alignItems: "center", justifyContent: "center",
+                          cursor: "pointer", userSelect: "none",
+                          outline: isSelected ? "2px solid #333" : "none", outlineOffset: -1, zIndex: isSelected ? 2 : 1,
+                        }}>
+                        {/* Left edge drag handle */}
+                        <div onMouseDown={(e) => handleSegEdgeDown(e, i, "left")}
+                          style={{ position: "absolute", left: -3, top: 0, bottom: 0, width: 6, cursor: "ew-resize", zIndex: 3 }} />
+                        {/* Right edge drag handle */}
+                        <div onMouseDown={(e) => handleSegEdgeDown(e, i, "right")}
+                          style={{ position: "absolute", right: -3, top: 0, bottom: 0, width: 6, cursor: "ew-resize", zIndex: 3 }} />
+                        <span style={{ fontSize: w > 4 ? 8 : 0, color: "white", fontWeight: 700, pointerEvents: "none",
+                          textShadow: "0 1px 2px rgba(0,0,0,0.4)", overflow: "hidden", whiteSpace: "nowrap" }}>
+                          {seg.label || ""}{seg.source === "propagated" && " ~"}
                         </span>
                       </div>
                     );
                   })}
                 </div>
-                {/* Cluster legend + label inputs */}
-                <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 6 }}>
-                  {[...new Set(segments.map(s => s.cluster_id))].sort().map((cid) => (
-                    <div key={cid} style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                      <span style={{ width: 10, height: 10, borderRadius: 2, backgroundColor: SEG_COLORS[cid % SEG_COLORS.length], flexShrink: 0 }} />
-                      {classes.length > 0 ? (
-                        <select value={segLabels[cid] || ""} onChange={(e) => labelCluster(cid, e.target.value)}
-                          style={{ fontSize: 10, border: "1px solid #e0e0e0", borderRadius: 3, padding: "1px 4px" }}>
-                          <option value="">—</option>
-                          {classes.map((c) => <option key={c.id} value={c.name}>{c.name}</option>)}
-                        </select>
-                      ) : (
-                        <input type="text" placeholder="label…" value={segLabels[cid] || ""}
-                          onChange={(e) => labelCluster(cid, e.target.value)}
-                          style={{ fontSize: 10, border: "1px solid #e0e0e0", borderRadius: 3, padding: "1px 4px", width: 80 }} />
-                      )}
+
+                {/* Legend + save status */}
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginBottom: 8, alignItems: "center" }}>
+                  {Object.entries(labelColorMap).map(([lbl, color]) => (
+                    <div key={lbl} style={{ display: "flex", alignItems: "center", gap: 3 }}>
+                      <span style={{ width: 10, height: 10, borderRadius: 2, backgroundColor: color, flexShrink: 0 }} aria-hidden="true" />
+                      <span style={{ fontSize: 10, color: "#6b6a63" }}>{lbl}</span>
                     </div>
                   ))}
+                  {segments.some(s => !s.label) && (
+                    <div style={{ display: "flex", alignItems: "center", gap: 3 }}>
+                      <span style={{ width: 10, height: 10, borderRadius: 2, backgroundColor: UNLABELED_COLOR, flexShrink: 0 }} aria-hidden="true" />
+                      <span style={{ fontSize: 10, color: "#b0afa8" }}>unlabeled</span>
+                    </div>
+                  )}
+                  <span style={{ marginLeft: "auto", fontSize: 9, fontFamily: "'DM Mono', monospace",
+                    color: segSaveStatus === "failed" ? "#EF4444" : segSaveStatus === "saved" ? "#1D9E75" : "#b0afa8",
+                    cursor: segSaveStatus === "failed" ? "pointer" : "default" }}
+                    onClick={segSaveStatus === "failed" ? saveSegments : undefined}
+                    title={segSaveStatus === "failed" ? `${segSaveError} — click to retry` : ""}>
+                    {segSaveStatus === "saving" && "Saving..."}
+                    {segSaveStatus === "saved" && "Saved"}
+                    {segSaveStatus === "failed" && "Save failed — retry"}
+                  </span>
                 </div>
-                <button onClick={applySegmentLabels}
-                  disabled={Object.values(segLabels).filter(Boolean).length === 0}
-                  style={{
-                    fontSize: 10, color: Object.values(segLabels).filter(Boolean).length > 0 ? "#8B5CF6" : "#ccc",
-                    border: "1px solid rgba(139,92,246,0.3)", borderRadius: 4, padding: "3px 10px",
-                    background: "none", cursor: Object.values(segLabels).filter(Boolean).length > 0 ? "pointer" : "not-allowed",
-                  }}>
-                  Apply labels →
-                </button>
-                {/* Propagate button */}
+
+                {/* ═══ Segment table (edit surface) ═══ */}
+                <div style={{ border: "1px solid #e8e7e4", borderRadius: 6, overflow: "hidden", marginBottom: 8 }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "20px 60px 60px 1fr 28px 56px", gap: 0,
+                    padding: "4px 8px", background: "#f4f3f0", borderBottom: "1px solid #e8e7e4",
+                    fontSize: 9, fontFamily: "'DM Mono', monospace", color: "#b0afa8", textTransform: "uppercase", letterSpacing: "0.06em" }}
+                    role="row" aria-label="Segment table header">
+                    <span aria-hidden="true" /><span>Start</span><span>End</span><span>Label</span><span aria-hidden="true" /><span>Actions</span>
+                  </div>
+                  <div style={{ maxHeight: 200, overflowY: "auto" }} role="table" aria-label="Segment list">
+                    {segments.map((seg, i) => {
+                      const color = getSegColor(seg);
+                      const isSelected = selectedSeg === i;
+                      return (
+                        <div key={i} ref={(el) => { segRowRefs.current[i] = el; }} role="row" aria-selected={isSelected} tabIndex={0}
+                          onClick={() => setSelectedSeg(isSelected ? null : i)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setSelectedSeg(isSelected ? null : i); }
+                            if (e.key === "ArrowDown" && i < segments.length - 1) { e.preventDefault(); setSelectedSeg(i + 1); segRowRefs.current[i + 1]?.focus(); }
+                            if (e.key === "ArrowUp" && i > 0) { e.preventDefault(); setSelectedSeg(i - 1); segRowRefs.current[i - 1]?.focus(); }
+                            if (e.key === "Delete" || e.key === "Backspace") { e.preventDefault(); deleteSegment(i); }
+                          }}
+                          style={{
+                            display: "grid", gridTemplateColumns: "20px 60px 60px 1fr 28px 56px", gap: 0,
+                            padding: "3px 8px", alignItems: "center",
+                            background: isSelected ? "#f0edff" : i % 2 === 0 ? "#fff" : "#fafaf8",
+                            borderBottom: "1px solid #f0efec", cursor: "pointer", outline: "none",
+                            boxShadow: isSelected ? "inset 2px 0 0 #8B5CF6" : "none",
+                          }}>
+                          <span style={{ width: 12, height: 12, borderRadius: 3, backgroundColor: color, flexShrink: 0,
+                            border: seg.source === "propagated" ? "2px dashed rgba(0,0,0,0.2)" : "2px solid rgba(0,0,0,0.1)" }}
+                            title={seg.source === "propagated" ? "Propagated" : seg.source === "manual" ? "Manual" : "Unlabeled"} />
+                          <input type="number" step="0.1" min="0" aria-label={`Segment ${i + 1} start`}
+                            value={(seg.start_ms / 1000).toFixed(1)} onClick={(e) => e.stopPropagation()}
+                            onChange={(e) => resizeSegment(i, "start", parseFloat(e.target.value) || 0)}
+                            style={{ width: 52, fontSize: 10, fontFamily: "'DM Mono', monospace", border: "1px solid #e8e7e4", borderRadius: 3, padding: "2px 4px", background: "#fff", outline: "none" }} />
+                          <input type="number" step="0.1" min="0" aria-label={`Segment ${i + 1} end`}
+                            value={(seg.end_ms / 1000).toFixed(1)} onClick={(e) => e.stopPropagation()}
+                            onChange={(e) => resizeSegment(i, "end", parseFloat(e.target.value) || 0)}
+                            style={{ width: 52, fontSize: 10, fontFamily: "'DM Mono', monospace", border: "1px solid #e8e7e4", borderRadius: 3, padding: "2px 4px", background: "#fff", outline: "none" }} />
+                          <div style={{ display: "flex", alignItems: "center", gap: 4 }} onClick={(e) => e.stopPropagation()}>
+                            {classes.length > 0 ? (
+                              <select value={seg.label || ""} aria-label={`Segment ${i + 1} label`}
+                                onChange={(e) => relabelSegment(i, e.target.value)}
+                                style={{ fontSize: 10, border: "1px solid #e8e7e4", borderRadius: 3, padding: "2px 4px", background: "#fff", outline: "none", maxWidth: 110 }}>
+                                <option value="">— unlabeled —</option>
+                                {classes.map((c) => <option key={c.id} value={c.name}>{c.name}</option>)}
+                              </select>
+                            ) : (
+                              <input type="text" placeholder="label..." value={seg.label || ""} aria-label={`Segment ${i + 1} label`}
+                                onChange={(e) => relabelSegment(i, e.target.value)}
+                                style={{ width: 80, fontSize: 10, border: "1px solid #e8e7e4", borderRadius: 3, padding: "2px 4px", background: "#fff", outline: "none", fontFamily: "'DM Mono', monospace" }} />
+                            )}
+                            {seg.source === "propagated" && <span title="Auto-propagated" style={{ fontSize: 9, color: "#b0afa8" }}>~</span>}
+                          </div>
+                          <button aria-label={`Delete segment ${i + 1}`} onClick={(e) => { e.stopPropagation(); deleteSegment(i); }}
+                            disabled={segments.length <= 1}
+                            style={{ fontSize: 11, color: segments.length > 1 ? "#EF4444" : "#ddd", background: "none", border: "none", cursor: segments.length > 1 ? "pointer" : "not-allowed", padding: 0, lineHeight: 1 }}
+                            title="Delete (merge into neighbor)">x</button>
+                          <div style={{ display: "flex", gap: 2 }} onClick={(e) => e.stopPropagation()}>
+                            <button aria-label={`Merge segment ${i + 1} up`} onClick={() => mergeWithPrev(i)} disabled={i === 0}
+                              title="Merge with segment above"
+                              style={{ fontSize: 9, color: i > 0 ? "#8B5CF6" : "#ddd", background: "none", border: "1px solid " + (i > 0 ? "rgba(139,92,246,0.25)" : "#eee"), borderRadius: 3, padding: "1px 3px", cursor: i > 0 ? "pointer" : "not-allowed", lineHeight: 1 }}>
+                              ↑</button>
+                            <button aria-label={`Merge segment ${i + 1} down`} onClick={() => mergeWithNext(i)} disabled={i >= segments.length - 1}
+                              title="Merge with segment below"
+                              style={{ fontSize: 9, color: i < segments.length - 1 ? "#8B5CF6" : "#ddd", background: "none", border: "1px solid " + (i < segments.length - 1 ? "rgba(139,92,246,0.25)" : "#eee"), borderRadius: 3, padding: "1px 3px", cursor: i < segments.length - 1 ? "pointer" : "not-allowed", lineHeight: 1 }}>
+                              ↓</button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Propagate + status */}
                 {(() => {
-                  // Count manual labels from both segment labels AND typed span overlaps
-                  let nManual = Object.values(perSegLabels).filter(v => v.source === "manual" && v.label).length;
-                  // Also count segments that WOULD be marked manual by typed spans (in case reconciliation hasn't rendered yet)
-                  if (nManual === 0 && labels.length > 0) {
-                    for (const span of labels) {
-                      const mid = span.start_ms + span.duration_ms / 2;
-                      if (segments.some(s => mid >= s.start_ms && mid < s.end_ms)) nManual++;
-                    }
-                  }
-                  const nUnlabeled = segments.length - Object.keys(perSegLabels).filter(k => perSegLabels[k]?.label).length;
+                  const nManual = segments.filter(s => s.source === "manual" && s.label).length;
+                  const nLabeled = segments.filter(s => s.label).length;
+                  const nUnlabeled = segments.length - nLabeled;
                   const canPropagate = nManual >= 1 && nUnlabeled > 0 && segments.some(s => s.embedding?.length > 0);
-                  return canPropagate ? (
-                    <button onClick={handlePropagate} disabled={propagating}
-                      style={{
-                        fontSize: 10, color: "#1D9E75",
-                        border: "1px solid rgba(29,158,117,0.3)", borderRadius: 4, padding: "3px 10px",
-                        background: "none", cursor: propagating ? "wait" : "pointer",
-                      }}>
-                      {propagating ? "Propagating…" : `Propagate labels (${nUnlabeled} unlabeled)`}
-                    </button>
-                  ) : null;
+                  return (
+                    <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                      {canPropagate && (
+                        <button onClick={handlePropagate} disabled={propagating}
+                          style={{ fontSize: 10, color: "#1D9E75", fontWeight: 600, border: "1px solid rgba(29,158,117,0.3)", borderRadius: 4, padding: "4px 12px", background: "none", cursor: propagating ? "wait" : "pointer" }}>
+                          {propagating ? "Propagating..." : `Propagate labels (${nUnlabeled} unlabeled)`}
+                        </button>
+                      )}
+                      <span style={{ fontSize: 9, color: "#b0afa8" }}>
+                        {nLabeled}/{segments.length} labeled
+                        {nManual > 0 && ` · ${nManual} manual seed${nManual > 1 ? "s" : ""}`}
+                      </span>
+                    </div>
+                  );
                 })()}
               </>
             )}
-          </div>
-        )}
 
-        {/* ── Label track — shown only when NO auto-segments (avoid dual display) ── */}
-        {ev.datasetId && ev.duration > 0 && segments.length === 0 && (() => {
-          const labelRows = computeRows(labels);
-          const ROW_H = 26;
-          const GAP   = 3;
-          return (
-            <div style={{ marginBottom: 14 }}>
-              {/* Header row */}
-              <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 6 }}>
-                <p style={{ fontFamily: "'DM Mono', monospace", fontSize: 9, color: "#b0afa8", textTransform: "uppercase", letterSpacing: "0.08em" }}>Labels</p>
-                {proposals.length > 0 && (
-                  <>
-                    <span style={{ fontSize: 9, color: "#8B5CF6", fontFamily: "'DM Mono', monospace" }}>
-                      {proposals.length} proposed
-                    </span>
-                    <button
-                      onClick={acceptAllProposals}
-                      style={{ background: "none", cursor: "pointer", fontSize: 9, color: "#1D9E75", padding: "1px 6px", fontFamily: "'DM Mono', monospace", borderRadius: 3, border: "1px solid #1D9E7540" }}
-                    >✓ accept all</button>
-                    <button
-                      onClick={() => setProposals([])}
-                      style={{ background: "none", border: "1px solid #ebeae5", cursor: "pointer", fontSize: 9, color: "#b0afa8", padding: "1px 6px", fontFamily: "'DM Mono', monospace", borderRadius: 3 }}
-                    >✕ discard all</button>
-                  </>
-                )}
+            {/* Empty state when no segments */}
+            {segments.length === 0 && ev.datasetId && ev.duration > 0 && (
+              <div style={{ padding: "12px 0", textAlign: "center" }}>
+                <span style={{ fontSize: 10, color: "#b0afa8", fontFamily: "'DM Mono', monospace" }}>
+                  Run Auto-segment to detect activity boundaries, or drag on the signal to create a manual segment
+                </span>
               </div>
-
-              {/* Auto-label error */}
-              {autoLabelError && (
-                <div style={{ fontSize: 9, color: "#dc2626", fontFamily: "'DM Mono', monospace", marginBottom: 6, padding: "4px 8px", background: "#fef2f2", borderRadius: 4, border: "1px solid #fecaca" }}>
-                  {autoLabelError}
-                </div>
-              )}
-
-              {/* Track container — same 14px+6px inset as signal rows */}
-              <div style={{ display: "flex", alignItems: "flex-start", gap: 6 }}>
-                <span style={{ width: 14, flexShrink: 0 }} />
-                <div style={{ flex: 1, position: "relative", minHeight: ROW_H, background: "#f8f7f3", border: "1px solid #ebeae5", borderRadius: 4, overflow: "hidden" }}>
-
-                  {/* ── Accepted label rows ─────────────────────────────────── */}
-                  {labelRows.map((row, rowIdx) => (
-                    <div key={rowIdx} style={{ position: "relative", height: ROW_H, marginBottom: rowIdx < labelRows.length - 1 ? GAP : 0 }}>
-                      {row.map((lbl) => {
-                        const color  = _labelColor(lbl.label_name);
-                        const leftPct = ((lbl.start_ms - viewStartMs) / viewDurationMs) * 100;
-                        const widPct  = Math.max(0.2, (lbl.duration_ms / viewDurationMs) * 100);
-                        // Skip labels entirely outside viewport
-                        if (lbl.start_ms + lbl.duration_ms < viewStartMs || lbl.start_ms > viewEndMs) return null;
-                        const isResizingThis = resizing?.id === lbl.id;
-                        return (
-                          <div
-                            key={lbl.id}
-                            title={`${lbl.label_name}  ·  ${(lbl.start_ms / 1000).toFixed(2)}s – ${((lbl.start_ms + lbl.duration_ms) / 1000).toFixed(2)}s  (${(lbl.duration_ms / 1000).toFixed(2)}s)`}
-                            style={{
-                              position: "absolute",
-                              left: `${leftPct}%`, width: `${widPct}%`,
-                              top: 2, height: ROW_H - 4,
-                              background: color + "22",
-                              borderLeft: `3px solid ${color}`,
-                              borderRadius: 3,
-                              display: "flex", alignItems: "center",
-                              cursor: "pointer",
-                              boxShadow: isResizingThis ? `0 0 0 1.5px ${color}` : "none",
-                              zIndex: isResizingThis ? 2 : 1,
-                            }}
-                            onClick={(e) => { e.stopPropagation(); setLabelMenu({ id: lbl.id, clientX: e.clientX, clientY: e.clientY }); }}
-                          >
-                            {/* Left resize grip */}
-                            <div
-                              style={{ position: "absolute", left: 0, top: 0, width: 8, height: "100%", cursor: "ew-resize", zIndex: 3, display: "flex", alignItems: "center", justifyContent: "center" }}
-                              onMouseDown={(e) => handleEdgeDown(e, lbl, "left")}
-                              onClick={(e) => e.stopPropagation()}
-                            >
-                              <div style={{ width: 2, height: 10, background: color + "80", borderRadius: 1 }} />
-                            </div>
-                            {/* Label text */}
-                            <span style={{
-                              fontSize: 10, fontFamily: "'DM Mono', monospace",
-                              color, fontWeight: 600,
-                              paddingLeft: 10, paddingRight: 10,
-                              overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                              flex: 1, minWidth: 0, userSelect: "none",
-                            }}>
-                              {lbl.label_name}
-                            </span>
-                            {/* Right resize grip */}
-                            <div
-                              style={{ position: "absolute", right: 0, top: 0, width: 8, height: "100%", cursor: "ew-resize", zIndex: 3, display: "flex", alignItems: "center", justifyContent: "center" }}
-                              onMouseDown={(e) => handleEdgeDown(e, lbl, "right")}
-                              onClick={(e) => e.stopPropagation()}
-                            >
-                              <div style={{ width: 2, height: 10, background: color + "80", borderRadius: 1 }} />
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  ))}
-
-                  {/* ── Proposal row ────────────────────────────────────────── */}
-                  {proposals.length > 0 && (
-                    <div style={{ position: "relative", height: ROW_H, marginTop: labelRows.length > 0 ? GAP + 1 : 0, borderTop: labelRows.length > 0 ? "1px dashed #ebeae5" : "none" }}>
-                      {proposals.map((p, idx) => {
-                        if (p.start_ms + p.duration_ms < viewStartMs || p.start_ms > viewEndMs) return null;
-                        const leftPct = ((p.start_ms - viewStartMs) / viewDurationMs) * 100;
-                        const widPct  = Math.max(0.2, (p.duration_ms / viewDurationMs) * 100);
-                        const wideEnough = widPct * (sigContainerRef.current?.clientWidth ?? 200) / 100 > 48;
-                        return (
-                          <div
-                            key={idx}
-                            title={`VLM proposal: ${p.label_name}  ·  ${(p.start_ms / 1000).toFixed(2)}s – ${((p.start_ms + p.duration_ms) / 1000).toFixed(2)}s  (${p.frame_count} frames)`}
-                            style={{
-                              position: "absolute",
-                              left: `${leftPct}%`, width: `${widPct}%`,
-                              top: 2, height: ROW_H - 4,
-                              background: "#faf8ff",
-                              border: "1.5px dashed #8B5CF6",
-                              borderRadius: 3,
-                              display: "flex", alignItems: "center",
-                              cursor: "pointer",
-                              overflow: "hidden",
-                            }}
-                            onClick={(e) => { e.stopPropagation(); setProposalMenu({ idx, clientX: e.clientX, clientY: e.clientY }); }}
-                          >
-                            <span style={{
-                              fontSize: 9, fontFamily: "'DM Mono', monospace",
-                              color: "#8B5CF6", fontWeight: 600,
-                              paddingLeft: 5, paddingRight: wideEnough ? 36 : 5,
-                              overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                              flex: 1, minWidth: 0, userSelect: "none",
-                            }}>
-                              {p.label_name}
-                            </span>
-                            {wideEnough && (
-                              <div style={{ position: "absolute", right: 2, top: 0, bottom: 0, display: "flex", alignItems: "center", gap: 1 }}>
-                                <button
-                                  onClick={(e) => { e.stopPropagation(); acceptProposal(idx); }}
-                                  style={{ background: "#1D9E7515", border: "none", borderRadius: 2, cursor: "pointer", color: "#1D9E75", fontSize: 9, fontWeight: 700, padding: "1px 4px", lineHeight: 1 }}
-                                  title="Accept"
-                                >✓</button>
-                                <button
-                                  onClick={(e) => { e.stopPropagation(); discardProposal(idx); }}
-                                  style={{ background: "#ef444415", border: "none", borderRadius: 2, cursor: "pointer", color: "#ef4444", fontSize: 9, fontWeight: 700, padding: "1px 4px", lineHeight: 1 }}
-                                  title="Discard"
-                                >✕</button>
-                              </div>
-                            )}
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-
-                  {/* Empty state */}
-                  {labels.length === 0 && proposals.length === 0 && (
-                    <div style={{ height: ROW_H, display: "flex", alignItems: "center", paddingLeft: 10 }}>
-                      <span style={{ fontSize: 9, color: "#c0bfb8", fontFamily: "'DM Mono', monospace" }}>Drag on signal above to label a span</span>
-                    </div>
-                  )}
-
-                  {/* Drag selection overlay */}
-                  {selX !== null && selW > 2 && (
-                    <div style={{
-                      position: "absolute", pointerEvents: "none", zIndex: 4,
-                      left: `${(selX / VW) * 100}%`,
-                      width: `${(selW / VW) * 100}%`,
-                      top: 0, bottom: 0,
-                      background: "rgba(59,130,246,0.08)",
-                      borderLeft: "1.5px solid #3B82F6",
-                      borderRight: "1.5px solid #3B82F6",
-                    }} />
-                  )}
-
-                  {/* Shared playback cursor */}
-                  <div style={{
-                    position: "absolute", pointerEvents: "none", zIndex: 5,
-                    left: `${(currentMs / ev.duration) * 100}%`,
-                    top: 0, bottom: 0, width: 1,
-                    background: "#ef4444",
-                  }} />
-                </div>
-              </div>
-            </div>
-          );
-        })()}
-
-        {/* ── Direct timestamp label entry ─────────────────────────────────── */}
-        {ev.datasetId && (
-          <div style={{ marginBottom: 12 }}>
-            <p style={{ fontFamily: "'DM Mono', monospace", fontSize: 9, color: "#b0afa8", textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 }}>
-              Add label by time range
-            </p>
-            <div style={{ display: "flex", gap: 6, alignItems: "flex-end", flexWrap: "wrap" }}>
-              <div>
-                <label style={{ fontSize: 9, color: "#b0afa8", display: "block", marginBottom: 2 }}>Label</label>
-                <input type="text" placeholder="class name…" value={tlName}
-                  onChange={(e) => setTlName(e.target.value)}
-                  style={{ width: 90, fontSize: 10, border: "1px solid #e0e0e0", borderRadius: 3, padding: "3px 6px", fontFamily: "'DM Mono', monospace" }} />
-              </div>
-              <div>
-                <label style={{ fontSize: 9, color: "#b0afa8", display: "block", marginBottom: 2 }}>Start (s)</label>
-                <input type="number" step="0.1" min="0" value={tlStart}
-                  onChange={(e) => setTlStart(e.target.value)}
-                  style={{ width: 65, fontSize: 10, border: "1px solid #e0e0e0", borderRadius: 3, padding: "3px 6px", fontFamily: "'DM Mono', monospace" }} />
-              </div>
-              <div>
-                <label style={{ fontSize: 9, color: "#b0afa8", display: "block", marginBottom: 2 }}>End (s)</label>
-                <input type="number" step="0.1" min="0" value={tlEnd}
-                  onChange={(e) => setTlEnd(e.target.value)}
-                  style={{ width: 65, fontSize: 10, border: "1px solid #e0e0e0", borderRadius: 3, padding: "3px 6px", fontFamily: "'DM Mono', monospace" }} />
-              </div>
-              <button
-                onClick={async () => {
-                  const name = tlName.trim();
-                  const startS = parseFloat(tlStart);
-                  const endS = parseFloat(tlEnd);
-                  if (!name) { alert("Enter a label name."); return; }
-                  if (isNaN(startS) || isNaN(endS)) { alert("Enter valid start and end times in seconds."); return; }
-                  if (startS >= endS) { alert("Start must be before end."); return; }
-                  const maxS = ev.duration / 1000;
-                  if (startS < 0 || endS > maxS + 0.1) { alert(`Times must be within 0–${maxS.toFixed(1)}s.`); return; }
-                  const s_ms = startS * 1000;
-                  const dur_ms = (endS - startS) * 1000;
-                  try {
-                    const r = await fetch(`${API_BASE_URL}/datasets/${ev.datasetId}/labels`, {
-                      method: "POST",
-                      headers: { "Content-Type": "application/json" },
-                      body: JSON.stringify({ label_name: name, start_ms: s_ms, duration_ms: dur_ms }),
-                    });
-                    if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
-                    const created = await r.json();
-                    // Use functional updater so we always read the LATEST labels
-                    setLabels((prev) => {
-                      const updated = [...prev, created].sort((a, b) => a.start_ms - b.start_ms);
-                      // Map onto overlapping segments for propagation
-                      if (segments.length > 0) reconcileSpansToSegments(segments, updated);
-                      return updated;
-                    });
-                    setTlName(""); setTlStart(""); setTlEnd("");
-                  } catch (err) { alert("Failed: " + err.message); }
-                }}
-                style={{
-                  fontSize: 10, color: "#1D9E75", border: "1px solid rgba(29,158,117,0.3)",
-                  borderRadius: 4, padding: "3px 10px", background: "none", cursor: "pointer",
-                  fontFamily: "'DM Mono', monospace", fontWeight: 600,
-                }}>
-                Add label
-              </button>
-            </div>
+            )}
           </div>
         )}
 
@@ -1557,8 +1310,11 @@ function FileDetailPanel({ ev, allEvents, onClose, onAskCopilot, classes }) {
             autoFocus
           />
           <datalist id="dp-label-list">
-            {[...new Set(labels.map((l) => l.label_name))].map((n) => (
+            {[...new Set(segments.map((s) => s.label).filter(Boolean))].map((n) => (
               <option key={n} value={n} />
+            ))}
+            {classes.map((c) => (
+              <option key={c.id} value={c.name} />
             ))}
           </datalist>
           <div style={{ display: "flex", gap: 6 }}>
@@ -1585,67 +1341,6 @@ function FileDetailPanel({ ev, allEvents, onClose, onAskCopilot, classes }) {
         </div>
       )}
 
-      {/* Label context menu */}
-      {labelMenu && (() => {
-        const lbl = labels.find((l) => l.id === labelMenu.id);
-        if (!lbl) return null;
-        return (
-          <div
-            style={{
-              position: "fixed", zIndex: 100, left: labelMenu.clientX, top: labelMenu.clientY,
-              background: "#ffffff", border: "1px solid #ebeae5", borderRadius: 8,
-              boxShadow: "0 4px 16px rgba(0,0,0,0.10)", padding: "4px 0", minWidth: 148,
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div style={{ padding: "4px 12px 6px", fontSize: 10, color: "#b0afa8", fontFamily: "'DM Mono', monospace", borderBottom: "1px solid #f0efe9" }}>
-              {lbl.label_name} · {lbl.duration_ms.toFixed(0)} ms
-            </div>
-            <button onClick={() => doRenameLabel(lbl)}
-              style={{ display: "block", width: "100%", textAlign: "left", padding: "7px 12px", background: "none", border: "none", cursor: "pointer", fontSize: 12, color: "#0a0a0a", fontFamily: "'DM Sans', sans-serif" }}>
-              Rename
-            </button>
-            <button onClick={() => doDeleteLabel(lbl)}
-              style={{ display: "block", width: "100%", textAlign: "left", padding: "7px 12px", background: "none", border: "none", cursor: "pointer", fontSize: 12, color: "#dc2626", fontFamily: "'DM Sans', sans-serif" }}>
-              Delete
-            </button>
-          </div>
-        );
-      })()}
-
-      {/* Proposal context menu */}
-      {proposalMenu && (() => {
-        const p = proposals[proposalMenu.idx];
-        if (!p) return null;
-        return (
-          <div
-            style={{
-              position: "fixed", zIndex: 100, left: proposalMenu.clientX, top: proposalMenu.clientY,
-              background: "#ffffff", border: "1px solid #8B5CF640", borderRadius: 8,
-              boxShadow: "0 4px 16px rgba(139,92,246,0.12)", padding: "4px 0", minWidth: 170,
-            }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div style={{ padding: "4px 12px 6px", fontSize: 10, color: "#8B5CF6", fontFamily: "'DM Mono', monospace", borderBottom: "1px solid #f0efe9", display: "flex", alignItems: "center", gap: 5 }}>
-              <span>VLM proposal</span>
-              <span style={{ fontSize: 7, background: "#8B5CF615", padding: "1px 4px", borderRadius: 3, fontWeight: 700 }}>BETA</span>
-            </div>
-            <div style={{ padding: "4px 12px 4px", fontSize: 9, color: "#b0afa8", fontFamily: "'DM Mono', monospace" }}>
-              "{p.label_name}" · {p.duration_ms.toFixed(0)} ms · {p.frame_count} frame{p.frame_count !== 1 ? "s" : ""}
-            </div>
-            <button
-              onClick={() => { setProposalMenu(null); acceptProposal(proposalMenu.idx); }}
-              style={{ display: "block", width: "100%", textAlign: "left", padding: "7px 12px", background: "none", border: "none", cursor: "pointer", fontSize: 12, color: "#1D9E75", fontFamily: "'DM Sans', sans-serif" }}>
-              ✓ Accept
-            </button>
-            <button
-              onClick={() => { setProposalMenu(null); discardProposal(proposalMenu.idx); }}
-              style={{ display: "block", width: "100%", textAlign: "left", padding: "7px 12px", background: "none", border: "none", cursor: "pointer", fontSize: 12, color: "#dc2626", fontFamily: "'DM Sans', sans-serif" }}>
-              ✕ Discard
-            </button>
-          </div>
-        );
-      })()}
     </div>
   );
 }
