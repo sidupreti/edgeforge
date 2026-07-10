@@ -2259,6 +2259,7 @@ function FileUploadMode({
                 {dataMode !== "continuous" && (ev.datasetId ? (
                   <button
                     onClick={(e) => { e.stopPropagation(); moveToPool(ev, otherPool); }}
+                    aria-label={`Move ${ev.filename || ev.id} to ${otherPool}`}
                     className="text-[9px] text-gray-400 hover:text-accent border border-gray-200 hover:border-accent/40 rounded px-1.5 py-0.5 transition-colors flex-shrink-0 whitespace-nowrap"
                   >
                     → {otherPool === "test" ? "Test" : "Train"}
