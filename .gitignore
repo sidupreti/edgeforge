@@ -8,6 +8,12 @@
 # testing
 /coverage
 
+# e2e (Playwright) — generated artifacts; the spec + fixture are committed, outputs are not
+/test-results
+/playwright-report
+/e2e/screenshots
+/.playwright-mcp
+
 # production
 /build
 
