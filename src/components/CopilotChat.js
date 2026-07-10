@@ -39,6 +39,7 @@ export default function CopilotChat({
   classes,
   setEvents,
   setClasses,
+  grow = false,   // when true: message area fills available flex space instead of max-h-48
 }) {
   const [input,     setInput]     = useState("");
   const [isLoading, setIsLoading] = useState(false);
@@ -269,7 +270,7 @@ export default function CopilotChat({
   const isEmpty = chatHistory.length === 0 && !isLoading;
 
   return (
-    <div className="flex flex-col gap-2">
+    <div className={`flex flex-col gap-2${grow ? " flex-1 min-h-0" : ""}`}>
       {/* Header */}
       <div className="flex items-center gap-2">
         <div className="w-3.5 h-3.5 rounded-full bg-accent/20 flex items-center justify-center flex-shrink-0">
@@ -280,13 +281,14 @@ export default function CopilotChat({
           />
         </div>
         <span className="text-xs uppercase tracking-widest text-gray-400">Ask Copilot</span>
+        <span className="text-[9px] font-semibold uppercase tracking-widest text-gray-400 bg-gray-100 px-1.5 py-0.5 rounded">Beta</span>
       </div>
 
       {/* Message list */}
       {(chatHistory.length > 0 || isLoading) && (
         <div
           ref={scrollRef}
-          className="flex flex-col gap-2 max-h-48 overflow-y-auto pr-0.5"
+          className={`flex flex-col gap-2 overflow-y-auto pr-0.5${grow ? " flex-1 min-h-0" : " max-h-48"}`}
         >
           {chatHistory.map((msg) => (
             <div

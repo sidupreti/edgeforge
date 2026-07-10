@@ -5,8 +5,6 @@ import API_BASE_URL from "../config";
 
 function ConfusionMatrix({ matrix, classLabels, uncertainCount }) {
   if (!matrix || !classLabels || classLabels.length === 0) return null;
-  const allCols = [...classLabels];
-  if (uncertainCount > 0) allCols.push("Uncertain");
   const maxVal = Math.max(...matrix.flat().filter((v) => isFinite(v)), 1);
   return (
     <div>
@@ -14,7 +12,7 @@ function ConfusionMatrix({ matrix, classLabels, uncertainCount }) {
       <div className="overflow-x-auto">
         <table className="border-collapse text-xs"><thead><tr>
           <th className="px-2 py-1 text-gray-300 font-normal text-right w-20 text-xs">actual ↓ pred →</th>
-          {allCols.map((l) => <th key={l} className={`px-2 py-1 font-semibold text-center min-w-[56px] ${l === "Uncertain" ? "text-amber-500" : "text-gray-500"}`}>{l}</th>)}
+          {classLabels.map((l) => <th key={l} className="px-2 py-1 font-semibold text-center min-w-[56px] text-gray-500">{l}</th>)}
         </tr></thead><tbody>
           {matrix.map((row, ri) => (
             <tr key={ri}>
@@ -25,11 +23,15 @@ function ConfusionMatrix({ matrix, classLabels, uncertainCount }) {
                 return <td key={ci} className="px-2 py-2 text-center font-bold tabular-nums rounded"
                   style={{ backgroundColor: bg, color: ok ? (int_ > 0.4 ? "#065f46" : "#3a3935") : cell > 0 ? "#b91c1c" : "#b0afa8" }}>{cell}</td>;
               })}
-              {uncertainCount > 0 && <td className="px-2 py-2 text-center tabular-nums text-gray-300">—</td>}
             </tr>
           ))}
         </tbody></table>
       </div>
+      {uncertainCount > 0 && (
+        <p className="text-[10px] text-gray-400 mt-2">
+          Counts show each window's best-guess class. <span className="text-amber-500 font-semibold">{uncertainCount}</span> low-confidence window{uncertainCount > 1 ? "s" : ""} (max probability &lt; 60%) are still counted above by their top prediction.
+        </p>
+      )}
     </div>
   );
 }
@@ -164,6 +166,26 @@ export default function ValidateScreen({ projectId, onGoToTrain, savedResult, on
               <p className="text-4xl font-bold text-gray-700 tabular-nums leading-none">{result.n_test_windows}</p>
             </div>
           </div>
+          {(() => {
+            const zeroClasses = (result.per_class || []).filter((c) => c.recall === 0).map((c) => c.label);
+            const smallData = (result.n_test_windows || 0) < 60;
+            if (accPct >= 70 && zeroClasses.length === 0) return null;
+            return (
+              <div className="flex items-start gap-2.5 border border-amber-200 bg-amber-50 rounded-xl p-4 text-xs text-amber-800">
+                <span className="flex-shrink-0 text-sm leading-none mt-0.5">💡</span>
+                <div className="space-y-1">
+                  <p className="font-semibold">Why is accuracy low?</p>
+                  {zeroClasses.length > 0 && (
+                    <p><strong>{zeroClasses.join(" and ")}</strong> {zeroClasses.length > 1 ? "were" : "was"} never predicted correctly — likely being confused with a physically similar activity (e.g. walking↔jogging, sitting↔standing). Look at the confusion matrix rows below to see where they land.</p>
+                  )}
+                  {smallData && (
+                    <p>This is a small test set ({result.n_test_windows} windows). With few examples per class, results swing a lot and under-fit is common — this usually reflects <strong>data quantity, not a broken pipeline</strong>.</p>
+                  )}
+                  <p className="text-amber-700">Try: record longer / more sessions per activity, add more labeled segments, increase training cycles, or confirm the classes are actually separable in the signal.</p>
+                </div>
+              </div>
+            );
+          })()}
           <div className="border border-gray-200 rounded-xl p-5">
             <ConfusionMatrix matrix={result.confusion_matrix} classLabels={result.class_labels} uncertainCount={result.uncertain_count} />
           </div>

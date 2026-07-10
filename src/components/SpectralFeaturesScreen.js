@@ -567,7 +567,7 @@ export default function SpectralFeaturesScreen({ pipelineConfig, setPipelineConf
         </div>
         {selectedRec && (
           <div className="flex items-center gap-2 ml-auto">
-            <span className="text-xs font-bold text-white bg-accent px-2 py-0.5 rounded">{selectedRec.label}</span>
+            <span className="text-xs font-bold text-white bg-accent px-2 py-0.5 rounded">{preview?.label || selectedRec.label}</span>
             {preview && <span className="text-[10px] text-gray-400 tabular-nums">{preview.window_start_ms}–{preview.window_end_ms} ms · {preview.fs} Hz</span>}
           </div>
         )}

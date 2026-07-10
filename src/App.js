@@ -345,6 +345,7 @@ function AppContent() {
           projectId={projectId}
           pipelineConfig={pipelineConfig}
           classes={classes}
+          featureResult={featureResult}
           onRetrain={() => setActiveStep(2)}
           savedClassifierResult={classifierResult}
           onClassifierResult={setClassifierResult}

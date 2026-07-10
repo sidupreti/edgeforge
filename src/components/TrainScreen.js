@@ -99,7 +99,7 @@ function ScoreHistogram({ scores, title }) {
 // ── Main Component ───────────────────────────────────────────────────────────
 
 export default function TrainScreen({
-  projectId, pipelineConfig, classes, onRetrain,
+  projectId, pipelineConfig, classes, featureResult, onRetrain,
   savedClassifierResult, onClassifierResult,
   savedAnomalyResult, onAnomalyResult,
 }) {
@@ -334,7 +334,9 @@ export default function TrainScreen({
 
             {/* Estimated model size (live) */}
             {(() => {
-              const nf = clfFeatures.length > 0 ? clfFeatures.length : allFeatures.length || 99;
+              const nf = clfFeatures.length > 0
+                ? clfFeatures.length
+                : (allFeatures.length || featureResult?.n_features || clfResult?.n_features || 99);
               const nc = allClassNames.length || 3;
               const params = nf * neurons1 + neurons1 * neurons2 + neurons2 * nc;
               const kb = (params * 4 / 1024).toFixed(1);

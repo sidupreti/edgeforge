@@ -62,6 +62,19 @@ function WaveformThumb({ data, color = "#1D9E75", w = 64, h = 28 }) {
 
 // ── CSV parser (browser-side, for preview waveform only) ─────────────────────
 
+// Infer the multiplier that converts this file's timestamp unit → microseconds.
+// Picks µs / ms / s by whichever yields a plausible sensor rate (~0.5–2000 Hz).
+// Without this the preview assumed µs, so a 20 Hz recording whose timestamps are
+// in ms mis-displayed as "20000 Hz · 170 ms" (the backend infers units correctly).
+function _inferTimestampToUs(medianDelta) {
+  if (!(medianDelta > 0)) return 1;              // no info → assume µs
+  for (const toUs of [1, 1_000, 1_000_000]) {    // µs, ms, s
+    const hz = 1_000_000 / (medianDelta * toUs);
+    if (hz >= 0.5 && hz <= 2_000) return toUs;
+  }
+  return 1;                                        // fallback → µs
+}
+
 const UPLOAD_COL_MAP = {
   t: "timestamp", time: "timestamp", ts: "timestamp", time_us: "timestamp",
   timestamp_us: "timestamp",   // native SensorFlow format
@@ -128,7 +141,8 @@ function parseCSVText(text) {
     ax.push(xv);
     ay.push(ayIdx >= 0 ? (parseFloat(parts[ayIdx]) || 0) : 0);
     az.push(azIdx >= 0 ? (parseFloat(parts[azIdx]) || 0) : 0);
-    ts.push(tsIdx >= 0 ? (parseFloat(parts[tsIdx]) || 10000) : 10000);
+    const _tv = tsIdx >= 0 ? parseFloat(parts[tsIdx]) : NaN;   // keep a legit 0 (don't let 0||10000 corrupt it)
+    ts.push(Number.isFinite(_tv) ? _tv : 10000);
     if (actIdx >= 0 && !detectedLabel) {
       const raw = (parts[actIdx] ?? "").replace(/;$/, "").trim();
       detectedLabel = WISDM_ACTIVITY_MAP[raw] ?? (raw || null);
@@ -145,18 +159,20 @@ function parseCSVText(text) {
   const tArr = isAbsolute
     ? ts.slice(1).map((v, i) => v - ts[i])
     : ts;
-  const durationMs = tArr.reduce((s, v) => s + Math.abs(v), 0) / 1000;
-
-  // Per-file sample rate via median consecutive delta (µs) → Hz.
-  // Median is robust to the one corrupted first diff caused by ts[0]=0→10000 fallback.
-  const validDeltas = tArr.filter((d) => d > 0 && d < 2_000_000);
-  let sampleRateHz = null;
+  // Median consecutive delta (robust to gaps), then infer the timestamp unit and
+  // convert both duration and sample rate accordingly.
+  const validDeltas = tArr.filter((d) => d > 0);
+  let medianDelta = null;
   if (validDeltas.length >= 2) {
     const sorted = [...validDeltas].sort((a, b) => a - b);
     const mid = Math.floor(sorted.length / 2);
-    const medianDelta = sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
-    if (medianDelta > 0) sampleRateHz = Math.round((1_000_000 / medianDelta) * 10) / 10;
+    medianDelta = sorted.length % 2 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
   }
+  const toUs = _inferTimestampToUs(medianDelta);   // native timestamp unit → microseconds
+  const durationMs = tArr.reduce((s, v) => s + Math.abs(v), 0) * toUs / 1000;
+  const sampleRateHz = medianDelta > 0
+    ? Math.round((1_000_000 / (medianDelta * toUs)) * 10) / 10
+    : null;
 
   return { ax, ay, az, rowCount: ax.length, durationMs: Math.round(durationMs), detectedLabel, sampleRateHz };
 }
@@ -288,7 +304,7 @@ function SignalPlotRow({ data, color, label, height = 36, startIdx = 0, endIdx }
 
 // ── File detail overlay ───────────────────────────────────────────────────────
 
-function FileDetailPanel({ ev, allEvents, onClose, onAskCopilot, classes }) {
+function FileDetailPanel({ ev, allEvents, onClose, onAskCopilot, classes, setClasses }) {
   const snap  = ev.snapshot ?? {};
   // Use actual channel names from snapshot keys (dynamic, not hardcoded ax/ay/az)
   const axes  = Object.keys(snap).filter((k) => snap[k]?.length > 0);
@@ -368,6 +384,35 @@ function FileDetailPanel({ ev, allEvents, onClose, onAskCopilot, classes }) {
     if (initialLoadRef.current) { initialLoadRef.current = false; return; }
     if (segments.length > 0) debouncedSave();
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [segments]);
+
+  // ── Sync segment labels → App.js classes ────────────────────────────────
+  // Union, not replace: new labels introduced in segments are appended to the
+  // class list; predefined classes are never dropped just because no segment
+  // uses them yet (otherwise labeling the first segment would wipe every other
+  // class out of the dropdown, making them unassignable).
+  useEffect(() => {
+    if (!setClasses || segments.length === 0) return;
+    const segLabels = [...new Set(segments.map(s => s.label).filter(Boolean))];
+    if (segLabels.length === 0) return;
+    const CLASS_PALETTE = ["#1D9E75", "#3B82F6", "#F59E0B", "#EF4444", "#8B5CF6", "#EC4899"];
+    setClasses((prev) => {
+      const existing = prev || [];
+      const have = new Set(existing.map((c) => c.name));
+      const missing = segLabels.filter((l) => !have.has(l));
+      if (missing.length === 0) return existing;
+      const base = existing.length;
+      return [
+        ...existing,
+        ...missing.map((name, i) => ({
+          id: `cls-${name.replace(/\s+/g, "-")}-${base + i}`,
+          name,
+          color: CLASS_PALETTE[(base + i) % CLASS_PALETTE.length],
+          description: "",
+        })),
+      ];
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [segments]);
 
   // ── Label→color map ──────────────────────────────────────────────────────
@@ -1754,6 +1799,7 @@ function FileUploadMode({
           onClose={() => setSelectedEventId(null)}
           onAskCopilot={onAskCopilot}
           classes={classes}
+          setClasses={setClasses}
         />
       )}
 
@@ -1882,7 +1928,9 @@ function FileUploadMode({
               {dragOver ? "Drop to upload" : "Drop CSV files here"}
             </p>
             <p className="text-xs text-gray-400 mt-0.5">
-              Upload CSV files for each class using the buttons in the Classes panel →
+              {dataMode === "continuous"
+                ? "Upload one continuous recording — you'll segment & label it after adding"
+                : "Upload CSV files for each class using the buttons in the Classes panel →"}
             </p>
             <p className="text-xs text-gray-400 mt-0.5">
               CSV with header row, or headerless <code className="text-gray-300">timestamp,v1,v2,...</code>
@@ -1937,7 +1985,7 @@ function FileUploadMode({
 
                 {/* File info */}
                 <div className="flex-1 min-w-0">
-                  {assignedCls && !entry.error ? (
+                  {assignedCls && !entry.error && dataMode !== "continuous" ? (
                     <div className="flex items-center gap-1.5 mb-0.5">
                       <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: assignedCls.color }} />
                       <span className="text-xs font-bold" style={{ color: assignedCls.color }}>{assignedCls.name}</span>
@@ -1946,6 +1994,11 @@ function FileUploadMode({
                   <p className="text-xs text-gray-400 truncate">{entry.name}</p>
                   {entry.error ? (
                     <p className="text-[10px] text-red-500 mt-0.5 leading-tight">{entry.error}</p>
+                  ) : dataMode === "continuous" && entry.parsed ? (
+                    <p className="text-[10px] text-gray-300 mt-0.5 tabular-nums">
+                      {entry.parsed.rowCount} rows · {entry.parsed.durationMs} ms
+                      {entry.parsed.sampleRateHz ? ` · ${entry.parsed.sampleRateHz} Hz` : ""}
+                    </p>
                   ) : !entry.reading && entry.detected === false ? (
                     <p className="text-[10px] text-yellow-600 mt-0.5 leading-tight">
                       No class detected — assigned to {assignedCls?.name ?? "unknown"}. Change if needed.
@@ -1958,8 +2011,8 @@ function FileUploadMode({
                   ) : null}
                 </div>
 
-                {/* Class selector */}
-                {!entry.error && !entry.reading && (
+                {/* Class selector — hidden in continuous mode */}
+                {!entry.error && !entry.reading && dataMode !== "continuous" && (
                   <select
                     value={entry.classId ?? ""}
                     onChange={(e) => setEntryClass(idx, e.target.value)}
@@ -2077,6 +2130,10 @@ function FileUploadMode({
         const allClasses = [...new Set(events.map((e) => e.className))];
         const missingFromTrain = allClasses.filter((c) => !trainClasses.has(c));
 
+        // Continuous mode splits at the window level (per segment), not the file
+        // level — so the file-level Training/Test tabs + Auto-split don't apply.
+        if (dataMode === "continuous") return null;
+
         return (
           <>
             <div className="flex items-center justify-between border-b border-gray-200 mb-1 flex-shrink-0">
@@ -2143,21 +2200,26 @@ function FileUploadMode({
                 <WaveformThumb data={ev.waveform} color={ev.waveColor} />
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-1.5 flex-wrap">
-                    <select
-                      value={ev.classId ?? ""}
-                      onChange={(e) => { e.stopPropagation(); setEventClass(ev.id, e.target.value); }}
-                      onClick={(e) => e.stopPropagation()}
-                      className="text-xs border rounded px-1 py-0.5 focus:outline-none focus:border-accent bg-white flex-shrink-0"
-                      style={{
-                        color: ev.classColor,
-                        borderColor: `${ev.classColor}60`,
-                        maxWidth: "90px",
-                      }}
-                    >
-                      {classes.map((c) => (
-                        <option key={c.id} value={c.id}>{c.name}</option>
-                      ))}
-                    </select>
+                    {/* Continuous recordings are classless — labels come from segments. */}
+                    {dataMode === "continuous" ? (
+                      <span className="text-xs font-semibold text-gray-500 flex-shrink-0">Recording</span>
+                    ) : (
+                      <select
+                        value={ev.classId ?? ""}
+                        onChange={(e) => { e.stopPropagation(); setEventClass(ev.id, e.target.value); }}
+                        onClick={(e) => e.stopPropagation()}
+                        className="text-xs border rounded px-1 py-0.5 focus:outline-none focus:border-accent bg-white flex-shrink-0"
+                        style={{
+                          color: ev.classColor,
+                          borderColor: `${ev.classColor}60`,
+                          maxWidth: "90px",
+                        }}
+                      >
+                        {classes.map((c) => (
+                          <option key={c.id} value={c.id}>{c.name}</option>
+                        ))}
+                      </select>
+                    )}
                     <span className="text-xs text-gray-400 tabular-nums">{ev.duration} ms</span>
                   </div>
                   {ev.filename && (
@@ -2192,8 +2254,9 @@ function FileUploadMode({
                     Include
                   </button>
                 )}
-                {/* Move to other pool — always visible */}
-                {ev.datasetId ? (
+                {/* Move to other pool — file-level split is samples-mode only
+                    (continuous mode splits at the window level per segment). */}
+                {dataMode !== "continuous" && (ev.datasetId ? (
                   <button
                     onClick={(e) => { e.stopPropagation(); moveToPool(ev, otherPool); }}
                     className="text-[9px] text-gray-400 hover:text-accent border border-gray-200 hover:border-accent/40 rounded px-1.5 py-0.5 transition-colors flex-shrink-0 whitespace-nowrap"
@@ -2202,7 +2265,7 @@ function FileUploadMode({
                   </button>
                 ) : (
                   <span className="text-[9px] text-gray-300 flex-shrink-0">no index</span>
-                )}
+                ))}
                 <button
                   onClick={(e) => { e.stopPropagation(); setEvents((prev) => prev.filter((e2) => e2.id !== ev.id)); }}
                   className="text-gray-300 hover:text-red-400 transition-colors text-base leading-none px-1 flex-shrink-0"
@@ -2542,7 +2605,25 @@ export default function CollectScreen({ config, setConfig, projectId, classes, s
 
           {/* Class list — scrollable if many classes */}
           <div className="divide-y divide-gray-50 overflow-y-auto" style={{ maxHeight: "220px" }}>
-            {classes.map((cls) => {
+            {effectiveDataMode === "continuous" ? (
+              /* ── Continuous mode: segment-derived class stats ── */
+              classes.length > 0 ? classes.map((cls) => (
+                <div key={cls.id} className="px-4 py-2.5">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: cls.color }} />
+                    <span className="text-xs font-semibold text-gray-700">{cls.name}</span>
+                    <span className="text-[10px] text-gray-400 ml-auto">segment label</span>
+                  </div>
+                </div>
+              )) : (
+                <div className="px-4 py-6 text-center">
+                  <p className="text-[10px] text-gray-300">Labels derived from segments</p>
+                  <p className="text-[10px] text-gray-300 mt-1">Open a recording and label segments</p>
+                </div>
+              )
+            ) : (
+            /* ── Samples mode: per-file class counters (original) ── */
+            classes.map((cls) => {
               const count  = events.filter((e) => e.classId === cls.id).length;
               const pct    = Math.min(100, (count / TARGET_COUNT) * 100);
               const active = cls.id === activeClassId;
@@ -2550,7 +2631,6 @@ export default function CollectScreen({ config, setConfig, projectId, classes, s
               return (
                 <div key={cls.id} className={`transition-colors ${active ? "bg-accent/5" : ""}`}>
                   {isDeleting ? (
-                    /* ── inline delete confirmation ── */
                     <div className="px-4 py-3">
                       <p className="text-xs text-red-600 leading-snug mb-2">
                         Delete <strong>{cls.name}</strong> and its {count} event{count !== 1 ? "s" : ""}?
@@ -2571,9 +2651,7 @@ export default function CollectScreen({ config, setConfig, projectId, classes, s
                       </div>
                     </div>
                   ) : (
-                    /* ── normal class row ── */
                     <div className="relative group/cls">
-                      {/* Hidden file input for per-class upload */}
                       <input
                         ref={(el) => { if (el) classInputRefs.current[cls.id] = el; }}
                         type="file"
@@ -2585,7 +2663,6 @@ export default function CollectScreen({ config, setConfig, projectId, classes, s
                           e.target.value = "";
                         }}
                       />
-                      {/* Clickable area — div so we can nest real buttons */}
                       <div
                         role="button"
                         tabIndex={0}
@@ -2603,7 +2680,6 @@ export default function CollectScreen({ config, setConfig, projectId, classes, s
                             </span>
                           </div>
                           <div className="flex items-center gap-2 flex-shrink-0 ml-1">
-                            {/* Upload button */}
                             <button
                               onClick={(e) => { e.stopPropagation(); classInputRefs.current[cls.id]?.click(); }}
                               disabled={!!classUploading[cls.id]}
@@ -2654,7 +2730,8 @@ export default function CollectScreen({ config, setConfig, projectId, classes, s
                   )}
                 </div>
               );
-            })}
+            })
+            )}
           </div>
         </div>
 
