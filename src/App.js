@@ -128,6 +128,9 @@ function AppContent() {
   const [classifierResult,  setClassifierResult]  = useState(saved?.classifierResult  ?? null);
   const [anomalyTrainResult,setAnomalyTrainResult]= useState(saved?.anomalyTrainResult?? null);
   const [anomalyTestResult, setAnomalyTestResult] = useState(saved?.anomalyTestResult ?? null);
+  const [exportPrecision,   setExportPrecision]   = useState(saved?.exportPrecision   ?? "int8");
+  const [exportPreset,      setExportPreset]      = useState(saved?.exportPreset      ?? "balanced");
+  const [quantResult,       setQuantResult]       = useState(saved?.quantResult       ?? null);
   const [pendingFlash,      setPendingFlash]      = useState(null); // eslint-disable-line no-unused-vars
   const [pipelineSubPage,   setPipelineSubPage]   = useState("blocks"); // "blocks" | "spectral"
   const [submitLoading,     setSubmitLoading]     = useState(false);
@@ -158,13 +161,17 @@ function AppContent() {
         classifierResult,
         anomalyTrainResult,
         anomalyTestResult,
+        exportPrecision,
+        exportPreset,
+        quantResult,
       }));
     } catch {
       // Ignore quota errors
     }
   }, [activeStep, config, classes, activeClassId, events, analyzeResult, separabilityNote,
       pipelineConfig, chatHistory, aiPipelineDesign, aiConfiguredBlocks, pipelineBlocks, trainResults,
-      featureResult, classifierResult, anomalyTrainResult, anomalyTestResult]);
+      featureResult, classifierResult, anomalyTrainResult, anomalyTestResult,
+      exportPrecision, exportPreset, quantResult]);
 
   // ── Reset project ─────────────────────────────────────────────────────────
   const handleReset = useCallback(async () => {
@@ -351,6 +358,12 @@ function AppContent() {
           onClassifierResult={setClassifierResult}
           savedAnomalyResult={anomalyTrainResult}
           onAnomalyResult={setAnomalyTrainResult}
+          exportPrecision={exportPrecision}
+          setExportPrecision={setExportPrecision}
+          exportPreset={exportPreset}
+          setExportPreset={setExportPreset}
+          quantResult={quantResult}
+          setQuantResult={setQuantResult}
         />
       );
     }
@@ -368,6 +381,10 @@ function AppContent() {
       return (
         <ExportScreen
           projectId={projectId}
+          exportPrecision={exportPrecision}
+          setExportPrecision={setExportPrecision}
+          exportPreset={exportPreset}
+          quantResult={quantResult}
         />
       );
     }

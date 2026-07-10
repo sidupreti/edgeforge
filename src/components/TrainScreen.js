@@ -98,10 +98,23 @@ function ScoreHistogram({ scores, title }) {
 
 // ── Main Component ───────────────────────────────────────────────────────────
 
+// Optimization presets — wired ONLY to real levers (quantization + feature count),
+// not imaginary compiler dials. featureFrac trims the classifier to the top-N most
+// important features (a genuine model-size lever) on the next retrain.
+const PRESETS = {
+  float32:  { label: "Float32",  precision: "float32", featureFrac: 1.0,  hint: "No quantization — largest, reference accuracy" },
+  balanced: { label: "Balanced", precision: "int8",    featureFrac: 1.0,  hint: "INT8, all features — ~4× smaller, best accuracy/size trade" },
+  smallest: { label: "Smallest", precision: "int8",    featureFrac: 0.6,  hint: "INT8 + trim to top 60% features — minimum flash" },
+  fastest:  { label: "Fastest",  precision: "int8",    featureFrac: 0.75, hint: "INT8 + trim to top 75% features — fewest MACs / lowest latency" },
+};
+
 export default function TrainScreen({
   projectId, pipelineConfig, classes, featureResult, onRetrain,
   savedClassifierResult, onClassifierResult,
   savedAnomalyResult, onAnomalyResult,
+  exportPrecision = "int8", setExportPrecision,
+  exportPreset = "balanced", setExportPreset,
+  quantResult, setQuantResult,
 }) {
   const [blockType, setBlockType] = useState("classification");
   const [modelType, setModelType] = useState("mlp");  // "mlp" | "rf" | "logistic"
@@ -121,6 +134,7 @@ export default function TrainScreen({
   const [clfFilter, setClfFilter] = useState("");
   const [training, setTraining] = useState(false);
   const [error, setError] = useState(null);
+  const [quantizing, setQuantizing] = useState(false);
 
   // Persisted results — hydrate from props
   const [clfResult, setClfResult] = useState(savedClassifierResult || null);
@@ -161,8 +175,44 @@ export default function TrainScreen({
       const r = { type: "classification", ...data };
       setClfResult(r);
       onClassifierResult?.(r);
+      setQuantResult?.(null);  // footprint is stale after a retrain
     } catch (err) { setError(err.message); }
     finally { setTraining(false); }
+  }
+
+  // INT8 quantization: measure real before/after size, latency, accuracy delta.
+  async function handleQuantize() {
+    setQuantizing(true); setError(null);
+    try {
+      const res = await fetch(`${API_BASE_URL}/features/quantize`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ project_id: projectId }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.detail || `Server ${res.status}`);
+      setQuantResult?.(data);
+    } catch (err) { setError(err.message); }
+    finally { setQuantizing(false); }
+  }
+
+  // Presets wire to precision + feature count (both real levers). Feature trim
+  // applies on the next retrain; precision applies at export/quantize time.
+  async function applyPreset(key) {
+    const p = PRESETS[key];
+    if (!p) return;
+    setExportPreset?.(key);
+    setExportPrecision?.(p.precision);
+    if (p.featureFrac >= 1.0) { setClfFeatures([]); return; }
+    let feats = allFeatures;
+    if (feats.length === 0) {
+      const data = await fetchFeatureList();
+      feats = (data?.all_features || []).map((name, i) => ({ name, importance: data.all_importances?.[i] ?? 0 }));
+    }
+    if (feats.length > 0) {
+      const sorted = feats.slice().sort((a, b) => b.importance - a.importance);
+      const k = Math.max(1, Math.round(feats.length * p.featureFrac));
+      setClfFeatures(sorted.slice(0, k).map((f) => f.name));
+    }
   }
 
   async function fetchFeatureList() {
@@ -238,6 +288,80 @@ export default function TrainScreen({
 
   const valAccPct = result?.val_accuracy != null ? Math.round(result.val_accuracy * 100) : null;
   const trainAccPct = result?.train_accuracy != null ? Math.round(result.train_accuracy * 100) : null;
+
+  // Deployment footprint + optimization presets. showMeasure=true renders the
+  // INT8 quantize action + before/after table (needs a trained model).
+  function renderFootprint(showMeasure) {
+    const nf = clfFeatures.length > 0
+      ? clfFeatures.length
+      : (featureResult?.n_features || clfResult?.n_features || allFeatures.length || 99);
+    const nc = allClassNames.length || 3;
+    const params = nf * neurons1 + neurons1 * neurons2 + neurons2 * nc;
+    const bytesPerParam = exportPrecision === "int8" ? 1 : 4;
+    const kb = (params * bytesPerParam / 1024).toFixed(1);
+    const q = quantResult && quantResult.quantizable ? quantResult : null;
+    const fmtB = (b) => b == null ? "—" : (b / 1024).toFixed(2) + " KB";
+    const fmtP = (a) => a == null ? "—" : (a * 100).toFixed(1) + "%";
+    return (
+      <div className="w-full max-w-lg border border-gray-200 rounded-xl p-3 space-y-2.5" data-testid="footprint-panel">
+        <div className="flex items-center justify-between">
+          <span className="text-[10px] text-gray-500 uppercase tracking-widest font-semibold">Deployment footprint</span>
+          <span className="text-[10px] text-gray-400 tabular-nums">
+            est. ~{kb} KB · {exportPrecision === "int8" ? "INT8" : "float32"} · {nf}f × {neurons1}→{neurons2}→{nc}
+          </span>
+        </div>
+        <div>
+          <div className="flex gap-1.5 flex-wrap" data-testid="preset-selector">
+            {Object.entries(PRESETS).map(([key, p]) => (
+              <button key={key} onClick={() => applyPreset(key)} title={p.hint}
+                className={`text-[10px] font-semibold rounded px-2 py-1 border transition-colors ${
+                  exportPreset === key ? "border-accent text-accent bg-accent/5" : "border-gray-200 text-gray-500 hover:text-gray-700"}`}>
+                {p.label}
+              </button>
+            ))}
+          </div>
+          <p className="text-[9px] text-gray-400 mt-1 leading-relaxed">{PRESETS[exportPreset]?.hint}</p>
+        </div>
+        {showMeasure && (
+          <div className="pt-1 border-t border-gray-100">
+            <button onClick={handleQuantize} disabled={!clfResult || quantizing}
+              className="text-[10px] font-semibold text-accent border border-accent/30 rounded px-2 py-1 hover:bg-accent/5 transition-colors disabled:opacity-40">
+              {quantizing ? "Quantizing…" : q ? "Re-measure INT8 footprint" : "Quantize & measure INT8"}
+            </button>
+            {q && (
+              <table className="w-full text-[10px] mt-2 tabular-nums" data-testid="footprint-table">
+                <thead><tr className="text-gray-400 uppercase tracking-wider text-[9px]">
+                  <th className="text-left pb-1"></th><th className="text-right pb-1">float32</th>
+                  <th className="text-right pb-1">int8</th><th className="text-right pb-1">Δ</th>
+                </tr></thead>
+                <tbody className="text-gray-600">
+                  <tr><td className="text-gray-400">Model size</td>
+                    <td className="text-right">{fmtB(q.float32.bytes)}</td>
+                    <td className="text-right font-semibold text-accent">{fmtB(q.int8.bytes)}</td>
+                    <td className="text-right">{q.size_reduction ? `${q.size_reduction}× smaller` : "—"}</td></tr>
+                  <tr><td className="text-gray-400">Est. latency</td>
+                    <td className="text-right">{q.float32.latency_ms} ms</td>
+                    <td className="text-right font-semibold text-accent">{q.int8.latency_ms} ms</td>
+                    <td className="text-right">{q.float32.latency_ms && q.int8.latency_ms ? `${(q.float32.latency_ms / q.int8.latency_ms).toFixed(1)}× faster` : "—"}</td></tr>
+                  <tr><td className="text-gray-400">Test accuracy</td>
+                    <td className="text-right">{fmtP(q.float32.accuracy)}</td>
+                    <td className="text-right font-semibold text-accent">{fmtP(q.int8.accuracy)}</td>
+                    <td className={`text-right ${q.accuracy_delta > 0 ? "text-emerald-600" : q.accuracy_delta < 0 ? "text-amber-600" : "text-gray-400"}`}>
+                      {q.accuracy_delta == null ? "—" : `${q.accuracy_delta >= 0 ? "+" : ""}${(q.accuracy_delta * 100).toFixed(1)} pts`}</td></tr>
+                </tbody>
+              </table>
+            )}
+            {q && (
+              <p className="text-[9px] text-gray-400 mt-1 leading-relaxed">
+                Latency is an estimate ({q.macs?.toLocaleString()} MACs @ {(q.clock_hz / 1e6).toFixed(0)} MHz; int8 ~1 cyc/MAC vs float32 ~4).
+                {q.int8?.pred_agreement != null && ` int8 agrees with float32 on ${(q.int8.pred_agreement * 100).toFixed(1)}% of test windows.`}
+              </p>
+            )}
+          </div>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col min-h-0 max-w-4xl mx-auto w-full">
@@ -332,20 +456,8 @@ export default function TrainScreen({
               )}
             </div>
 
-            {/* Estimated model size (live) */}
-            {(() => {
-              const nf = clfFeatures.length > 0
-                ? clfFeatures.length
-                : (allFeatures.length || featureResult?.n_features || clfResult?.n_features || 99);
-              const nc = allClassNames.length || 3;
-              const params = nf * neurons1 + neurons1 * neurons2 + neurons2 * nc;
-              const kb = (params * 4 / 1024).toFixed(1);
-              return (
-                <p className="text-[10px] text-gray-400 tabular-nums">
-                  Est. model: ~{kb} KB ({nf} features × {neurons1} → {neurons2} → {nc})
-                </p>
-              );
-            })()}
+            {/* Deployment footprint + presets (measurement shown in results view) */}
+            {modelType === "mlp" && renderFootprint(false)}
 
             {/* Optional feature trimmer (collapsed by default) */}
             <div className="w-full max-w-lg">
@@ -603,6 +715,7 @@ export default function TrainScreen({
               </tbody></table>
             </div>
           )}
+          {modelType === "mlp" && renderFootprint(true)}
           <div className="flex pb-2"><button onClick={() => { setClfResult(null); onClassifierResult?.(null); setError(null); }}
             className="px-5 py-2 rounded border border-gray-300 text-sm text-gray-600 hover:border-gray-400 transition-colors">← Retrain</button></div>
         </div>
