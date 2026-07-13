@@ -531,7 +531,12 @@ export default function LandingPage() {
           <li><a href="#features">Features</a></li>
           <li><a href="#how-it-works">How it works</a></li>
           <li><a href="#pricing">Get started</a></li>
-          <li><Link to="/optimize" style={{ color: "#6b6a63", textDecoration: "none", fontSize: "14px" }}>Vision Optimizer</Link></li>
+          {/* Staged rollout (Option B): shown in local dev + when explicitly enabled;
+              hidden on the public prod build until the ForgeOpt backend is hosted (Option A).
+              The /optimize route stays reachable by direct URL for demos. */}
+          {(process.env.REACT_APP_SHOW_OPTIMIZER === "true" || process.env.NODE_ENV === "development") && (
+            <li><Link to="/optimize" style={{ color: "#6b6a63", textDecoration: "none", fontSize: "14px" }}>Vision Optimizer</Link></li>
+          )}
           <li><Link to="/contact" style={{ color: "#6b6a63", textDecoration: "none", fontSize: "14px" }}>Contact</Link></li>
           <li>
             <Link to="/app" className="nav-cta">Try free →</Link>
@@ -570,12 +575,14 @@ export default function LandingPage() {
               </svg>
             </a>
           </div>
-          <p style={{ marginTop: "18px", fontSize: "14px", color: "#6b6a63" }}>
-            Have a computer-vision model instead?{" "}
-            <Link to="/optimize" style={{ color: "#0a0a0a", fontWeight: 600, textDecoration: "underline", textUnderlineOffset: "3px" }}>
-              Shrink it for the edge →
-            </Link>
-          </p>
+          {(process.env.REACT_APP_SHOW_OPTIMIZER === "true" || process.env.NODE_ENV === "development") && (
+            <p style={{ marginTop: "18px", fontSize: "14px", color: "#6b6a63" }}>
+              Have a computer-vision model instead?{" "}
+              <Link to="/optimize" style={{ color: "#0a0a0a", fontWeight: 600, textDecoration: "underline", textUnderlineOffset: "3px" }}>
+                Shrink it for the edge →
+              </Link>
+            </p>
+          )}
         </div>
       </section>
 
