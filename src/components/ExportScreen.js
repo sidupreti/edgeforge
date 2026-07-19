@@ -107,14 +107,24 @@ export default function ExportScreen({ projectId, exportPrecision = "int8", setE
           <div className="border border-gray-200 rounded-xl p-5">
             <p className="text-xs text-gray-400 uppercase tracking-widest mb-4">Trained Project</p>
             <div className="grid grid-cols-2 gap-x-12 gap-y-3">
-              {[
-                { label: "Classes", value: summary.classes.join(", ") },
-                { label: "Features", value: `${summary.n_features} (${summary.fft_length}-pt FFT)` },
-                { label: "Architecture", value: summary.layers.join(" → ") },
-                { label: "Sample rate", value: `${summary.sample_rate_hz} Hz` },
-                { label: "Filter", value: summary.filter_type === "none" ? "None" : `${summary.filter_type}-pass ${summary.cutoff_hz} Hz order ${summary.order}` },
-                { label: "Window", value: `${summary.window_ms} ms` },
-              ].map(({ label, value }) => (
+              {(summary.modality === "image"
+                ? [
+                    { label: "Classes", value: summary.classes.join(", ") },
+                    { label: "Features", value: `${summary.n_features} (${summary.image_block === "transfer" ? "MobileNetV2 embedding" : "raw pixels"})` },
+                    { label: "Architecture", value: summary.layers.join(" → ") },
+                    { label: "Input", value: summary.image_block === "transfer" ? "224×224 RGB (backbone)" : `${summary.image_size}×${summary.image_size} ${summary.image_grayscale ? "grayscale" : "RGB"}` },
+                    { label: "Learning block", value: summary.image_block === "transfer" ? "Transfer learning" : "Raw pixels" },
+                    { label: "Modality", value: "Image classification" },
+                  ]
+                : [
+                    { label: "Classes", value: summary.classes.join(", ") },
+                    { label: "Features", value: `${summary.n_features} (${summary.fft_length}-pt FFT)` },
+                    { label: "Architecture", value: summary.layers.join(" → ") },
+                    { label: "Sample rate", value: `${summary.sample_rate_hz} Hz` },
+                    { label: "Filter", value: summary.filter_type === "none" ? "None" : `${summary.filter_type}-pass ${summary.cutoff_hz} Hz order ${summary.order}` },
+                    { label: "Window", value: `${summary.window_ms} ms` },
+                  ]
+              ).map(({ label, value }) => (
                 <div key={label}>
                   <p className="text-xs text-gray-400 mb-0.5">{label}</p>
                   <p className="text-sm font-semibold text-gray-700">{value}</p>
