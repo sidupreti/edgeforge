@@ -10,6 +10,8 @@ import SpectralFeaturesScreen from "./components/SpectralFeaturesScreen";
 import TrainScreen from "./components/TrainScreen";
 import ValidateScreen from "./components/ValidateScreen";
 import ExportScreen from "./components/ExportScreen";
+import ImageCollectScreen from "./components/ImageCollectScreen";
+import ImagePipelineScreen from "./components/ImagePipelineScreen";
 import PlaceholderScreen from "./components/PlaceholderScreen";
 import FlowFieldBackground from "./components/FlowFieldBackground";
 import NewOnboarding from "./components/NewOnboarding";
@@ -49,6 +51,7 @@ const INITIAL_CONFIG = {
   hardwarePreprocessing:  { type: "none" },
   dataMode:               "",   // "" = unset, "samples" = pre-labeled, "continuous" = continuous recording
   collectMethod:          "",   // "" = unset, "upload" = CSV upload, "serial" = live serial capture
+  modality:               "sensor",  // "sensor" = time-series | "image" = image classification
 };
 
 const INITIAL_PIPELINE_CONFIG = {
@@ -287,6 +290,16 @@ function AppContent() {
       );
     }
     if (currentKey === "collect") {
+      if (config.modality === "image") {
+        return (
+          <ImageCollectScreen
+            config={config}
+            projectId={projectId}
+            classes={classes}
+            setClasses={setClasses}
+          />
+        );
+      }
       return (
         <CollectScreen
           config={config}
@@ -310,6 +323,17 @@ function AppContent() {
       );
     }
     if (currentKey === "pipeline") {
+      if (config.modality === "image") {
+        return (
+          <ImagePipelineScreen
+            projectId={projectId}
+            savedResult={featureResult}
+            onResult={setFeatureResult}
+            onBack={goBack}
+            onNext={() => setActiveStep(3)}
+          />
+        );
+      }
       if (pipelineSubPage === "spectral") {
         return (
           <SpectralFeaturesScreen
