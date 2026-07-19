@@ -418,14 +418,23 @@ function FileDetailPanel({ ev, allEvents, onClose, onAskCopilot, classes, setCla
   // ── Label→color map ──────────────────────────────────────────────────────
   const labelColorMap = React.useMemo(() => {
     const map = {};
-    const allLabels = [];
+    // Prefer the app-level class color so a class shows the SAME color in the
+    // segment bar/table as in the CLASSES panel. Labels not in the class list
+    // fall back to the palette (offset past the defined class colors).
+    const byName = {};
+    (classes || []).forEach((c) => { if (c?.name) byName[c.name] = c.color; });
+    const extraLabels = [];
     for (const seg of segments) {
-      if (seg.label && !allLabels.includes(seg.label)) allLabels.push(seg.label);
+      if (!seg.label) continue;
+      if (byName[seg.label]) { map[seg.label] = byName[seg.label]; }
+      else if (!extraLabels.includes(seg.label)) { extraLabels.push(seg.label); }
     }
-    allLabels.forEach((lbl, idx) => { map[lbl] = SEG_COLORS[idx % SEG_COLORS.length]; });
+    extraLabels.forEach((lbl, idx) => {
+      map[lbl] = SEG_COLORS[((classes ? classes.length : 0) + idx) % SEG_COLORS.length];
+    });
     return map;
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [segments]);
+  }, [segments, classes]);
 
   function getSegColor(seg) {
     return seg.label ? (labelColorMap[seg.label] || UNLABELED_COLOR) : UNLABELED_COLOR;

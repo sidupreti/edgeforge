@@ -256,15 +256,20 @@ export default function NewOnboarding({ onComplete }) {
   const [classes,      setClasses]      = useState("");
   const [dataMode,     setDataMode]     = useState("");  // "samples" | "continuous"
   const [collectMethod, setCollectMethod] = useState("upload"); // "upload" | "serial"
+  const [modality,     setModality]     = useState("sensor"); // "sensor" | "image"
   const [error,        setError]        = useState("");
+  const isImage = modality === "image";
 
   function handleSubmit(e) {
     e.preventDefault();
     if (!projectName.trim()) { setError("Please name your project."); return; }
-    if (!dataMode)       { setError("Please select how your data is organized."); return; }
-    // Classes required for pre-labeled samples, optional for continuous
-    if (dataMode === "samples" && !classes.trim()) { setError("Please name at least one class."); return; }
+    if (!isImage && !dataMode) { setError("Please select how your data is organized."); return; }
+    // Classes required for pre-labeled samples and images, optional for continuous
+    if ((isImage || dataMode === "samples") && !classes.trim()) { setError("Please name at least one class."); return; }
     setError("");
+    // Images are always per-class file uploads → reuse the samples/upload data path.
+    const effDataMode = isImage ? "samples" : dataMode;
+    const effCollect  = isImage ? "upload"  : collectMethod;
 
     const classNames = classes.trim()
       ? classes.split(",").map((s) => s.trim().toLowerCase()).filter(Boolean)
@@ -288,8 +293,9 @@ export default function NewOnboarding({ onComplete }) {
       targetMcu:              resolvedMcu,
       applicationDescription: projectName.trim(),
       hardwarePreprocessing:  { type: "none" },
-      dataMode,
-      collectMethod,
+      dataMode:               effDataMode,
+      collectMethod:          effCollect,
+      modality,
     };
 
     onComplete(finalConfig, finalClasses);
@@ -356,8 +362,28 @@ export default function NewOnboarding({ onComplete }) {
             )}
           </QuestionBlock>
 
+          {/* Q2.5 — Data type / modality */}
+          <QuestionBlock index={2} question="What kind of data are you classifying?">
+            <div className="grid grid-cols-2 gap-3">
+              {[
+                { id: "sensor", title: "Sensor time-series", sub: "Accelerometer, IMU, audio, analog — CSV recordings" },
+                { id: "image", title: "Images", sub: "Photos per class — pixel or transfer-learning features" },
+              ].map(({ id, title, sub }) => (
+                <button key={id} type="button" onClick={() => setModality(id)}
+                  className="flex flex-col items-start gap-1.5 p-4 rounded-xl border-2 transition-colors text-left"
+                  style={{
+                    borderColor: modality === id ? "#1D9E75" : "#d8d7d0",
+                    background: modality === id ? "rgba(29,158,117,0.05)" : "#ffffff",
+                  }}>
+                  <span className="text-sm font-semibold" style={{ color: modality === id ? "#1D9E75" : "#0a0a0a" }}>{title}</span>
+                  <span className="text-xs text-gray-400 leading-relaxed">{sub}</span>
+                </button>
+              ))}
+            </div>
+          </QuestionBlock>
+
           {/* Q3 — Classes (required for samples, optional/deferred for continuous) */}
-          <QuestionBlock index={2} question={
+          <QuestionBlock index={3} question={
             dataMode === "continuous"
               ? "Name your classes (optional — you can define them later when labeling segments)."
               : "Name your classification classes, separated by commas."
@@ -395,8 +421,9 @@ export default function NewOnboarding({ onComplete }) {
             )}
           </QuestionBlock>
 
-          {/* Q4 — Data organization mode */}
-          <QuestionBlock index={3} question="How is your data organized?">
+          {/* Q4 — Data organization mode (sensor only; images are per-class uploads) */}
+          {!isImage && (
+          <QuestionBlock index={4} question="How is your data organized?">
             <div className="grid grid-cols-2 gap-3">
               {[
                 { id: "samples", title: "Pre-labeled samples", sub: "Separate files, each one example of a class" },
@@ -414,9 +441,11 @@ export default function NewOnboarding({ onComplete }) {
               ))}
             </div>
           </QuestionBlock>
+          )}
 
           {/* Q5 — Collection method */}
-          <QuestionBlock index={4} question="How will you collect data?">
+          {!isImage && (
+          <QuestionBlock index={5} question="How will you collect data?">
             <div className="grid grid-cols-2 gap-3">
               {[
                 { id: "upload", title: "Upload CSV", sub: "Upload recorded data files from your computer" },
@@ -434,6 +463,7 @@ export default function NewOnboarding({ onComplete }) {
               ))}
             </div>
           </QuestionBlock>
+          )}
 
           {/* ── Error ────────────────────────────────────────────────────── */}
           {error && (
