@@ -88,6 +88,12 @@ export default function CopilotChat({
           pipeline_config:      pipelineConfig ?? undefined,
           use_label_tools:      useLabelTools,
           visible_dataset_ids:  visibleDatasetIds,
+          // prior turns for follow-up questions (chatHistory here excludes the
+          // just-sent message; keep only plain role/content pairs)
+          history:              (chatHistory ?? [])
+                                  .filter((m) => m.type !== "confirm_card" && m.content)
+                                  .slice(-8)
+                                  .map((m) => ({ role: m.role, content: m.content })),
         }),
       });
       if (!res.ok) throw new Error(`API ${res.status}`);
