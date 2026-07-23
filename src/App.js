@@ -18,6 +18,7 @@ import NewOnboarding from "./components/NewOnboarding";
 import LandingPage from "./components/LandingPage";
 import ContactPage from "./components/ContactPage";
 import VisionOptimizer from "./components/VisionOptimizer";
+import { TermsOfService, PrivacyPolicy } from "./components/Legal";
 
 const STEPS = [
   { key: "setup",    label: "Setup" },
@@ -107,6 +108,9 @@ export default function App() {
       <Route path="/app/*" element={<AppContent />} />
       {/* Vision/CNN optimization track — fully isolated from the 6-step sensor flow */}
       <Route path="/optimize" element={<VisionOptimizer />} />
+      {/* Legal */}
+      <Route path="/terms" element={<TermsOfService />} />
+      <Route path="/privacy" element={<PrivacyPolicy />} />
       {/* Catch-all: redirect unknown paths to landing */}
       <Route path="*" element={<LandingPage />} />
     </Routes>

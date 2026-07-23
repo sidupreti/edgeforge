@@ -164,7 +164,7 @@ const CSS = `
 
 function LogoSvg({ size = 34 }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 36 36" fill="none" aria-label="SensorFlow logo">
+    <svg width={size} height={size} viewBox="0 0 36 36" fill="none" aria-label="EdgeForge logo">
       <rect x="10" y="10" width="16" height="16" rx="2.5" fill="#0a0a0a"/>
       <rect x="13" y="13" width="4" height="4" rx="0.6" fill="white"/>
       <rect x="19" y="13" width="4" height="4" rx="0.6" fill="white" opacity="0.75"/>
@@ -234,7 +234,7 @@ export default function ContactPage() {
       <nav className="sf-nav">
         <Link to="/" className="logo-wrap">
           <LogoSvg size={34} />
-          <span className="logo-text">SensorFlow</span>
+          <span className="logo-text">EdgeForge</span>
         </Link>
         <ul className="nav-links">
           <li><Link to="/#features">Features</Link></li>
@@ -334,12 +334,14 @@ export default function ContactPage() {
       <footer>
         <div className="footer-left">
           <LogoSvg size={24} />
-          <span className="footer-copy">© 2026 SensorFlow · Cambridge, MA</span>
+          <span className="footer-copy">© 2026 EdgeForge · Cambridge, MA</span>
         </div>
         <ul className="footer-links">
           <li><Link to="/">Home</Link></li>
           <li><Link to="/app">Launch app</Link></li>
           <li><Link to="/contact">Contact</Link></li>
+          <li><Link to="/terms">Terms</Link></li>
+          <li><Link to="/privacy">Privacy</Link></li>
         </ul>
       </footer>
     </div>

@@ -321,7 +321,7 @@ export default function NewOnboarding({ onComplete }) {
               letterSpacing: "-0.03em",
             }}
           >
-            SENSORFLOW
+            EDGEFORGE
           </h1>
           <span className="animate-underline-grow" style={{ width: 120 }} />
           <p className="text-sm mt-3 tracking-wider" style={{ color: "#8a8982", fontFamily: "'DM Mono', monospace", fontSize: "12px" }}>

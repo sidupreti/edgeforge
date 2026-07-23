@@ -12,7 +12,7 @@ const STEPS = [
 /* Chip-interconnect logo SVG */
 function LogoMark({ size = 28 }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 36 36" fill="none" aria-label="SensorFlow logo">
+    <svg width={size} height={size} viewBox="0 0 36 36" fill="none" aria-label="EdgeForge logo">
       <rect x="10" y="10" width="16" height="16" rx="2.5" fill="#0a0a0a"/>
       <rect x="13" y="13" width="4" height="4" rx="0.6" fill="white"/>
       <rect x="19" y="13" width="4" height="4" rx="0.6" fill="white" opacity="0.75"/>
@@ -58,7 +58,7 @@ export default function Sidebar({ activeStep, onResetRequest, onOpenSettings }) 
               letterSpacing: "-0.02em",
             }}
           >
-            SensorFlow
+            EdgeForge
           </span>
           <p
             className="text-xs mt-0.5"
