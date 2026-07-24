@@ -1,5 +1,6 @@
 import React, { useEffect, useState, useCallback } from "react";
 import { Link } from "react-router-dom";
+import { useUser } from "@clerk/clerk-react";
 
 // The real forgeopt engine (whitebox NSGA optimizer) runs as its own service — it needs
 // torch/onnx, so it can't run on Vercel. Point this at that host in prod; defaults to local dev.
@@ -93,8 +94,35 @@ function CenterPanel({ children }) {
   );
 }
 
+// Gated private-beta screen — logged-in users who haven't been granted optimizer access land here.
+function RequestAccess() {
+  return (
+    <div style={{ minHeight: "100vh", background: "#fff", color: INK }}>
+      <TopBar />
+      <CenterPanel>
+        <div style={{ fontFamily: MONO, color: TEAL, fontSize: 11, letterSpacing: ".12em", marginBottom: 12 }}>● PRIVATE ACCESS</div>
+        <h1 style={{ fontFamily: SYNE, fontWeight: 800, fontSize: 28, lineHeight: 1.15, margin: "0 0 12px", maxWidth: 560 }}>
+          The optimizer is invite-only right now.
+        </h1>
+        <p style={{ color: SUB, fontSize: 15, lineHeight: 1.6, maxWidth: 540, margin: "0 0 22px" }}>
+          We optimize models hands-on, per customer — so access is granted after a quick conversation.
+          Tell us your model and target chip, and we'll get you set up.
+        </p>
+        <PilotCTA />
+      </CenterPanel>
+    </div>
+  );
+}
+
 export default function VisionOptimizer() {
-  const [state, recheck] = useReachable(LIVE);
+  const { user } = useUser();
+  // Gated private beta: only accounts granted access in Clerk (publicMetadata.optimizerAccess === true)
+  // reach the live tool; everyone else gets RequestAccess. To grant access: Clerk dashboard →
+  // Users → (the user) → Metadata → Public → add  {"optimizerAccess": true}
+  const hasAccess = user?.publicMetadata?.optimizerAccess === true;
+  const [state, recheck] = useReachable(LIVE && hasAccess);
+
+  if (!hasAccess) return <RequestAccess />;
 
   return (
     <div style={{ minHeight: "100vh", background: "#fff", color: INK }}>
