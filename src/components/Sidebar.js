@@ -1,4 +1,5 @@
 import React from "react";
+import { UserButton, useUser } from "@clerk/clerk-react";
 
 const STEPS = [
   { id: 0, key: "setup",    label: "Setup",    sub: "Project configuration" },
@@ -35,6 +36,7 @@ function LogoMark({ size = 28 }) {
 }
 
 export default function Sidebar({ activeStep, onResetRequest, onOpenSettings }) {
+  const { user } = useUser();
   return (
     <aside
       className="w-64 h-screen flex-shrink-0 flex flex-col overflow-y-auto"
@@ -141,6 +143,20 @@ export default function Sidebar({ activeStep, onResetRequest, onOpenSettings }) 
         className="px-4 py-4 space-y-2"
         style={{ borderTop: "1px solid #ebeae5" }}
       >
+        <div className="flex items-center gap-2.5 px-1 pb-2">
+          <UserButton afterSignOutUrl="/" />
+          <div className="min-w-0">
+            <p className="text-xs font-semibold truncate" style={{ fontFamily: "'Syne', sans-serif", color: "#0a0a0a" }}>
+              {user?.fullName || user?.primaryEmailAddress?.emailAddress || "Account"}
+            </p>
+            {user?.unsafeMetadata?.company && (
+              <p className="text-xs truncate" style={{ fontFamily: "'DM Mono', monospace", color: "#8a8982" }}>
+                {user.unsafeMetadata.company}
+              </p>
+            )}
+          </div>
+        </div>
+
         {onOpenSettings && (
           <button
             onClick={onOpenSettings}

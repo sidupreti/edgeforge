@@ -19,6 +19,10 @@ import LandingPage from "./components/LandingPage";
 import ContactPage from "./components/ContactPage";
 import VisionOptimizer from "./components/VisionOptimizer";
 import { TermsOfService, PrivacyPolicy } from "./components/Legal";
+import SignUpPage from "./components/auth/SignUpPage";
+import SignInPage from "./components/auth/SignInPage";
+import SSOCallback from "./components/auth/SSOCallback";
+import RequireAuth from "./components/auth/RequireAuth";
 
 const STEPS = [
   { key: "setup",    label: "Setup" },
@@ -105,9 +109,13 @@ export default function App() {
     <Routes>
       <Route path="/" element={<LandingPage />} />
       <Route path="/contact" element={<ContactPage />} />
-      <Route path="/app/*" element={<AppContent />} />
+      <Route path="/app/*" element={<RequireAuth><AppContent /></RequireAuth>} />
       {/* Vision/CNN optimization track — fully isolated from the 6-step sensor flow */}
-      <Route path="/optimize" element={<VisionOptimizer />} />
+      <Route path="/optimize" element={<RequireAuth><VisionOptimizer /></RequireAuth>} />
+      {/* Auth */}
+      <Route path="/sign-up" element={<SignUpPage />} />
+      <Route path="/sign-in" element={<SignInPage />} />
+      <Route path="/sso-callback" element={<SSOCallback />} />
       {/* Legal */}
       <Route path="/terms" element={<TermsOfService />} />
       <Route path="/privacy" element={<PrivacyPolicy />} />
