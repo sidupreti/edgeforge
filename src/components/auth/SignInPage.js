@@ -20,8 +20,20 @@ export default function SignInPage() {
   const navigate = useNavigate();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [code, setCode] = useState("");
+  // "" | "second_factor" | "first_factor" — which email-code step we're in, if any.
+  const [codeStage, setCodeStage] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+
+  async function finish(result) {
+    if (result.status === "complete") {
+      await setActive({ session: result.createdSessionId });
+      navigate("/app");
+      return true;
+    }
+    return false;
+  }
 
   async function handleGoogle() {
     if (!isLoaded) return;
@@ -42,16 +54,58 @@ export default function SignInPage() {
     setError(""); setBusy(true);
     try {
       const result = await signIn.create({ identifier: email, password });
-      if (result.status === "complete") {
-        await setActive({ session: result.createdSessionId });
-        navigate("/app");
-      } else {
-        setError("Sign-in incomplete — please try again.");
+      if (!(await finish(result))) {
+        // Instance may require an emailed code as a second factor (or as the first).
+        if (result.status === "needs_second_factor") {
+          await signIn.prepareSecondFactor({ strategy: "email_code" });
+          setCodeStage("second_factor");
+        } else if (result.status === "needs_first_factor") {
+          const ff = (result.supportedFirstFactors || []).find((f) => f.strategy === "email_code");
+          if (ff) {
+            await signIn.prepareFirstFactor({ strategy: "email_code", emailAddressId: ff.emailAddressId });
+            setCodeStage("first_factor");
+          } else {
+            setError("This account needs a different sign-in method.");
+          }
+        } else {
+          setError("Sign-in incomplete — please try again.");
+        }
       }
     } catch (e) {
       setError(e?.errors?.[0]?.longMessage || "Invalid email or password.");
     }
     setBusy(false);
+  }
+
+  async function handleCode(e) {
+    e.preventDefault();
+    if (!isLoaded) return;
+    setError(""); setBusy(true);
+    try {
+      const result = codeStage === "second_factor"
+        ? await signIn.attemptSecondFactor({ strategy: "email_code", code })
+        : await signIn.attemptFirstFactor({ strategy: "email_code", code });
+      if (!(await finish(result))) setError("Verification incomplete — check the code and try again.");
+    } catch (e) {
+      setError(e?.errors?.[0]?.longMessage || "Invalid code. Please try again.");
+    }
+    setBusy(false);
+  }
+
+  if (codeStage) {
+    return (
+      <AuthShell title="Check your email" subtitle={`We sent a 6-digit code to ${email}.`}>
+        <form onSubmit={handleCode}>
+          <label style={labelStyle}>Verification code</label>
+          <input style={inputStyle} inputMode="numeric" autoFocus value={code}
+            onChange={(e) => setCode(e.target.value)} placeholder="123456" />
+          {error && <div style={{ color: RED, fontSize: 13, marginBottom: 14 }}>{error}</div>}
+          <button style={primaryBtn} disabled={busy} type="submit">
+            {busy ? "Verifying…" : "Verify & sign in"}
+          </button>
+        </form>
+      </AuthShell>
+    );
   }
 
   return (
