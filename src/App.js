@@ -109,8 +109,9 @@ export default function App() {
     <Routes>
       <Route path="/" element={<LandingPage />} />
       <Route path="/contact" element={<ContactPage />} />
-      <Route path="/app/*" element={<RequireAuth><AppContent /></RequireAuth>} />
-      {/* Vision/CNN optimization track — fully isolated from the 6-step sensor flow */}
+      {/* End-to-end pipeline: OPEN (no login) — the labeling/preprocessing funnel DeepGate lacks */}
+      <Route path="/app/*" element={<AppContent />} />
+      {/* Vision/CNN optimization track — GATED (login required); isolated from the 6-step sensor flow */}
       <Route path="/optimize" element={<RequireAuth><VisionOptimizer /></RequireAuth>} />
       {/* Auth */}
       <Route path="/sign-up" element={<SignUpPage />} />
