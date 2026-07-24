@@ -374,7 +374,7 @@ function LogoSvg({ size = 34 }) {
 }
 
 /* ─── Marquee items ─────────────────────────────────────────────────────────── */
-const MARQUEE_ITEMS = ["ESP32","STM32","nRF52840","Arduino Nano 33","Raspberry Pi Pico","Teensy 4.1","SAMD21","Any MCU"];
+const MARQUEE_ITEMS = ["Snapdragon","Jetson Orin","Apple Neural Engine","Coral Edge TPU","Raspberry Pi 5","Ethos-U NPU","Hailo-8","STM32","ESP32-S3","nRF52840","Arduino","Any chip, MCU → NPU"];
 
 /* ─── Main component ─────────────────────────────────────────────────────────── */
 export default function LandingPage() {
@@ -546,34 +546,35 @@ export default function LandingPage() {
         <div className="hero-content">
           <div className="hero-badge">
             <span className="badge-dot" />
-            Hardware-agnostic embedded ML
+            Edge model optimization — measured, done for you
           </div>
           <h1>
-            Train once.<br />
-            Deploy to <span className="outline">any chip.</span>
+            Make any model<br />
+            run on <span className="outline">any edge chip.</span>
           </h1>
           <p className="hero-sub">
-            SensorForge is the development platform for engineers building real-time sensor event
-            classification — on whatever hardware you choose.
+            We compress and optimize your model for your exact target — from Snapdragon and Jetson
+            down to a $2 microcontroller — and prove it on the real silicon. Done for you, measured,
+            no guesswork.
           </p>
           <div className="hero-actions">
-            <Link to="/app" className="btn-primary">
-              Try for free
+            <Link to="/optimize" className="btn-primary">
+              Optimize my model
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2">
                 <path d="M3 8h10M9 4l4 4-4 4" />
               </svg>
             </Link>
-            <a href="#how-it-works" className="btn-ghost">
-              See how it works
+            <Link to="/contact" className="btn-ghost">
+              Talk to us
               <svg width="14" height="14" viewBox="0 0 14 14" fill="none" stroke="currentColor" strokeWidth="1.5">
                 <path d="M7 2v10M3 8l4 4 4-4" />
               </svg>
-            </a>
+            </Link>
           </div>
           <p style={{ marginTop: "18px", fontSize: "14px", color: "#6b6a63" }}>
-            Have a computer-vision model instead?{" "}
-            <Link to="/optimize" style={{ color: "#0a0a0a", fontWeight: 600, textDecoration: "underline", textUnderlineOffset: "3px" }}>
-              Shrink it for the edge →
+            No model yet?{" "}
+            <Link to="/app" style={{ color: "#0a0a0a", fontWeight: 600, textDecoration: "underline", textUnderlineOffset: "3px" }}>
+              Build one with our end-to-end pipeline →
             </Link>
           </p>
         </div>
@@ -590,50 +591,50 @@ export default function LandingPage() {
 
       {/* ── FEATURES ── */}
       <section className="section reveal" id="features">
-        <div className="section-label">features</div>
-        <h2>Everything you need,<br />nothing you don't.</h2>
+        <div className="section-label">the optimizer</div>
+        <h2>Not a recipe.<br />A search for your chip.</h2>
         <div className="features-grid">
           <div className="feature-card">
             <div className="feature-icon">
               <svg viewBox="0 0 20 20"><path d="M10 2L2 7v6l8 5 8-5V7L10 2z"/><path d="M10 12V7M7 9l3-2 3 2"/></svg>
             </div>
-            <div className="feature-title">AI Pipeline Designer</div>
-            <div className="feature-desc">Describe your classification task in plain English. SensorForge generates a complete DSP + ML pipeline tuned for your hardware constraints.</div>
+            <div className="feature-title">Hardware-aware search</div>
+            <div className="feature-desc">We search per-layer precision, pruning, and technique against your chip's real flash, RAM, and latency budget — not one fixed recipe.</div>
           </div>
           <div className="feature-card">
             <div className="feature-icon">
               <svg viewBox="0 0 20 20"><rect x="2.5" y="2.5" width="6.5" height="6.5" rx="1"/><rect x="11" y="2.5" width="6.5" height="6.5" rx="1"/><rect x="2.5" y="11" width="6.5" height="6.5" rx="1"/><rect x="11" y="11" width="6.5" height="6.5" rx="1"/></svg>
             </div>
-            <div className="feature-title">Variable-Duration Normalization</div>
-            <div className="feature-desc">Proprietary normalization preserves the true signal shape across events of different lengths — a detail fixed-window approaches lose.</div>
+            <div className="feature-title">Measured on real silicon</div>
+            <div className="feature-desc">Every accuracy and latency number comes off the actual chip via real device farms — no FLOP estimates, no best-case "up to" figures.</div>
           </div>
           <div className="feature-card">
             <div className="feature-icon">
               <svg viewBox="0 0 20 20"><rect x="3" y="3.5" width="14" height="9" rx="1"/><path d="M7 16.5h6M10 12.5v4"/><path d="M6.5 8l2 2 4-4"/></svg>
             </div>
-            <div className="feature-title">Live Hardware Validation</div>
-            <div className="feature-desc">Connect your device via Web Serial and classify events in real time, straight from the browser — no firmware flash required.</div>
+            <div className="feature-title">The full arsenal</div>
+            <div className="feature-desc">Quantization, QAT, structured pruning, distillation, mixed precision — the complete modern toolkit, not a single trick.</div>
           </div>
           <div className="feature-card">
             <div className="feature-icon">
               <svg viewBox="0 0 20 20"><path d="M3 16l4-8 3.5 4 3-6 3.5 10"/></svg>
             </div>
-            <div className="feature-title">C Header Export</div>
-            <div className="feature-desc">One-click export of a ready-to-compile C header with chip-specific SRAM and flash estimates. Drop it into any embedded project.</div>
+            <div className="feature-title">MCU to NPU</div>
+            <div className="feature-desc">One workflow from a $2 microcontroller up to Snapdragon, Jetson Orin, Coral, and mobile NPUs — the powerful edge, not just tiny.</div>
           </div>
           <div className="feature-card">
             <div className="feature-icon">
               <svg viewBox="0 0 20 20"><circle cx="10" cy="10" r="7.5"/><path d="M10 5.5v4.5l3 2"/></svg>
             </div>
-            <div className="feature-title">Hardware-Agnostic</div>
-            <div className="feature-desc">No SDK lock-in, no proprietary toolchain. Deploy the same trained model to ESP32, STM32, nRF, or whatever your supply chain allows.</div>
+            <div className="feature-title">Deploy-ready output</div>
+            <div className="feature-desc">A drop-in optimized model plus an honest before/after report — including a straight answer on when a target simply won't fit.</div>
           </div>
           <div className="feature-card">
             <div className="feature-icon">
               <svg viewBox="0 0 20 20"><path d="M3 6h14M3 10h14M3 14h9"/><circle cx="15" cy="14" r="2" fill="white" stroke="none"/></svg>
             </div>
-            <div className="feature-title">Full Pipeline Control</div>
-            <div className="feature-desc">Add, remove, skip, or customize every block — Butterworth filter, FFT, normalization, classifier — plus custom AI-generated DSP blocks.</div>
+            <div className="feature-title">Expert in the loop</div>
+            <div className="feature-desc">Real engineers make the calls and stand behind the result — a hands-on service, not a DIY tool that half-works.</div>
           </div>
         </div>
       </section>
@@ -641,8 +642,8 @@ export default function LandingPage() {
       {/* ── WORKFLOW ── */}
       <section className="workflow" id="how-it-works">
         <div className="workflow-inner reveal">
-          <div className="section-label">workflow</div>
-          <h2>From sensor to deployment<br />in six steps.</h2>
+          <div className="section-label">also — the full pipeline</div>
+          <h2>No model yet?<br />From raw data to deployed.</h2>
           <div className="steps">
             {[
               ["01","Setup","Define your project, device target, and sensor config."],
@@ -667,9 +668,9 @@ export default function LandingPage() {
         <div className="diff">
           <div className="diff-text">
             <div className="section-label">why sensorforge</div>
-            <h2>Agnostic by architecture.</h2>
-            <p>The embedded ML world is full of platforms that quietly assume one chip vendor. The moment your design calls for something else, the tooling stops working with you.</p>
-            <p>SensorForge was built from the ground up to be <strong>hardware-agnostic by design</strong> — not as a feature bolted on later, but as a core constraint. Your model runs wherever your project runs.</p>
+            <h2>Honest, and hands-on.</h2>
+            <p>Most tools quote you a best-case “up to 45×” against a weak baseline, hand you a config, and vanish — and half the time the model quietly breaks in production.</p>
+            <p>We measure every number on <strong>your actual target chip</strong>, tell you the truth — including when a target won’t work — and we do the work with you until it ships. That’s the difference between a benchmark and a deployment.</p>
           </div>
           <div className="diff-visual">
             <div className="win-dots"><span /><span /><span /></div>
@@ -690,11 +691,11 @@ export default function LandingPage() {
       {/* ── CTA ── */}
       <section className="cta-section" id="pricing">
         <div className="cta-inner reveal">
-          <div className="section-label">get started</div>
-          <h2>Free to try.<br />No credit card.</h2>
-          <p>Start building immediately. No setup, no commitment.</p>
-          <Link to="/app" className="btn-primary" style={{ display: "inline-flex" }}>
-            Try SensorForge free
+          <div className="section-label">work with us</div>
+          <h2>Bring us your model.<br />Let's make it fit.</h2>
+          <p>Tell us your model and your target chip. The first optimization is on us.</p>
+          <Link to="/contact" className="btn-primary" style={{ display: "inline-flex" }}>
+            Talk to us
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M3 8h10M9 4l4 4-4 4" />
             </svg>
