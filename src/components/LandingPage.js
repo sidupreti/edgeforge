@@ -351,7 +351,7 @@ const CSS = `
 /* ─── Logo SVG ─────────────────────────────────────────────────────────────── */
 function LogoSvg({ size = 34 }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 36 36" fill="none" aria-label="EdgeForge logo">
+    <svg width={size} height={size} viewBox="0 0 36 36" fill="none" aria-label="SensorForge logo">
       <rect x="10" y="10" width="16" height="16" rx="2.5" fill="#0a0a0a"/>
       <rect x="13" y="13" width="4" height="4" rx="0.6" fill="white"/>
       <rect x="19" y="13" width="4" height="4" rx="0.6" fill="white" opacity="0.75"/>
@@ -525,7 +525,7 @@ export default function LandingPage() {
       <nav id="sf-nav" className="sf-nav" ref={navRef}>
         <Link to="/" className="logo-wrap">
           <LogoSvg size={34} />
-          <span className="logo-text">EdgeForge</span>
+          <span className="logo-text">SensorForge</span>
         </Link>
         <ul className="nav-links">
           <li><a href="#features">Features</a></li>
@@ -553,7 +553,7 @@ export default function LandingPage() {
             Deploy to <span className="outline">any chip.</span>
           </h1>
           <p className="hero-sub">
-            EdgeForge is the development platform for engineers building real-time sensor event
+            SensorForge is the development platform for engineers building real-time sensor event
             classification — on whatever hardware you choose.
           </p>
           <div className="hero-actions">
@@ -598,7 +598,7 @@ export default function LandingPage() {
               <svg viewBox="0 0 20 20"><path d="M10 2L2 7v6l8 5 8-5V7L10 2z"/><path d="M10 12V7M7 9l3-2 3 2"/></svg>
             </div>
             <div className="feature-title">AI Pipeline Designer</div>
-            <div className="feature-desc">Describe your classification task in plain English. EdgeForge generates a complete DSP + ML pipeline tuned for your hardware constraints.</div>
+            <div className="feature-desc">Describe your classification task in plain English. SensorForge generates a complete DSP + ML pipeline tuned for your hardware constraints.</div>
           </div>
           <div className="feature-card">
             <div className="feature-icon">
@@ -666,10 +666,10 @@ export default function LandingPage() {
       <section className="section reveal">
         <div className="diff">
           <div className="diff-text">
-            <div className="section-label">why edgeforge</div>
+            <div className="section-label">why sensorforge</div>
             <h2>Agnostic by architecture.</h2>
             <p>The embedded ML world is full of platforms that quietly assume one chip vendor. The moment your design calls for something else, the tooling stops working with you.</p>
-            <p>EdgeForge was built from the ground up to be <strong>hardware-agnostic by design</strong> — not as a feature bolted on later, but as a core constraint. Your model runs wherever your project runs.</p>
+            <p>SensorForge was built from the ground up to be <strong>hardware-agnostic by design</strong> — not as a feature bolted on later, but as a core constraint. Your model runs wherever your project runs.</p>
           </div>
           <div className="diff-visual">
             <div className="win-dots"><span /><span /><span /></div>
@@ -694,7 +694,7 @@ export default function LandingPage() {
           <h2>Free to try.<br />No credit card.</h2>
           <p>Start building immediately. No setup, no commitment.</p>
           <Link to="/app" className="btn-primary" style={{ display: "inline-flex" }}>
-            Try EdgeForge free
+            Try SensorForge free
             <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="2">
               <path d="M3 8h10M9 4l4 4-4 4" />
             </svg>
@@ -706,7 +706,7 @@ export default function LandingPage() {
       <footer>
         <div className="footer-left">
           <LogoSvg size={24} />
-          <span className="footer-copy">© 2026 EdgeForge · Cambridge, MA</span>
+          <span className="footer-copy">© 2026 SensorForge · Cambridge, MA</span>
         </div>
         <ul className="footer-links">
           <li><a href="#features">Features</a></li>

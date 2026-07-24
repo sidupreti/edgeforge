@@ -15,7 +15,7 @@ const ENTITY = "EdgeForge LLC";
 
 function LogoMark({ size = 26 }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 36 36" fill="none" aria-label="EdgeForge logo">
+    <svg width={size} height={size} viewBox="0 0 36 36" fill="none" aria-label="SensorForge logo">
       <rect x="10" y="10" width="16" height="16" rx="2.5" fill={INK} />
       <rect x="13" y="13" width="4" height="4" rx=".6" fill="#fff" />
       <rect x="19" y="13" width="4" height="4" rx=".6" fill="#fff" opacity=".75" />
@@ -32,7 +32,7 @@ function LegalShell({ title, children }) {
         padding: "18px 28px", borderBottom: `1px solid ${LINE}`, maxWidth: 1080, margin: "0 auto" }}>
         <Link to="/" style={{ display: "flex", alignItems: "center", gap: 10, textDecoration: "none", color: INK }}>
           <LogoMark />
-          <span style={{ fontFamily: SYNE, fontWeight: 700, letterSpacing: "-.02em", fontSize: 17 }}>EdgeForge</span>
+          <span style={{ fontFamily: SYNE, fontWeight: 700, letterSpacing: "-.02em", fontSize: 17 }}>SensorForge</span>
         </Link>
         <div style={{ display: "flex", gap: 22, alignItems: "center" }}>
           <Link to="/terms" style={{ color: SUB, textDecoration: "none", fontSize: 14 }}>Terms</Link>
@@ -71,15 +71,15 @@ export function TermsOfService() {
   return (
     <LegalShell title="Terms of Service">
       <P>
-        These Terms of Service (“Terms”) govern your access to and use of the EdgeForge model-optimization
+        These Terms of Service (“Terms”) govern your access to and use of the SensorForge model-optimization
         platform, website, and related services (collectively, the “Service”), operated by {ENTITY}{" "}
-        (“EdgeForge,” “we,” “us”). By accessing or using the Service, you agree to be bound by these Terms.
+        (“SensorForge,” “we,” “us”). By accessing or using the Service, you agree to be bound by these Terms.
         If you do not agree, do not use the Service.
       </P>
 
       <H>1. The Service</H>
       <P>
-        EdgeForge helps you compress, quantize, and optimize machine-learning models for deployment on edge
+        SensorForge helps you compress, quantize, and optimize machine-learning models for deployment on edge
         hardware, and provides analysis such as size, accuracy-retention, device-fit, and estimated latency.
         Optimization results, accuracy figures, device-fit checks, and latency values are provided for your
         evaluation and may be estimates. They are not a guarantee of performance in your production environment.
@@ -88,7 +88,7 @@ export function TermsOfService() {
       <H>2. Your models and data</H>
       <P>
         <b>You retain all right, title, and interest in the models, datasets, files, and other materials you
-        upload or submit (“Your Content”).</b> We claim no ownership of Your Content. You grant EdgeForge a
+        upload or submit (“Your Content”).</b> We claim no ownership of Your Content. You grant SensorForge a
         limited, non-exclusive license to host, process, and transform Your Content solely to provide the
         Service to you and, where you enable it, to obtain measurements from the third-party services described
         in our <Link to="/privacy" style={{ color: INK }}>Privacy Policy</Link>.
@@ -115,7 +115,7 @@ export function TermsOfService() {
 
       <H>5. Limitation of liability</H>
       <P>
-        TO THE MAXIMUM EXTENT PERMITTED BY LAW, EDGEFORGE WILL NOT BE LIABLE FOR ANY INDIRECT, INCIDENTAL,
+        TO THE MAXIMUM EXTENT PERMITTED BY LAW, SENSORFORGE WILL NOT BE LIABLE FOR ANY INDIRECT, INCIDENTAL,
         SPECIAL, CONSEQUENTIAL, OR EXEMPLARY DAMAGES, OR FOR ANY LOSS OF PROFITS, DATA, OR GOODWILL, ARISING
         OUT OF OR RELATING TO THE SERVICE OR ANY MODEL OPTIMIZED WITH IT, EVEN IF ADVISED OF THE POSSIBILITY.
         OUR TOTAL AGGREGATE LIABILITY FOR ANY CLAIM WILL NOT EXCEED THE GREATER OF (A) THE AMOUNTS YOU PAID US
@@ -124,14 +124,14 @@ export function TermsOfService() {
 
       <H>6. Indemnification</H>
       <P>
-        You agree to indemnify and hold EdgeForge harmless from any claims, damages, and expenses arising from
+        You agree to indemnify and hold SensorForge harmless from any claims, damages, and expenses arising from
         Your Content, your use of the Service, or your violation of these Terms or any law or third-party right.
       </P>
 
       <H>7. Our intellectual property</H>
       <P>
         The Service, including its software, models, interfaces, and content (excluding Your Content), is owned
-        by EdgeForge and protected by intellectual-property laws. These Terms grant you no rights in the Service
+        by SensorForge and protected by intellectual-property laws. These Terms grant you no rights in the Service
         other than the limited right to use it in accordance with these Terms.
       </P>
 
@@ -168,8 +168,8 @@ export function PrivacyPolicy() {
   return (
     <LegalShell title="Privacy Policy">
       <P>
-        This Privacy Policy explains how {ENTITY} (“EdgeForge,” “we,” “us”) collects, uses, and protects
-        information when you use the EdgeForge platform and website (the “Service”). We aim to collect only what
+        This Privacy Policy explains how {ENTITY} (“SensorForge,” “we,” “us”) collects, uses, and protects
+        information when you use the SensorForge platform and website (the “Service”). We aim to collect only what
         we need to run the Service.
       </P>
 

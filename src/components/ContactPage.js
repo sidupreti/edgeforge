@@ -164,7 +164,7 @@ const CSS = `
 
 function LogoSvg({ size = 34 }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 36 36" fill="none" aria-label="EdgeForge logo">
+    <svg width={size} height={size} viewBox="0 0 36 36" fill="none" aria-label="SensorForge logo">
       <rect x="10" y="10" width="16" height="16" rx="2.5" fill="#0a0a0a"/>
       <rect x="13" y="13" width="4" height="4" rx="0.6" fill="white"/>
       <rect x="19" y="13" width="4" height="4" rx="0.6" fill="white" opacity="0.75"/>
@@ -234,7 +234,7 @@ export default function ContactPage() {
       <nav className="sf-nav">
         <Link to="/" className="logo-wrap">
           <LogoSvg size={34} />
-          <span className="logo-text">EdgeForge</span>
+          <span className="logo-text">SensorForge</span>
         </Link>
         <ul className="nav-links">
           <li><Link to="/#features">Features</Link></li>
@@ -334,7 +334,7 @@ export default function ContactPage() {
       <footer>
         <div className="footer-left">
           <LogoSvg size={24} />
-          <span className="footer-copy">© 2026 EdgeForge · Cambridge, MA</span>
+          <span className="footer-copy">© 2026 SensorForge · Cambridge, MA</span>
         </div>
         <ul className="footer-links">
           <li><Link to="/">Home</Link></li>

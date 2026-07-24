@@ -362,7 +362,7 @@ export default function OnboardingChat({ onComplete, onManualSetup }) {
     const id = botSay(
       {
         text:
-          "Welcome to EdgeForge!\n\nWhat are you trying to classify? Describe your application in a sentence or two.\n\nFor example: \"Detect vibration anomalies on a CNC spindle bearing\" or \"Recognize hand gestures on a wristband.\"",
+          "Welcome to SensorForge!\n\nWhat are you trying to classify? Describe your application in a sentence or two.\n\nFor example: \"Detect vibration anomalies on a CNC spindle bearing\" or \"Recognize hand gestures on a wristband.\"",
         phase: "app_desc",
       },
       400

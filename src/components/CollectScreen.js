@@ -77,7 +77,7 @@ function _inferTimestampToUs(medianDelta) {
 
 const UPLOAD_COL_MAP = {
   t: "timestamp", time: "timestamp", ts: "timestamp", time_us: "timestamp",
-  timestamp_us: "timestamp",   // native EdgeForge format
+  timestamp_us: "timestamp",   // native SensorForge format
   time_ms: "timestamp", time_s: "timestamp", sample_time: "timestamp", elapsed: "timestamp",
   x: "a_x", ax: "a_x", accel_x: "a_x", acc_x: "a_x", "x-axis": "a_x",
   y: "a_y", ay: "a_y", accel_y: "a_y", acc_y: "a_y", "y-axis": "a_y",
@@ -1572,7 +1572,7 @@ function FileUploadMode({
           const parsed = result?.error ? null : result;
           let note = null;
           if (result?.error === "pre-processed feature file") {
-            note = "Pre-processed feature file — EdgeForge needs raw sensor time series data";
+            note = "Pre-processed feature file — SensorForge needs raw sensor time series data";
           }
           // Auto-assign detected class label if available (WISDM activity column)
           let classId  = updated[realIdx].classId;

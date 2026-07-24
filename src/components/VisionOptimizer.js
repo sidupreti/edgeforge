@@ -21,7 +21,7 @@ const BAR_H = 58;
 
 function LogoMark({ size = 26 }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 36 36" fill="none" aria-label="EdgeForge logo">
+    <svg width={size} height={size} viewBox="0 0 36 36" fill="none" aria-label="SensorForge logo">
       <rect x="10" y="10" width="16" height="16" rx="2.5" fill={INK} />
       <rect x="13" y="13" width="4" height="4" rx=".6" fill="#fff" />
       <rect x="19" y="13" width="4" height="4" rx=".6" fill="#fff" opacity=".75" />
@@ -37,7 +37,7 @@ function TopBar() {
       justifyContent: "space-between", padding: "0 24px", borderBottom: `1px solid ${LINE}`, background: "#fff" }}>
       <Link to="/" style={{ display: "flex", alignItems: "center", gap: 10, textDecoration: "none", color: INK }}>
         <LogoMark />
-        <span style={{ fontFamily: SYNE, fontWeight: 700, letterSpacing: "-.02em", fontSize: 17 }}>EdgeForge</span>
+        <span style={{ fontFamily: SYNE, fontWeight: 700, letterSpacing: "-.02em", fontSize: 17 }}>SensorForge</span>
         <span style={{ fontFamily: MONO, color: MUTE, fontSize: 11, letterSpacing: ".04em", marginTop: 2 }}>/ Optimizer</span>
       </Link>
       <div style={{ display: "flex", gap: 22, alignItems: "center" }}>
@@ -104,7 +104,7 @@ export default function VisionOptimizer() {
       {/* LIVE + backend reachable → the real forgeopt whitebox tool, full height */}
       {state === "up" && (
         <iframe
-          title="EdgeForge Optimizer"
+          title="SensorForge Optimizer"
           src={FORGEOPT_URL}
           style={{ display: "block", width: "100%", height: `calc(100vh - ${BAR_H}px)`, border: "none" }}
         />
@@ -124,7 +124,7 @@ export default function VisionOptimizer() {
           <div style={{ fontFamily: MONO, color: TEAL, fontSize: 11, letterSpacing: ".12em", marginBottom: 12 }}>● OPTIMIZER OFFLINE</div>
           <h1 style={{ fontFamily: SYNE, fontWeight: 800, fontSize: 24, margin: "0 0 10px" }}>The optimizer backend isn’t running</h1>
           <p style={{ color: SUB, fontSize: 15, lineHeight: 1.6, maxWidth: 500, margin: "0 0 18px" }}>
-            The EdgeForge optimizer runs as a service (it needs PyTorch/ONNX). Start it, then reconnect:
+            The SensorForge optimizer runs as a service (it needs PyTorch/ONNX). Start it, then reconnect:
           </p>
           <code style={{ display: "block", fontFamily: MONO, fontSize: 13, background: PANEL, color: INK,
             border: `1px solid ${LINE}`, borderRadius: 10, padding: "12px 16px", marginBottom: 20 }}>
@@ -150,7 +150,7 @@ export default function VisionOptimizer() {
             Shrink your model. <span style={{ color: MUTE }}>Deploy to any chip.</span>
           </h1>
           <p style={{ color: SUB, fontSize: 15, lineHeight: 1.6, maxWidth: 540, margin: "0 0 6px" }}>
-            Bring a trained CNN in ONNX — from YOLO, PyTorch, or TensorFlow. EdgeForge makes it smaller and
+            Bring a trained CNN in ONNX — from YOLO, PyTorch, or TensorFlow. SensorForge makes it smaller and
             faster, measures the accuracy on your data, and tells you honestly which chips it fits.
           </p>
           <PilotCTA />

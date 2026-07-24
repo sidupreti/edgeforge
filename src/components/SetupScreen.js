@@ -262,7 +262,7 @@ export default function SetupScreen({ config, setConfig, submitError, onOnboardi
             <div className="space-y-3">
               {[
                 ["1 · Describe", "Tell the AI what you're classifying and what sensor you have."],
-                ["2 · Upload",   "Drop a sample CSV and EdgeForge detects your data format automatically."],
+                ["2 · Upload",   "Drop a sample CSV and SensorForge detects your data format automatically."],
                 ["3 · Classes",  "Name your gesture or event classes — circle, shake, anomaly, …"],
                 ["4 · Collect",  "Record or upload labelled examples for each class."],
                 ["5 · Train",    "One click trains and benchmarks multiple classifiers."],
