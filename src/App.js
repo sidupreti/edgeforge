@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback, useRef } from "react";
 import { Routes, Route } from "react-router-dom";
 import "./index.css";
 import API_BASE_URL from "./config";
@@ -155,6 +155,33 @@ function AppContent() {
   const [submitLoading,     setSubmitLoading]     = useState(false);
   const [submitError,       setSubmitError]       = useState(null);
   const [showResetConfirm,  setShowResetConfirm]  = useState(false);
+
+  // ── Scroll affordance: cue the user when the main pane has more below the fold ──
+  const mainRef = useRef(null);
+  const [scrollMore, setScrollMore] = useState(false);
+  const checkScroll = useCallback(() => {
+    const el = mainRef.current;
+    if (!el) return;
+    setScrollMore(el.scrollHeight - el.scrollTop - el.clientHeight > 24);
+  }, []);
+  useEffect(() => {
+    const el = mainRef.current;
+    if (!el) return;
+    checkScroll();
+    el.addEventListener("scroll", checkScroll, { passive: true });
+    window.addEventListener("resize", checkScroll);
+    let ro;
+    if (typeof ResizeObserver !== "undefined") {
+      ro = new ResizeObserver(checkScroll);
+      ro.observe(el);
+      if (el.firstElementChild) ro.observe(el.firstElementChild);
+    }
+    return () => {
+      el.removeEventListener("scroll", checkScroll);
+      window.removeEventListener("resize", checkScroll);
+      if (ro) ro.disconnect();
+    };
+  }, [checkScroll, activeStep, pipelineSubPage]);
 
   // Derived — never stored separately, always consistent with config
   const projectId = slugify(config.projectName);
@@ -498,7 +525,7 @@ function AppContent() {
         )}
 
         {/* Main content */}
-        <div className="flex-1 flex flex-col min-h-0">
+        <div className="flex-1 flex flex-col min-h-0" style={{ position: "relative" }}>
           {/* Top bar */}
           <header
             className="px-8 py-4 flex items-center justify-between"
@@ -543,8 +570,56 @@ function AppContent() {
           </header>
 
           {/* Screen body */}
-          <main className="flex-1 min-h-0 px-8 py-8 overflow-y-auto">
+          <main ref={mainRef} onScroll={checkScroll} className="flex-1 min-h-0 px-8 py-8 overflow-y-auto">
             {renderScreen()}
+            {/* Scroll cue — sticks to the bottom of the scrollport (height 0, no layout push) */}
+            <div
+              aria-hidden="true"
+              style={{
+                position: "sticky",
+                bottom: 0,
+                height: 0,
+                pointerEvents: "none",
+                opacity: scrollMore ? 1 : 0,
+                transition: "opacity 0.22s ease",
+              }}
+            >
+              <div
+                style={{
+                  position: "absolute",
+                  bottom: 0,
+                  left: "-2rem",
+                  right: "-2rem",
+                  height: 76,
+                  background:
+                    "linear-gradient(to top, rgba(255,255,255,0.96) 22%, rgba(255,255,255,0))",
+                  display: "flex",
+                  alignItems: "flex-end",
+                  justifyContent: "center",
+                  paddingBottom: 10,
+                }}
+              >
+                <span
+                  style={{
+                    fontFamily: "'DM Mono', monospace",
+                    fontSize: 11,
+                    letterSpacing: "0.12em",
+                    textTransform: "uppercase",
+                    color: "#6b6a63",
+                    background: "#ffffff",
+                    border: "1px solid #ebeae5",
+                    borderRadius: 100,
+                    padding: "5px 13px",
+                    boxShadow: "0 4px 14px rgba(0,0,0,0.06)",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 6,
+                  }}
+                >
+                  More below <span style={{ animation: "sfBounce 1.3s ease-in-out infinite" }}>↓</span>
+                </span>
+              </div>
+            </div>
           </main>
 
           {/* Bottom nav bar — hidden on pipeline */}

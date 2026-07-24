@@ -186,6 +186,36 @@ export default function ExportScreen({ projectId, exportPrecision = "int8", setE
                 </button>
               ))}
             </div>
+            {/* On-device estimate for the selected target + precision */}
+            {(() => {
+              const chipKey = chip === "nrf" ? "nrf52840" : chip;
+              const t = exp?.per_target?.[chipKey];
+              const est = t?.[effPrecision];
+              if (!est) return null;
+              return (
+                <div className="mt-4 pt-4 border-t border-gray-100">
+                  <div className="flex items-baseline justify-between mb-2">
+                    <p className="text-[10px] uppercase tracking-widest text-gray-400">On-device estimate <span className="normal-case tracking-normal">· {effPrecision}</span></p>
+                    <p className="text-[10px] text-gray-400">{t.name} @ {t.clock_mhz} MHz · {t.sram_kb} KB SRAM</p>
+                  </div>
+                  <div className="grid grid-cols-3 gap-3">
+                    {[
+                      ["Latency / window", `${est.latency_ms} ms`],
+                      ["Peak RAM", `${est.ram_kb} KB`],
+                      ["Flash (model)", `${est.flash_kb} KB`],
+                    ].map(([lbl, val]) => (
+                      <div key={lbl} className="rounded-lg bg-gray-50 px-3 py-2">
+                        <p className="text-[9px] uppercase tracking-wider text-gray-400 mb-1">{lbl}</p>
+                        <p className="text-base font-bold text-gray-800 tabular-nums leading-none">{val}</p>
+                      </div>
+                    ))}
+                  </div>
+                  <p className="text-[10px] text-gray-400 mt-2 leading-snug">
+                    Rough estimate from the model's {exp?.macs?.toLocaleString?.() ?? exp?.macs} MACs + DSP cost at the target's clock — recompute on real hardware for exact figures.
+                  </p>
+                </div>
+              );
+            })()}
           </div>
 
           {/* TFLite fallback — honest, user-visible message (no fake artifact) */}

@@ -318,16 +318,21 @@ function FilterResponsePlot({ freqs, gains, height = 160 }) {
 
 // ── Feature Explorer (hover tooltip) ─────────────────────────────────────────
 
-function FeatureExplorer({ coords, labels, meta }) {
+function FeatureExplorer({ coords, labels, meta, explainedVariance, onInspect }) {
   const canvasRef = useRef(null);
   const [tooltip, setTooltip] = useState(null);
   const pointsRef = useRef([]);   // [{px, py, idx}] for hit-testing
+
+  const pcLabel = (i) => {
+    const v = explainedVariance?.[i];
+    return v != null ? `PC${i + 1} (${(v * 100).toFixed(0)}% var)` : `PC${i + 1}`;
+  };
 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas || !coords?.length) return;
     const dpr = window.devicePixelRatio || 1;
-    const W = canvas.offsetWidth, H = 280;
+    const W = canvas.offsetWidth, H = 320;
     canvas.width = W * dpr; canvas.height = H * dpr;
     canvas.style.height = `${H}px`;
     const ctx = canvas.getContext("2d");
@@ -385,26 +390,60 @@ function FeatureExplorer({ coords, labels, meta }) {
     }
   }
 
+  function hitTest(e) {
+    const canvas = canvasRef.current;
+    if (!canvas) return null;
+    const rect = canvas.getBoundingClientRect();
+    const mx = e.clientX - rect.left, my = e.clientY - rect.top;
+    let closest = null, closestDist = 8;
+    for (const pt of pointsRef.current) {
+      const d = Math.sqrt((mx - pt.px) ** 2 + (my - pt.py) ** 2);
+      if (d < closestDist) { closest = pt; closestDist = d; }
+    }
+    return closest;
+  }
+
+  function handleClick(e) {
+    const pt = hitTest(e);
+    if (pt && onInspect) {
+      const m = meta?.[pt.idx];
+      if (m?.file != null) onInspect(m.file, m.window ?? 0);
+    }
+  }
+
   if (!coords?.length) return null;
   const uq = [...new Set(labels)].sort(); const cm = {};
   uq.forEach((l, i) => { cm[l] = PALETTE[i % PALETTE.length]; });
   return (
     <div>
-      <p className="text-xs text-gray-400 uppercase tracking-widest mb-3">Feature Explorer</p>
-      <div className="relative">
-        <canvas ref={canvasRef} className="w-full block rounded-lg"
-          style={{ height: "280px", border: "1px solid #ebeae5", cursor: "crosshair" }}
-          onMouseMove={handleMouseMove} onMouseLeave={() => setTooltip(null)} />
-        {tooltip && (
-          <div className="absolute pointer-events-none bg-white border border-gray-200 rounded-lg shadow-lg px-2.5 py-1.5 text-[10px] z-10"
-            style={{ left: Math.min(tooltip.x + 10, 280), top: Math.max(tooltip.y - 50, 0) }}>
-            <p className="font-semibold" style={{ color: cm[tooltip.label] || "#999" }}>{tooltip.label}</p>
-            <p className="text-gray-500">{tooltip.file}</p>
-            <p className="text-gray-400">Window {tooltip.window + 1} · {tooltip.range} ms</p>
-          </div>
-        )}
+      <div className="flex items-baseline justify-between mb-3">
+        <p className="text-xs text-gray-400 uppercase tracking-widest">Feature Explorer</p>
+        <p className="text-[10px] text-gray-400">click a point → inspect its window</p>
       </div>
-      <div className="flex gap-4 mt-2">
+      <div className="relative flex">
+        {/* Y axis label */}
+        <span className="text-[9px] text-gray-400 tabular-nums self-center"
+          style={{ writingMode: "vertical-rl", transform: "rotate(180deg)", marginRight: 4, whiteSpace: "nowrap" }}>
+          {pcLabel(1)}
+        </span>
+        <div className="relative flex-1">
+          <canvas ref={canvasRef} className="w-full block rounded-lg"
+            style={{ height: "320px", border: "1px solid #ebeae5", cursor: "pointer" }}
+            onMouseMove={handleMouseMove} onMouseLeave={() => setTooltip(null)} onClick={handleClick} />
+          {tooltip && (
+            <div className="absolute pointer-events-none bg-white border border-gray-200 rounded-lg shadow-lg px-2.5 py-1.5 text-[10px] z-10"
+              style={{ left: Math.min(tooltip.x + 10, 280), top: Math.max(tooltip.y - 56, 0) }}>
+              <p className="font-semibold" style={{ color: cm[tooltip.label] || "#999" }}>{tooltip.label}</p>
+              <p className="text-gray-500">{tooltip.file}</p>
+              <p className="text-gray-400">Window {tooltip.window + 1} · {tooltip.range} ms</p>
+              <p className="text-accent mt-0.5">click to open →</p>
+            </div>
+          )}
+        </div>
+      </div>
+      {/* X axis label */}
+      <p className="text-[9px] text-gray-400 tabular-nums text-center mt-1" style={{ marginLeft: 14 }}>{pcLabel(0)}</p>
+      <div className="flex gap-4 mt-1">
         {uq.map((l) => (
           <span key={l} className="flex items-center gap-1.5 text-xs text-gray-600">
             <span className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: cm[l] }} /> {l}
@@ -493,7 +532,34 @@ export default function SpectralFeaturesScreen({ pipelineConfig, setPipelineConf
       cfg.overlap_frames, cfg.decimation]);
 
   useEffect(() => { fetchPreview(); }, [fetchPreview]);
-  useEffect(() => { setWindowIndex(0); }, [selectedDsId]);
+  // Reset to window 0 when the recording changes — unless a Feature-Explorer
+  // click asked to jump to a specific window on that recording.
+  const pendingWindowRef = useRef(null);
+  useEffect(() => {
+    if (pendingWindowRef.current != null) {
+      setWindowIndex(pendingWindowRef.current);
+      pendingWindowRef.current = null;
+    } else {
+      setWindowIndex(0);
+    }
+  }, [selectedDsId]);
+
+  // Feature Explorer: click a point → load that recording + window into the
+  // raw-data / DSP preview at the top, and scroll it into view.
+  const handleInspectPoint = useCallback((file, window) => {
+    const rec = (recordings || []).find((r) => r.source_filename === file);
+    if (!rec) return;
+    if (rec.id === selectedDsId) {
+      setWindowIndex(window);
+    } else {
+      pendingWindowRef.current = window;
+      setSelectedDsId(rec.id);
+    }
+    try {
+      const main = document.querySelector("main");
+      if (main) main.scrollTo({ top: 0, behavior: "smooth" });
+    } catch { /* non-critical */ }
+  }, [recordings, selectedDsId]);
 
   // Generate features
   async function handleGenerate() {
@@ -778,7 +844,8 @@ export default function SpectralFeaturesScreen({ pipelineConfig, setPipelineConf
           )}
           <div className="grid grid-cols-2 gap-5">
             <div className="border border-gray-200 rounded-xl p-5">
-              <FeatureExplorer coords={result.pca?.coords} labels={result.pca?.labels} meta={result.pca?.meta} />
+              <FeatureExplorer coords={result.pca?.coords} labels={result.pca?.labels} meta={result.pca?.meta}
+                explainedVariance={result.pca?.explained_variance} onInspect={handleInspectPoint} />
             </div>
             <div className="border border-gray-200 rounded-xl p-5">
               <FeatureImportance features={result.feature_importance} />

@@ -3,12 +3,30 @@ import API_BASE_URL from "../config";
 
 // ── Confusion Matrix ─────────────────────────────────────────────────────────
 
-function ConfusionMatrix({ matrix, classLabels, title = "Confusion Matrix" }) {
+function ConfusionMatrix({ matrix, classLabels, title = "Confusion Matrix", onCellClick }) {
+  const [asPct, setAsPct] = useState(false);
   if (!matrix || !classLabels || classLabels.length === 0) return null;
+  const rowSums = matrix.map((r) => r.reduce((a, b) => a + (isFinite(b) ? b : 0), 0));
   const maxVal = Math.max(...matrix.flat().filter((v) => isFinite(v)), 1);
+  const cellText = (cell, ri) => {
+    if (!asPct) return cell;
+    const s = rowSums[ri] || 0;
+    return s ? `${Math.round((cell / s) * 100)}%` : "0%";
+  };
+  const intensity = (cell, ri) => (asPct ? (rowSums[ri] ? cell / rowSums[ri] : 0) : cell / maxVal);
   return (
     <div>
-      <p className="text-xs text-gray-400 uppercase tracking-widest mb-3">{title}</p>
+      <div className="flex items-center justify-between mb-3">
+        <p className="text-xs text-gray-400 uppercase tracking-widest">{title}</p>
+        <div className="flex rounded-md border border-gray-200 overflow-hidden text-[10px] font-semibold">
+          {[["counts", "Counts"], ["pct", "%"]].map(([k, lbl]) => (
+            <button key={k} onClick={() => setAsPct(k === "pct")}
+              className={`px-2 py-1 transition-colors ${((k === "pct") === asPct) ? "bg-gray-800 text-white" : "text-gray-400 hover:text-gray-600"}`}>
+              {lbl}
+            </button>
+          ))}
+        </div>
+      </div>
       <div className="overflow-x-auto">
         <table className="border-collapse text-xs">
           <thead><tr>
@@ -20,10 +38,13 @@ function ConfusionMatrix({ matrix, classLabels, title = "Confusion Matrix" }) {
               <tr key={ri}>
                 <td className="px-2 py-1 text-gray-500 font-semibold text-right">{classLabels[ri]}</td>
                 {row.map((cell, ci) => {
-                  const ok = ri === ci, int_ = cell / maxVal;
+                  const ok = ri === ci, int_ = intensity(cell, ri);
                   const bg = ok ? `rgba(29,158,117,${0.06 + int_ * 0.4})` : cell > 0 ? `rgba(239,68,68,${0.06 + int_ * 0.28})` : "transparent";
-                  return <td key={ci} className="px-2 py-2 text-center font-bold tabular-nums rounded"
-                    style={{ backgroundColor: bg, color: ok ? (int_ > 0.4 ? "#065f46" : "#3a3935") : cell > 0 ? "#b91c1c" : "#b0afa8" }}>{cell}</td>;
+                  const clickable = onCellClick && !ok && cell > 0;
+                  return <td key={ci} onClick={clickable ? () => onCellClick(classLabels[ri], classLabels[ci]) : undefined}
+                    title={clickable ? `Show ${classLabels[ri]} recordings predicted as ${classLabels[ci]}` : undefined}
+                    className={`px-2 py-2 text-center font-bold tabular-nums rounded ${clickable ? "cursor-pointer hover:ring-1 hover:ring-red-300" : ""}`}
+                    style={{ backgroundColor: bg, color: ok ? (int_ > 0.4 ? "#065f46" : "#3a3935") : cell > 0 ? "#b91c1c" : "#b0afa8" }}>{cellText(cell, ri)}</td>;
                 })}
               </tr>
             ))}
@@ -713,6 +734,24 @@ export default function TrainScreen({
                   <td className="py-2 text-right tabular-nums text-gray-600">{(c.recall * 100).toFixed(1)}%</td>
                 </tr>)}
               </tbody></table>
+            </div>
+          )}
+          {(result.auc_roc != null || result.weighted) && (
+            <div className="border border-gray-200 rounded-xl p-5">
+              <p className="text-xs text-gray-400 uppercase tracking-widest mb-3">Summary Metrics <span className="normal-case tracking-normal text-gray-300">· validation set</span></p>
+              <div className="grid grid-cols-4 gap-4">
+                {[
+                  ["AUC-ROC", result.auc_roc != null ? result.auc_roc.toFixed(2) : "—"],
+                  ["Weighted Precision", result.weighted?.precision != null ? `${(result.weighted.precision * 100).toFixed(1)}%` : "—"],
+                  ["Weighted Recall", result.weighted?.recall != null ? `${(result.weighted.recall * 100).toFixed(1)}%` : "—"],
+                  ["Weighted F1", result.weighted?.f1 != null ? `${(result.weighted.f1 * 100).toFixed(1)}%` : "—"],
+                ].map(([lbl, val]) => (
+                  <div key={lbl}>
+                    <p className="text-[10px] text-gray-400 uppercase tracking-wider mb-1">{lbl}</p>
+                    <p className="text-xl font-bold text-gray-700 tabular-nums leading-none">{val}</p>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
           {modelType === "mlp" && renderFootprint(true)}

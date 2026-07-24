@@ -177,3 +177,12 @@ code, .font-mono, pre {
 
 /* ── Rounded override ────────────────────────────────────────────────── */
 .rounded-xl { border-radius: 12px !important; }
+
+/* ── Scroll-cue bounce ──────────────────────────────────────────────── */
+@keyframes sfBounce {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(3px); }
+}
+@media (prefers-reduced-motion: reduce) {
+  [style*="sfBounce"] { animation: none !important; }
+}

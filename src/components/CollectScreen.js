@@ -1,5 +1,6 @@
 import React, { useRef, useEffect, useState, useCallback } from "react";
 import API_BASE_URL from "../config";
+import DatasetExplorer from "./DatasetExplorer";
 import CopilotChat from "./CopilotChat";
 import LiveCaptureMode from "./LiveCaptureMode";
 import SerialCaptureScreen from "./SerialCaptureScreen";
@@ -15,7 +16,14 @@ function chColor(name, idx) { return _CH_PALETTE[idx % _CH_PALETTE.length]; }
 // Legacy compat aliases
 const AXIS_COLORS  = { ax: "#1D9E75", ay: "#3B82F6", az: "#F59E0B" };
 const SAMPLE_RATE  = 100;   // Hz — default rate fallback
-const TARGET_COUNT = 30;    // events per class before bar fills
+const TARGET_COUNT = 30;    // suggested events per class (progress-bar target, not a cap)
+
+// Human-readable recording length: seconds once we're past a second, else ms.
+const fmtDuration = (ms) => {
+  if (ms == null || isNaN(ms)) return "—";
+  if (ms >= 1000) return `${(ms / 1000).toFixed(ms >= 10000 ? 1 : 2)} s`;
+  return `${Math.round(ms)} ms`;
+};
 
 const CLASS_PALETTE = [
   "#1D9E75", "#3B82F6", "#F59E0B", "#EF4444", "#8B5CF6", "#EC4899",
@@ -642,7 +650,7 @@ function FileDetailPanel({ ev, allEvents, onClose, onAskCopilot, classes, setCla
   const copilotMsg = [
     `Analyze signal "${ev.filename ?? "unknown"}"`,
     displayRate ? `${displayRate} Hz` : null,
-    `${ev.duration} ms`,
+    `${fmtDuration(ev.duration)}`,
     `${axes.length > 0 ? (snap[axes[0]]?.length ?? 0) : 0} samples`,
     axes.map((a) => `${a}: mean=${stats[a]?.mean.toFixed(3)}, std=${stats[a]?.std.toFixed(3)}, min=${stats[a]?.min.toFixed(3)}, max=${stats[a]?.max.toFixed(3)}`).join("; "),
     flags.length ? `Flags: ${flags.join("; ")}` : null,
@@ -824,7 +832,7 @@ function FileDetailPanel({ ev, allEvents, onClose, onAskCopilot, classes, setCla
             {ev.filename ?? "Signal"}
           </p>
           <p style={{ fontFamily: "'DM Mono', monospace", fontSize: 9, color: "#b0afa8", marginTop: 1 }}>
-            {[displayRate ? `${displayRate} Hz` : null, `${ev.duration} ms`, snap.ax?.length ? `${snap.ax.length} samples` : null].filter(Boolean).join(" · ")}
+            {[displayRate ? `${displayRate} Hz` : null, `${fmtDuration(ev.duration)}`, snap.ax?.length ? `${snap.ax.length} samples` : null].filter(Boolean).join(" · ")}
           </p>
         </div>
         <span style={{
@@ -1468,6 +1476,7 @@ function FileUploadMode({
   const [dragOver,       setDragOver]       = useState(false);
   const [selectedEventId, setSelectedEventId] = useState(null);
   const [poolTab,         setPoolTab]         = useState("train"); // "train" | "test"
+  const [showExplorer,    setShowExplorer]    = useState(false);
   const [splitting,       setSplitting]       = useState(false);
   const [splitMsg,        setSplitMsg]        = useState(null);
   const inputRef = useRef(null);
@@ -2005,7 +2014,7 @@ function FileUploadMode({
                     <p className="text-[10px] text-red-500 mt-0.5 leading-tight">{entry.error}</p>
                   ) : dataMode === "continuous" && entry.parsed ? (
                     <p className="text-[10px] text-gray-300 mt-0.5 tabular-nums">
-                      {entry.parsed.rowCount} rows · {entry.parsed.durationMs} ms
+                      {entry.parsed.rowCount} rows · {fmtDuration(entry.parsed.durationMs)}
                       {entry.parsed.sampleRateHz ? ` · ${entry.parsed.sampleRateHz} Hz` : ""}
                     </p>
                   ) : !entry.reading && entry.detected === false ? (
@@ -2014,7 +2023,7 @@ function FileUploadMode({
                     </p>
                   ) : entry.parsed ? (
                     <p className="text-[10px] text-gray-300 mt-0.5 tabular-nums">
-                      {entry.parsed.rowCount} rows · {entry.parsed.durationMs} ms
+                      {entry.parsed.rowCount} rows · {fmtDuration(entry.parsed.durationMs)}
                       {entry.parsed.sampleRateHz ? ` · ${entry.parsed.sampleRateHz} Hz` : ""}
                     </p>
                   ) : null}
@@ -2145,6 +2154,9 @@ function FileUploadMode({
 
         return (
           <>
+            {showExplorer && events.length > 0 && (
+              <DatasetExplorer projectId={projectId} classes={classes} />
+            )}
             <div className="flex items-center justify-between border-b border-gray-200 mb-1 flex-shrink-0">
               <div className="flex gap-0">
                 {[
@@ -2160,6 +2172,12 @@ function FileUploadMode({
                 ))}
               </div>
               <div className="flex items-center gap-2">
+                <button onClick={() => setShowExplorer((v) => !v)} disabled={events.length === 0}
+                  className={`text-[10px] font-semibold border rounded px-2 py-1 transition-colors disabled:opacity-40 ${
+                    showExplorer ? "text-accent border-accent bg-accent/5" : "text-gray-400 border-gray-200 hover:text-gray-600"
+                  }`}>
+                  {showExplorer ? "Hide explorer" : "Dataset explorer"}
+                </button>
                 <span className="text-[10px] text-gray-400 tabular-nums">
                   {trainPct}% / {100 - trainPct}%
                 </span>
@@ -2229,7 +2247,7 @@ function FileUploadMode({
                         ))}
                       </select>
                     )}
-                    <span className="text-xs text-gray-400 tabular-nums">{ev.duration} ms</span>
+                    <span className="text-xs text-gray-400 tabular-nums">{fmtDuration(ev.duration)}</span>
                   </div>
                   {ev.filename && (
                     <p className="text-[10px] text-gray-300 mt-0.5 truncate">{ev.filename}</p>
@@ -2697,7 +2715,14 @@ export default function CollectScreen({ config, setConfig, projectId, classes, s
                             >
                               {classUploading[cls.id] ? "…" : "Upload"}
                             </button>
-                            <span className="text-xs text-gray-400 tabular-nums">{count}/{TARGET_COUNT}</span>
+                            <span
+                              className="text-xs text-gray-400 tabular-nums"
+                              title={`Suggested target: ${TARGET_COUNT} recordings per class. More is fine — this is a goal, not a limit.`}
+                            >
+                              {count >= TARGET_COUNT
+                                ? <span style={{ color: cls.color }}>{count} ✓</span>
+                                : <>{count}<span className="text-gray-300">/{TARGET_COUNT}</span></>}
+                            </span>
                           </div>
                         </div>
                         <div className="w-full h-1 bg-gray-100 rounded-full overflow-hidden">

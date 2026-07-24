@@ -3,12 +3,30 @@ import API_BASE_URL from "../config";
 
 // ── Confusion Matrix ─────────────────────────────────────────────────────────
 
-function ConfusionMatrix({ matrix, classLabels, uncertainCount }) {
+function ConfusionMatrix({ matrix, classLabels, uncertainCount, onCellClick }) {
+  const [asPct, setAsPct] = useState(false);
   if (!matrix || !classLabels || classLabels.length === 0) return null;
+  const rowSums = matrix.map((r) => r.reduce((a, b) => a + (isFinite(b) ? b : 0), 0));
   const maxVal = Math.max(...matrix.flat().filter((v) => isFinite(v)), 1);
+  const cellText = (cell, ri) => {
+    if (!asPct) return cell;
+    const s = rowSums[ri] || 0;
+    return s ? `${Math.round((cell / s) * 100)}%` : "0%";
+  };
+  const intensity = (cell, ri) => (asPct ? (rowSums[ri] ? cell / rowSums[ri] : 0) : cell / maxVal);
   return (
     <div>
-      <p className="text-xs text-gray-400 uppercase tracking-widest mb-3">Held-out Test Confusion Matrix</p>
+      <div className="flex items-center justify-between mb-3">
+        <p className="text-xs text-gray-400 uppercase tracking-widest">Held-out Test Confusion Matrix</p>
+        <div className="flex rounded-md border border-gray-200 overflow-hidden text-[10px] font-semibold">
+          {[["counts", "Counts"], ["pct", "%"]].map(([k, lbl]) => (
+            <button key={k} onClick={() => setAsPct(k === "pct")}
+              className={`px-2 py-1 transition-colors ${((k === "pct") === asPct) ? "bg-gray-800 text-white" : "text-gray-400 hover:text-gray-600"}`}>
+              {lbl}
+            </button>
+          ))}
+        </div>
+      </div>
       <div className="overflow-x-auto">
         <table className="border-collapse text-xs"><thead><tr>
           <th className="px-2 py-1 text-gray-300 font-normal text-right w-20 text-xs">actual ↓ pred →</th>
@@ -18,10 +36,13 @@ function ConfusionMatrix({ matrix, classLabels, uncertainCount }) {
             <tr key={ri}>
               <td className="px-2 py-1 text-gray-500 font-semibold text-right">{classLabels[ri]}</td>
               {row.map((cell, ci) => {
-                const ok = ri === ci, int_ = cell / maxVal;
+                const ok = ri === ci, int_ = intensity(cell, ri);
                 const bg = ok ? `rgba(29,158,117,${0.06 + int_ * 0.4})` : cell > 0 ? `rgba(239,68,68,${0.06 + int_ * 0.28})` : "transparent";
-                return <td key={ci} className="px-2 py-2 text-center font-bold tabular-nums rounded"
-                  style={{ backgroundColor: bg, color: ok ? (int_ > 0.4 ? "#065f46" : "#3a3935") : cell > 0 ? "#b91c1c" : "#b0afa8" }}>{cell}</td>;
+                const clickable = onCellClick && !ok && cell > 0;
+                return <td key={ci} onClick={clickable ? () => onCellClick(classLabels[ri], classLabels[ci]) : undefined}
+                  title={clickable ? `Show ${classLabels[ri]} recordings predicted as ${classLabels[ci]}` : undefined}
+                  className={`px-2 py-2 text-center font-bold tabular-nums rounded ${clickable ? "cursor-pointer hover:ring-1 hover:ring-red-300" : ""}`}
+                  style={{ backgroundColor: bg, color: ok ? (int_ > 0.4 ? "#065f46" : "#3a3935") : cell > 0 ? "#b91c1c" : "#b0afa8" }}>{cellText(cell, ri)}</td>;
               })}
             </tr>
           ))}
@@ -29,7 +50,9 @@ function ConfusionMatrix({ matrix, classLabels, uncertainCount }) {
       </div>
       {uncertainCount > 0 && (
         <p className="text-[10px] text-gray-400 mt-2">
-          Counts show each window's best-guess class. <span className="text-amber-500 font-semibold">{uncertainCount}</span> low-confidence window{uncertainCount > 1 ? "s" : ""} (max probability &lt; 60%) are still counted above by their top prediction.
+          {asPct ? "% is row-normalized (recall per class). " : "Counts show each window's best-guess class. "}
+          <span className="text-amber-500 font-semibold">{uncertainCount}</span> low-confidence window{uncertainCount > 1 ? "s" : ""} (max probability &lt; 60%) are still counted above by their top prediction.
+          {onCellClick ? " Click a red cell to see which recordings." : ""}
         </p>
       )}
     </div>
@@ -111,6 +134,8 @@ export default function ValidateScreen({ projectId, onGoToTrain, savedResult, on
   function handleTest() { mode === "anomaly" ? handleAnomalyTest() : handleClassificationTest(); }
 
   const accPct = result?.accuracy != null ? Math.round(result.accuracy * 100) : null;
+  const recAccPct = result?.recording_accuracy != null ? Math.round(result.recording_accuracy * 100) : null;
+  const [cellFilter, setCellFilter] = useState(null); // {exp, pred} from a clicked matrix cell
 
   return (
     <div className="flex flex-col min-h-0 max-w-4xl mx-auto w-full">
@@ -150,11 +175,26 @@ export default function ValidateScreen({ projectId, onGoToTrain, savedResult, on
         <div className="space-y-6">
           <div className="grid grid-cols-3 gap-4">
             <div className="border border-gray-200 rounded-xl p-5">
-              <p className="text-xs text-gray-400 uppercase tracking-widest mb-2">Test Accuracy</p>
-              <p className={`text-4xl font-bold tabular-nums leading-none ${accPct >= 90 ? "text-accent" : accPct >= 70 ? "text-amber-500" : "text-red-500"}`}>
-                {accPct}<span className="text-lg font-normal text-gray-400">%</span></p>
-              <div className="w-full h-1.5 bg-gray-100 rounded-full mt-3 overflow-hidden">
-                <div className="h-full rounded-full" style={{ width: `${accPct}%`, backgroundColor: accPct >= 90 ? "#1D9E75" : accPct >= 70 ? "#F59E0B" : "#EF4444" }} /></div>
+              {(() => {
+                // Lead with recording-level accuracy (how the model actually ships);
+                // window-level is the harsher per-window number, shown as context.
+                const headPct = recAccPct != null ? recAccPct : accPct;
+                const headColor = headPct >= 90 ? "#1D9E75" : headPct >= 70 ? "#F59E0B" : "#EF4444";
+                return (<>
+                  <p className="text-xs text-gray-400 uppercase tracking-widest mb-2">
+                    Test Accuracy {recAccPct != null && <span className="normal-case tracking-normal text-gray-300">· by recording</span>}
+                  </p>
+                  <p className="text-4xl font-bold tabular-nums leading-none" style={{ color: headColor }}>
+                    {headPct}<span className="text-lg font-normal text-gray-400">%</span></p>
+                  <div className="w-full h-1.5 bg-gray-100 rounded-full mt-3 overflow-hidden">
+                    <div className="h-full rounded-full" style={{ width: `${headPct}%`, backgroundColor: headColor }} /></div>
+                  {recAccPct != null && (
+                    <p className="text-[11px] text-gray-400 mt-2 tabular-nums">
+                      {accPct}% by window · {result.n_test_recordings} recordings
+                    </p>
+                  )}
+                </>);
+              })()}
             </div>
             <div className="border border-gray-200 rounded-xl p-5">
               <p className="text-xs text-gray-400 uppercase tracking-widest mb-2">Uncertain</p>
@@ -187,8 +227,30 @@ export default function ValidateScreen({ projectId, onGoToTrain, savedResult, on
             );
           })()}
           <div className="border border-gray-200 rounded-xl p-5">
-            <ConfusionMatrix matrix={result.confusion_matrix} classLabels={result.class_labels} uncertainCount={result.uncertain_count} />
+            <ConfusionMatrix matrix={result.confusion_matrix} classLabels={result.class_labels} uncertainCount={result.uncertain_count}
+              onCellClick={result.per_recording?.length ? (exp, pred) => {
+                setCellFilter({ exp, pred });
+                try { document.getElementById("per-recording-table")?.scrollIntoView({ behavior: "smooth", block: "center" }); } catch { /* noop */ }
+              } : undefined} />
           </div>
+          {(result.auc_roc != null || result.weighted) && (
+            <div className="border border-gray-200 rounded-xl p-5">
+              <p className="text-xs text-gray-400 uppercase tracking-widest mb-3">Summary Metrics <span className="normal-case tracking-normal text-gray-300">· held-out test</span></p>
+              <div className="grid grid-cols-4 gap-4">
+                {[
+                  ["AUC-ROC", result.auc_roc != null ? result.auc_roc.toFixed(2) : "—"],
+                  ["Weighted Precision", result.weighted?.precision != null ? `${(result.weighted.precision * 100).toFixed(1)}%` : "—"],
+                  ["Weighted Recall", result.weighted?.recall != null ? `${(result.weighted.recall * 100).toFixed(1)}%` : "—"],
+                  ["Weighted F1", result.weighted?.f1 != null ? `${(result.weighted.f1 * 100).toFixed(1)}%` : "—"],
+                ].map(([lbl, val]) => (
+                  <div key={lbl}>
+                    <p className="text-[10px] text-gray-400 uppercase tracking-wider mb-1">{lbl}</p>
+                    <p className="text-xl font-bold text-gray-700 tabular-nums leading-none">{val}</p>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
           {result.per_class?.length > 0 && (
             <div className="border border-gray-200 rounded-xl p-5">
               <p className="text-xs text-gray-400 uppercase tracking-widest mb-3">Per-class Metrics</p>
@@ -204,6 +266,52 @@ export default function ValidateScreen({ projectId, onGoToTrain, savedResult, on
               </tbody></table>
             </div>
           )}
+          {result.per_recording?.length > 0 && (() => {
+            const rows = cellFilter
+              ? result.per_recording.filter((r) => r.expected === cellFilter.exp && r.predicted === cellFilter.pred)
+              : result.per_recording;
+            return (
+            <div id="per-recording-table" className="border border-gray-200 rounded-xl p-5">
+              <div className="flex items-baseline justify-between mb-3">
+                <p className="text-xs text-gray-400 uppercase tracking-widest">Per-recording Results</p>
+                {cellFilter
+                  ? <button onClick={() => setCellFilter(null)} className="text-[10px] font-semibold text-accent hover:underline">
+                      showing {cellFilter.exp} → {cellFilter.pred} · clear filter ✕
+                    </button>
+                  : <p className="text-[10px] text-gray-400">{result.per_recording.filter((r) => !r.correct).length} of {result.per_recording.length} misclassified · failures first</p>}
+              </div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-xs" style={{ minWidth: 480 }}>
+                  <thead><tr className="text-gray-400 uppercase tracking-widest text-[10px]">
+                    <th className="text-left pb-2">Recording</th>
+                    <th className="text-left pb-2">Expected</th>
+                    <th className="text-left pb-2">Predicted</th>
+                    <th className="text-right pb-2">Window acc</th>
+                    <th className="text-right pb-2">Confidence</th>
+                    <th className="text-right pb-2"></th>
+                  </tr></thead>
+                  <tbody>
+                    {rows.map((r) => (
+                      <tr key={r.file} className="border-t border-gray-50" style={{ background: r.correct ? "transparent" : "rgba(239,68,68,0.04)" }}>
+                        <td className="py-2 font-mono text-[11px] text-gray-600">{r.file}</td>
+                        <td className="py-2 text-gray-700">{r.expected}</td>
+                        <td className={`py-2 font-semibold ${r.correct ? "text-gray-700" : "text-red-500"}`}>{r.predicted}</td>
+                        <td className="py-2 text-right tabular-nums text-gray-500">{Math.round(r.window_accuracy * 100)}%</td>
+                        <td className="py-2 text-right tabular-nums text-gray-500">{Math.round(r.confidence * 100)}%</td>
+                        <td className="py-2 text-right">
+                          {r.correct
+                            ? <span className="text-[9px] font-semibold uppercase tracking-wider text-accent bg-accent/10 rounded px-1.5 py-0.5">ok</span>
+                            : <span className="text-[9px] font-semibold uppercase tracking-wider text-red-500 bg-red-50 rounded px-1.5 py-0.5">miss</span>}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <p className="text-[10px] text-gray-400 mt-2 leading-snug">Each recording's label is the majority vote across its windows. Recording-level accuracy is how the model performs on a full capture — the number you ship.</p>
+            </div>
+            );
+          })()}
           <div className="flex pb-2"><button onClick={() => { setResult(null); onResult?.(null); setError(null); }}
             className="px-5 py-2 rounded border border-gray-300 text-sm text-gray-600 hover:border-gray-400 transition-colors">← Retest</button></div>
         </div>

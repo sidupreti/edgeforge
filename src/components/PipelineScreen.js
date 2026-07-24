@@ -1,5 +1,21 @@
 import React, { useState } from "react";
 
+// ── Help tooltip ─────────────────────────────────────────────────────────────
+
+function Help({ text }) {
+  return (
+    <span className="relative inline-flex items-center group ml-1 align-middle">
+      <span className="w-3 h-3 rounded-full border border-gray-300 text-gray-400 text-[8px] leading-none flex items-center justify-center cursor-help select-none">?</span>
+      <span
+        className="pointer-events-none absolute left-1/2 bottom-full mb-1 -translate-x-1/2 w-44 bg-gray-900 text-white text-[10px] leading-snug rounded px-2 py-1.5 opacity-0 group-hover:opacity-100 transition-opacity z-30 shadow-lg normal-case tracking-normal"
+        style={{ fontFamily: "'DM Mono', monospace", fontWeight: 400 }}
+      >
+        {text}
+      </span>
+    </span>
+  );
+}
+
 // ── Block card component ─────────────────────────────────────────────────────
 
 function BlockCard({ title, subtitle, items, onClick, clickLabel, color = "#0a0a0a", highlighted }) {
@@ -19,9 +35,9 @@ function BlockCard({ title, subtitle, items, onClick, clickLabel, color = "#0a0a
       )}
       {items && items.length > 0 && (
         <div className="space-y-1.5">
-          {items.map(({ label, value }, i) => (
-            <div key={i} className="flex justify-between text-[10px]">
-              <span className="text-gray-400">{label}</span>
+          {items.map(({ label, value, help }, i) => (
+            <div key={i} className="flex justify-between text-[10px] items-center">
+              <span className="text-gray-400 flex items-center">{label}{help && <Help text={help} />}</span>
               <span className="text-gray-700 font-semibold">{value}</span>
             </div>
           ))}
@@ -127,7 +143,7 @@ export default function PipelineScreen({
               </div>
             </div>
             <div className="flex items-center gap-2 text-[10px]">
-              <span className="text-gray-400 w-16">Window</span>
+              <span className="text-gray-400 w-16 flex items-center">Window<Help text="Length of each analysis window (ms). Longer windows capture slower motions but yield fewer training examples. Range 100–10000." /></span>
               <input type="number" value={cfg.window_ms} min={100} max={10000}
                 onChange={(e) => setParam("window_ms", Number(e.target.value))}
                 className="w-16 border border-gray-200 rounded px-1.5 py-1 text-[10px] font-mono outline-none focus:border-accent tabular-nums"
@@ -135,7 +151,7 @@ export default function PipelineScreen({
               <span className="text-gray-400">ms</span>
             </div>
             <div className="flex items-center gap-2 text-[10px]">
-              <span className="text-gray-400 w-16">Stride</span>
+              <span className="text-gray-400 w-16 flex items-center">Stride<Help text="How far the window advances between examples (ms). Smaller stride = more overlapping windows = more training data. Range 50–10000." /></span>
               <input type="number" value={cfg.stride_ms} min={50} max={10000}
                 onChange={(e) => setParam("stride_ms", Number(e.target.value))}
                 className="w-16 border border-gray-200 rounded px-1.5 py-1 text-[10px] font-mono outline-none focus:border-accent tabular-nums"
@@ -146,7 +162,7 @@ export default function PipelineScreen({
               <input type="checkbox" checked={cfg.zero_pad}
                 onChange={(e) => setParam("zero_pad", e.target.checked)}
                 className="accent-accent w-3 h-3" />
-              <span className="text-gray-600">Zero-pad</span>
+              <span className="text-gray-600 flex items-center">Zero-pad<Help text="Pad short recordings with zeros so every window is full-length, instead of dropping the leftover tail." /></span>
             </label>
           </div>
         </div>
@@ -158,9 +174,9 @@ export default function PipelineScreen({
           title="Spectral Features"
           subtitle="Butterworth filter + FFT power"
           items={[
-            { label: "Filter", value: filterLabel },
-            { label: "FFT length", value: cfg.fft_length },
-            { label: "Log", value: cfg.take_log ? "On" : "Off" },
+            { label: "Filter", value: filterLabel, help: "Butterworth filter applied before the FFT. High-pass removes gravity/drift; low-pass removes high-frequency noise. Configure the cutoff inside." },
+            { label: "FFT length", value: cfg.fft_length, help: "FFT points per frame. Higher = finer frequency resolution but more features (larger model)." },
+            { label: "Log", value: cfg.take_log ? "On" : "Off", help: "Take the log of the power spectrum — compresses dynamic range so quiet frequencies still matter." },
           ]}
           onClick={onOpenSpectral}
           clickLabel="Configure"
@@ -203,6 +219,40 @@ export default function PipelineScreen({
               <p className="text-[10px] text-gray-300 italic">No classes defined</p>
             )}
           </div>
+        </div>
+      </div>
+
+      {/* ── Parallel anomaly-detection branch (mirrors the impulse view) ──── */}
+      <div className="flex flex-col items-center mb-8 -mt-4">
+        <svg width="16" height="22" viewBox="0 0 16 22" fill="none" className="mb-1">
+          <path d="M8 0v15M3.5 11l4.5 4 4.5-4" stroke="#d1d5db" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+        <div className="w-full max-w-sm border-2 border-dashed border-gray-200 rounded-xl p-4 relative">
+          <div className="absolute top-0 left-4 right-4 h-0.5 rounded-b" style={{ backgroundColor: "#A78BFA" }} />
+          <div className="flex items-center justify-between mb-1 mt-1">
+            <p className="text-xs font-bold text-gray-800 uppercase tracking-widest flex items-center">
+              Anomaly Detection
+              <Help text="Unsupervised K-means over the same spectral features. Flags windows that don't resemble any trained class — useful for catching novel or faulty motions." />
+            </p>
+            <span className="text-[8px] uppercase tracking-wider text-gray-400 border border-gray-200 rounded px-1.5 py-0.5">Optional</span>
+          </div>
+          <p className="text-[10px] text-gray-400 mb-3">K-means · parallel branch from Spectral Features</p>
+          <div className="space-y-1.5">
+            <div className="flex justify-between text-[10px]">
+              <span className="text-gray-400">Input</span>
+              <span className="text-gray-700 font-semibold">Spectral features</span>
+            </div>
+            <div className="flex justify-between text-[10px]">
+              <span className="text-gray-400">Output</span>
+              <span className="text-gray-700 font-semibold">1 (anomaly score)</span>
+            </div>
+          </div>
+          <button
+            onClick={onGoToTrain}
+            className="text-[10px] text-accent font-semibold mt-3 hover:underline"
+          >
+            Enable on the Train step →
+          </button>
         </div>
       </div>
 
